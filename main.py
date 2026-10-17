@@ -1,0 +1,1126 @@
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#     "openpyxl",
+# ]
+# ///
+import os
+import sys
+import subprocess
+import datetime
+import re
+import io
+import copy
+from pathlib import Path
+import openpyxl
+from openpyxl.styles import Font, PatternFill
+from openpyxl.utils.datetime import from_excel
+from openpyxl.utils import get_column_letter
+
+# ==============================================================================
+# HẰNG SỐ & ĐƯỜNG DẪN MẪU (Hỗ trợ cả môi trường PyInstaller .exe)
+# ==============================================================================
+if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+    # Môi trường chạy file .exe đóng gói bởi PyInstaller
+    SCRIPT_DIR = Path(sys._MEIPASS)
+    if not (SCRIPT_DIR / "template.xlsx").exists():
+        SCRIPT_DIR = Path(sys.executable).resolve().parent
+else:
+    SCRIPT_DIR = Path(__file__).resolve().parent
+
+TEMPLATE_PATH = SCRIPT_DIR / "template.xlsx"
+
+# Danh sách 28 cột chuẩn hóa theo file template.xlsx
+TEMPLATE_COL_NAMES = [
+    "STT",                                                    # 0 (A)
+    "Số hiệu bằng",                                           # 1 (B)
+    "Số vào sổ gốc cấp văn bằng",                             # 2 (C)
+    "Tên văn bằng",                                           # 3 (D)
+    "Họ, chữ đệm và tên",                                     # 4 (E)
+    "Mã người học",                                           # 5 (F)
+    "Số định danh cá nhân",                                   # 6 (G)
+    "Hộ chiếu",                                               # 7 (H)
+    "Ngày, tháng, năm sinh",                                  # 8 (I)
+    "Giới tính",                                              # 9 (J)
+    "Dân tộc",                                                # 10 (K)
+    "Quốc tịch",                                              # 11 (L)
+    "Nơi sinh",                                               # 12 (M)
+    "Tên trường đã học",                                      # 13 (N)
+    "Niên khóa",                                              # 14 (O)
+    "Điểm các môn thi",                                       # 15 (P)
+    "Hội đồng thi",                                           # 16 (Q)
+    "Địa danh nơi cơ quan cấp bằng đặt trụ sở",               # 17 (R)
+    "Ngày tháng năm cấp bằng",                                # 18 (S)
+    "Tên cơ quan cấp bằng",                                   # 19 (T)
+    "Chức danh người ký bằng",                                # 20 (U)
+    "Họ, chữ đệm, tên người ký bằng",                         # 21 (V)
+    "Tình trạng văn bằng",                                    # 22 (W)
+    "Ghi chú",                                                # 23 (X)
+    "Trạng thái số hóa",                                      # 24 (Y)
+    "Thông tin chưa bảo đảm đầy đủ, chính xác và nguyên nhân",# 25 (Z)
+    "Mã đơn vị",                                              # 26 (AA)
+    "Tên đơn vị"                                              # 27 (AB)
+]
+
+
+# ==============================================================================
+# CÁC HÀM TIỆN ÍCH HỖ TRỢ
+# ==============================================================================
+def get_folder_path(prompt="Chọn thư mục chứa các file Excel:"):
+    """Mở hộp thoại native trên macOS hoặc Windows để chọn thư mục, hỗ trợ kéo thả thư mục vào Terminal/CMD."""
+    if sys.platform == "darwin":
+        try:
+            script = f'return POSIX path of (choose folder with prompt "{prompt}")'
+            result = subprocess.check_output(['osascript', '-e', script])
+            path_str = result.decode('utf-8').strip()
+            if path_str:
+                return path_str
+        except Exception:
+            pass
+    elif sys.platform == "win32":
+        try:
+            ps_script = (
+                "[System.Reflection.Assembly]::LoadWithPartialName('System.windows.forms') | Out-Null; "
+                f"$f = New-Object System.Windows.Forms.FolderBrowserDialog; $f.Description = '{prompt}'; "
+                "if($f.ShowDialog() -eq 'OK'){ $f.SelectedPath }"
+            )
+            result = subprocess.check_output(["powershell", "-NoProfile", "-Command", ps_script])
+            path_str = result.decode('utf-8').strip()
+            if path_str:
+                return path_str
+        except Exception:
+            pass
+
+    # Nếu hộp thoại bị hủy hoặc lỗi, cho phép nhập hoặc kéo thả thư mục vào Terminal / CMD
+    print("👉 Hoặc bạn có thể KÉO THẢ thư mục trực tiếp vào đây (hoặc dán đường dẫn):")
+    manual_path = input("   Đường dẫn thư mục (bấm Enter để hủy): ").strip()
+    if manual_path:
+        clean_path = manual_path.strip("'\"").replace('\\ ', ' ')
+        if Path(clean_path).is_dir():
+            return clean_path
+        else:
+            print(f"⚠️ Không tìm thấy thư mục: {clean_path}")
+    return None
+
+get_folder_path_mac = get_folder_path  # Giữ alias tương thích ngược
+
+def get_file_path(prompt="Chọn file Excel cần xử lý:"):
+    """Mở hộp thoại native trên macOS hoặc Windows để chọn file Excel, hỗ trợ kéo thả file vào Terminal/CMD."""
+    if sys.platform == "darwin":
+        try:
+            script = f'return POSIX path of (choose file with prompt "{prompt}" of type {{"xlsx", "org.openxmlformats.spreadsheetml.sheet"}})'
+            result = subprocess.check_output(['osascript', '-e', script])
+            path_str = result.decode('utf-8').strip()
+            if path_str:
+                return path_str
+        except Exception:
+            pass
+    elif sys.platform == "win32":
+        try:
+            ps_script = (
+                "[System.Reflection.Assembly]::LoadWithPartialName('System.windows.forms') | Out-Null; "
+                f"$f = New-Object System.Windows.Forms.OpenFileDialog; $f.Title = '{prompt}'; $f.Filter = 'Excel Files (*.xlsx)|*.xlsx'; "
+                "if($f.ShowDialog() -eq 'OK'){ $f.FileName }"
+            )
+            result = subprocess.check_output(["powershell", "-NoProfile", "-Command", ps_script])
+            path_str = result.decode('utf-8').strip()
+            if path_str:
+                return path_str
+        except Exception:
+            pass
+
+    # Nếu hộp thoại bị hủy hoặc lỗi, cho phép nhập hoặc kéo thả file vào Terminal / CMD
+    print("👉 Hoặc bạn có thể KÉO THẢ file Excel trực tiếp vào đây (hoặc dán đường dẫn):")
+    manual_path = input("   Đường dẫn file Excel (bấm Enter để hủy): ").strip()
+    if manual_path:
+        clean_path = manual_path.strip("'\"").replace('\\ ', ' ')
+        if Path(clean_path).is_file():
+            return clean_path
+        else:
+            print(f"⚠️ Không tìm thấy file: {clean_path}")
+    return None
+
+get_file_path_mac = get_file_path  # Giữ alias tương thích ngược
+
+def clean_whitespace(value):
+    """Làm sạch khoảng trắng thừa trong chuỗi, xử lý nan/none."""
+    if value is None:
+        return ""
+    if isinstance(value, float):
+        import math
+        if math.isnan(value):
+            return ""
+    if isinstance(value, str):
+        cleaned = re.sub(r'\s+', ' ', value).strip()
+        if cleaned.lower() in ("none", "nan", "null", "<na>"):
+            return ""
+        return cleaned
+    return value
+
+def get_col_letter(col_idx):
+    """Lấy ký hiệu chữ của cột từ index 0 (0 -> A, 1 -> B, ..., 27 -> AB, 28 -> AC...)."""
+    return get_column_letter(col_idx + 1)
+
+def is_cell_empty(val):
+    """Kiểm tra ô có bị trống dữ liệu không."""
+    if val is None:
+        return True
+    if isinstance(val, float):
+        import math
+        if math.isnan(val):
+            return True
+    s = str(val).strip()
+    return s == "" or s.lower() in ["none", "nan", "null", "<na>"]
+
+def is_cell_yellow(cell):
+    """Kiểm tra xem ô Excel có đang được tô màu vàng hay không."""
+    if cell.fill and cell.fill.start_color and cell.fill.start_color.rgb:
+        rgb_str = str(cell.fill.start_color.rgb).upper()
+        if "FFFF00" in rgb_str:
+            return True
+    return False
+
+def is_valid_stt(val):
+    """Kiểm tra ô có phải là Số thứ tự hợp lệ của học sinh (số nguyên dương: 1, 2, 3...)."""
+    if val is None:
+        return False
+    if isinstance(val, (int, float)):
+        import math
+        if math.isnan(val):
+            return False
+        return val > 0 and float(val).is_integer()
+    s = str(val).strip()
+    s_clean = re.sub(r'\.0+$', '', s)
+    return s_clean.isdigit() and int(s_clean) > 0
+
+SUMMARY_KEYWORDS = [
+    "danh sách này có", "danh sách có", "danh sách gồm",
+    "tổng số", "tổng cộng", "số học sinh",
+    "công nhận tốt nghiệp", "người lập", "người ký", "hiệu trưởng", "thủ trưởng"
+]
+
+def is_summary_or_footer_row(row_cells):
+    """Kiểm tra xem dòng có phải là dòng tổng kết, ghi chú cuối danh sách hoặc chân trang ký tên hay không."""
+    for cell in row_cells[:15]:
+        val = str(cell.value or '').strip().lower()
+        if any(kw in val for kw in SUMMARY_KEYWORDS):
+            return True
+    return False
+
+def get_cached_row_fonts(ws, reference_row_idx, max_col=28):
+    """Trích xuất và lưu sẵn (cache) định dạng Font từ dòng mẫu để tái sử dụng."""
+    cached = []
+    for col in range(1, max_col + 1):
+        cell = ws.cell(row=reference_row_idx, column=col)
+        if cell.has_style and cell.font:
+            cached.append(Font(name=cell.font.name, size=cell.font.size))
+        else:
+            cached.append(None)
+    return cached
+
+def apply_cached_fonts(ws, target_row_idx, cached_fonts):
+    """Gán font từ bộ nhớ cache vào dòng mục tiêu."""
+    for col_idx, font in enumerate(cached_fonts, start=1):
+        if font:
+            ws.cell(row=target_row_idx, column=col_idx).font = font
+
+def get_file_format_info(ws):
+    """
+    Nhận diện định dạng sheet:
+    - Quét tối đa 30 dòng đầu tìm dòng tiêu đề chứa 'STT' hoặc 'Họ và tên' (không phân biệt hoa/thường).
+    - Tìm cột 'Tên đơn vị' để phân loại 'AE' (31 cột) hoặc 'AB' (28 cột).
+    - Trả về (format_type, headers, header_row_idx)
+    """
+    for r_idx, row in enumerate(ws.iter_rows(min_row=1, max_row=30, values_only=True), start=1):
+        if not row:
+            continue
+        row_str = [clean_whitespace(str(cell)) if cell is not None else "" for cell in row]
+        row_lower = [s.lower() for s in row_str]
+
+        # Kiểm tra xem dòng này có phải dòng tiêu đề không
+        has_stt = any(s in ["stt", "số tt", "số thứ tự", "stt.", "tt", "tt."] for s in row_lower[:5])
+        has_name = any(("họ" in s and "tên" in s) for s in row_lower)
+
+        if has_stt or has_name:
+            headers = row_str
+            col_idx = -1
+            for idx, h in enumerate(row_lower):
+                if "tên đơn vị" in h or h == "đơn vị":
+                    col_idx = idx
+                    break
+
+            if col_idx >= 29:
+                return "AE", headers, r_idx
+            elif 25 <= col_idx <= 28:
+                return "AB", headers, r_idx
+            elif col_idx == -1 and has_name:
+                # Dự phòng: nếu tiêu đề không có chữ 'Tên đơn vị', suy đoán qua số cột có dữ liệu
+                non_empty_cols = sum(1 for c in headers if c)
+                if non_empty_cols >= 30:
+                    return "AE", headers, r_idx
+                elif non_empty_cols >= 26:
+                    return "AB", headers, r_idx
+                return "INVALID", headers, r_idx
+            else:
+                return "INVALID", headers, r_idx
+
+    return "INVALID", [], None
+
+def map_code_to_text(col_idx, value):
+    """
+    Chuyển đổi mã số sang văn bản theo quy định:
+    - Cột J (Index 9 - Giới tính): 1 -> 'Nam', 2 -> 'Khác', 3 -> 'Nữ'
+    - Cột K (Index 10 - Dân tộc): 29 -> 'Kinh'
+    """
+    if value is None:
+        return ""
+    s_val = str(value).strip()
+    s_clean = re.sub(r'\.0+$', '', s_val)
+
+    # Cột J: Giới tính
+    if col_idx == 9:
+        if s_clean.isdigit():
+            c_num = int(s_clean)
+            if c_num == 1:
+                return "Nam"
+            elif c_num == 2:
+                return "Khác"
+            elif c_num == 3:
+                return "Nữ"
+        s_lower = s_clean.lower()
+        if s_lower == "nam":
+            return "Nam"
+        elif s_lower in ["nữ", "nu"]:
+            return "Nữ"
+        elif s_lower in ["khác", "khac"]:
+            return "Khác"
+
+    # Cột K: Dân tộc
+    elif col_idx == 10:
+        if s_clean.isdigit() and int(s_clean) == 29:
+            return "Kinh"
+        if s_clean.lower() == "kinh":
+            return "Kinh"
+
+    return value
+
+
+# ==============================================================================
+# CHUẨN HÓA NGÀY THÁNG
+# ==============================================================================
+def format_date_to_text(value):
+    """
+    Chuyển đổi mọi loại dữ liệu ngày tháng thành văn bản thuần túy dạng dd/MM/yyyy.
+    Hỗ trợ datetime, date, số serial Excel, số liền 7-8 chữ số (Custom format DDMMYYYY),
+    lỗi lặp dấu (//, ///, .., --), chuỗi ISO (YYYY-MM-DD), chuỗi phân cách dấu chấm/gạch ngang, năm sinh.
+    """
+    if value is None:
+        return ""
+
+    if isinstance(value, float):
+        import math
+        if math.isnan(value):
+            return ""
+
+    # 1. Hỗ trợ cả datetime.datetime và datetime.date
+    if isinstance(value, (datetime.datetime, datetime.date)):
+        return value.strftime("%d/%m/%Y")
+
+    # 2. Xử lý số serial ngày tháng của Excel (10000 đến 80000, tương ứng năm 1927 đến 2119)
+    if isinstance(value, (int, float)) and 10000 <= value <= 80000:
+        try:
+            dt = from_excel(value)
+            return dt.strftime("%d/%m/%Y")
+        except:
+            pass
+
+    val_str = str(value).strip()
+    if not val_str or val_str.lower() in ("none", "nan", "null"):
+        return ""
+
+    # Loại bỏ phần thập phân .0 nếu là số nguyên lưu dạng float (ví dụ: 19061998.0 -> 19061998, 1990.0 -> 1990)
+    val_clean = re.sub(r'\.0+$', '', val_str)
+
+    # 3. Xử lý dạng số liền 7-8 chữ số (ví dụ: 19061998 hoặc 1061998 do gõ số dùng Custom format 00/00/0000)
+    if val_clean.isdigit() and len(val_clean) in (7, 8):
+        padded = val_clean.zfill(8)
+        # Thử kiểu DDMMYYYY (phổ biến nhất tại Việt Nam)
+        d, m, y = int(padded[:2]), int(padded[2:4]), int(padded[4:])
+        if 1900 <= y <= 2100:
+            try:
+                dt = datetime.date(y, m, d)
+                return f"{dt.day:02d}/{dt.month:02d}/{dt.year}"
+            except ValueError:
+                pass
+        # Thử kiểu YYYYMMDD
+        y, m, d = int(padded[:4]), int(padded[4:6]), int(padded[6:])
+        if 1900 <= y <= 2100:
+            try:
+                dt = datetime.date(y, m, d)
+                return f"{dt.day:02d}/{dt.month:02d}/{dt.year}"
+            except ValueError:
+                pass
+
+    # 4. Gom các dấu phân cách lặp lại (//, ///, .., --) và khoảng trắng thừa, loại bỏ / ở đầu/cuối
+    val_norm = re.sub(r'[/.\-\s]+', '/', val_clean).strip('/')
+    if not val_norm or val_norm.lower() in ("none", "nan", "null"):
+        return ""
+
+    # 5. Chuỗi dạng ISO YYYY/MM/DD -> đảo về DD/MM/YYYY
+    m_iso = re.match(r'^(\d{4})/(\d{1,2})/(\d{1,2})$', val_norm)
+    if m_iso:
+        y, m, d = m_iso.groups()
+        return f"{int(d):02d}/{int(m):02d}/{y}"
+
+    # 6. Chuỗi dạng DD/MM/YYYY hoặc D/M/YYYY -> chuẩn hóa thành DD/MM/YYYY
+    m_dmy = re.match(r'^(\d{1,2})/(\d{1,2})/(\d{4})$', val_norm)
+    if m_dmy:
+        d, m, y = m_dmy.groups()
+        return f"{int(d):02d}/{int(m):02d}/{y}"
+
+    # 6b. Chuỗi dạng D/M/YY (năm 2 chữ số)
+    m_dmy2 = re.match(r'^(\d{1,2})/(\d{1,2})/(\d{2})$', val_norm)
+    if m_dmy2:
+        d, m, y2 = m_dmy2.groups()
+        y_int = int(y2)
+        full_y = 2000 + y_int if y_int <= 35 else 1900 + y_int
+        return f"{int(d):02d}/{int(m):02d}/{full_y}"
+
+    # 7. Nếu chỉ có năm (ví dụ "1990" hoặc trường hợp nhập "//1990")
+    m_year = re.match(r'^(\d{4})$', val_norm)
+    if m_year:
+        return m_year.group(1)
+
+    # 8. Các trường hợp chuỗi còn lại
+    return val_norm
+
+
+# ==============================================================================
+# CÔNG ĐOẠN 1: CHUẨN HÓA TIÊU ĐỀ & DỮ LIỆU TỪNG FILE LẺ
+# ==============================================================================
+def stage1_normalize_individual_files():
+    """
+    Quét từng file nguồn (thứ tự ABC), chuẩn hóa tiêu đề và dữ liệu về dạng 28 cột.
+    Chuẩn hóa ngày sinh và ngày cấp bằng.
+    Tự động tô màu vàng vào các ô bị thiếu dữ liệu (chạy tự động 100%, không hỏi tương tác).
+    Xuất file lẻ cho từng file nguồn vào thư mục 'Da_Chuan_Hoa'.
+    """
+    print("\n" + "=" * 80)
+    print(" CÔNG ĐOẠN 1: CHUẨN HÓA HÀNG TIÊU ĐỀ & DỮ LIỆU TỪNG FILE NGUỒN ".center(80, "="))
+    print("=" * 80)
+
+    print("Đang mở cửa sổ chọn thư mục nguồn...")
+    folder_path = get_folder_path_mac("Chọn thư mục chứa các file Excel nguồn cần chuẩn hóa:")
+    if not folder_path:
+        print("Bạn đã hủy chọn thư mục.")
+        return
+
+    folder = Path(folder_path)
+    print(f"Thư mục nguồn đã chọn: {folder.absolute()}")
+
+    print("\n🏢 THÔNG TIN ĐƠN VỊ CẤP BẰNG (Áp dụng cho toàn bộ đợt này):")
+    unit_code_input = input("👉 Nhập Mã đơn vị (Cột AA - Bấm Enter để giữ nguyên file nguồn): ").strip().strip("'\"")
+    unit_name_input = input("👉 Nhập Tên đơn vị (Cột AB - Bấm Enter để giữ nguyên file nguồn): ").strip().strip("'\"")
+
+    if not TEMPLATE_PATH.exists():
+        print(f"❌ Lỗi: Không tìm thấy file mẫu '{TEMPLATE_PATH.name}' tại: {TEMPLATE_PATH.parent}")
+        return
+
+    try:
+        with open(TEMPLATE_PATH, "rb") as f:
+            template_bytes = f.read()
+        wb_tpl = openpyxl.load_workbook(io.BytesIO(template_bytes))
+        ws_tpl = wb_tpl.active
+        cached_fonts = get_cached_row_fonts(ws_tpl, ws_tpl.max_row, max_col=28)
+    except Exception as e:
+        print(f"❌ Lỗi khi đọc file mẫu template.xlsx: {e}")
+        return
+
+    # Thư mục xuất file đã chuẩn hóa
+    output_dir = folder / "Da_Chuan_Hoa"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
+
+    # Lấy danh sách file Excel nguồn, sắp xếp theo thứ tự ABC
+    excel_files = sorted(
+        [
+            f for f in folder.glob("*.xlsx")
+            if not f.name.startswith("~$")
+            and not f.name.startswith("._")
+            and not f.name.endswith("_TongHop.xlsx")
+            and not f.name.endswith("_Xong.xlsx")
+            and f.is_file()
+        ],
+        key=lambda x: x.name.lower()
+    )
+
+    if not excel_files:
+        print(f"⚠️ Không tìm thấy file Excel (*.xlsx) nào trong thư mục: {folder.name}")
+        return
+
+    print(f"\n📁 Tìm thấy tổng cộng {len(excel_files)} file Excel cần chuẩn hóa (thứ tự quét: ABC):")
+    for idx, f in enumerate(excel_files, start=1):
+        print(f"   {idx:>2}. {f.name}")
+
+    processed_files_count = 0
+    total_rows_extracted = 0
+    skipped_sheets_summary = []
+
+    for file_idx, file_path in enumerate(excel_files, start=1):
+        print("\n" + "=" * 80)
+        print(f"[{file_idx}/{len(excel_files)}] ĐANG XỬ LÝ FILE: {file_path.name}")
+        print("=" * 80)
+
+        try:
+            wb_in = openpyxl.load_workbook(file_path, data_only=True)
+            file_rows = []
+
+            for ws_in in wb_in.worksheets:
+                if ws_in.sheet_state != 'visible':
+                    continue
+
+                format_type, headers, header_row_idx = get_file_format_info(ws_in)
+
+                if format_type == "INVALID":
+                    print(f"  -> Bỏ qua Sheet '{ws_in.title}' (Không khớp cấu trúc 28 hoặc 31 cột)")
+                    headers_str = ", ".join([h for h in headers if h]) if headers else "Không có dòng tiêu đề"
+                    skipped_sheets_summary.append({
+                        "file": file_path.name,
+                        "sheet": ws_in.title,
+                        "columns": headers_str
+                    })
+                    continue
+
+                remove_qrs = (format_type == "AE")
+                print(f"  -> Quét Sheet '{ws_in.title}': {'Dạng AE 31 cột (loại bỏ 3 cột thừa Q, R, S)' if remove_qrs else 'Dạng AB chuẩn 28 cột'}")
+
+                start_extracting = False
+                empty_consecutive_rows = 0
+
+                for row in ws_in.iter_rows():
+                    row_idx = row[0].row if hasattr(row[0], 'row') else 0
+
+                    # Bỏ qua tuyệt đối các dòng trước và chính dòng tiêu đề
+                    if header_row_idx is not None and row_idx <= header_row_idx:
+                        continue
+
+                    cell_a_val = row[0].value
+                    cell_a_str = str(cell_a_val).strip() if cell_a_val is not None else ""
+
+                    name_cell_val = row[4].value if len(row) > 4 else None
+                    name_cell_str = clean_whitespace(str(name_cell_val)) if name_cell_val is not None else ""
+                    has_letters_in_name = bool(re.search(r'[a-zA-ZÀ-ỹ]', name_cell_str))
+
+                    is_row_empty = not any(c.value is not None and str(c.value).strip() != "" for c in row[:15])
+
+                    if not start_extracting:
+                        is_stt_one = bool(re.match(r'^0*1(\.0*)?$', cell_a_str))
+                        if (is_stt_one and has_letters_in_name) or (has_letters_in_name and name_cell_str.lower() not in ["họ và tên", "họ tên", "họ, chữ đệm và tên"]):
+                            start_extracting = True
+
+                    if start_extracting:
+                        if is_row_empty:
+                            empty_consecutive_rows += 1
+                            if empty_consecutive_rows >= 20:
+                                break
+                            continue
+                        else:
+                            empty_consecutive_rows = 0
+
+                        # Bỏ qua nếu là dòng tổng kết, ghi chú cuối bảng (ví dụ: 'Danh sách này có 100 học sinh')
+                        if is_summary_or_footer_row(row):
+                            continue
+
+                        # Chỉ lấy các dòng dữ liệu với ĐỒNG THỜI STT là số hợp lệ và Họ tên không trống
+                        if not is_valid_stt(cell_a_val) or is_cell_empty(name_cell_val) or not has_letters_in_name:
+                            continue
+
+                        row_values = [cell.value for cell in row]
+
+                        required_len = 31 if remove_qrs else 28
+                        while len(row_values) < required_len:
+                            row_values.append(None)
+
+                        # Chuẩn hóa Ngày sinh (Cột I -> Index 8)
+                        row_values[8] = format_date_to_text(row_values[8])
+
+                        # Cắt bỏ 3 cột Q, R, S nếu là dạng AE và chuẩn hóa Ngày cấp bằng
+                        if remove_qrs:
+                            row_values[21] = format_date_to_text(row_values[21])
+                            new_row_values = (row_values[:16] + row_values[19:])[:28]
+                        else:
+                            row_values[18] = format_date_to_text(row_values[18])
+                            new_row_values = row_values[:28]
+
+                        while len(new_row_values) < 28:
+                            new_row_values.append(None)
+
+                        new_row_values = [clean_whitespace(val) for val in new_row_values]
+
+                        # Cột D (Index 3): Tên văn bằng cố định
+                        new_row_values[3] = "Bằng tốt nghiệp trung học cơ sở"
+                        # Cột Y (Index 24): Trạng thái số hóa cố định
+                        new_row_values[24] = "Đã số hóa đầy đủ, chính xác"
+                        # Cột J (Index 9): Giới tính (1->Nam, 2->Khác, 3->Nữ)
+                        new_row_values[9] = map_code_to_text(9, new_row_values[9])
+                        # Cột K (Index 10): Dân tộc (29->Kinh)
+                        new_row_values[10] = map_code_to_text(10, new_row_values[10])
+                        # Cột AA (Index 26): Mã đơn vị
+                        if unit_code_input:
+                            new_row_values[26] = unit_code_input
+                        # Cột AB (Index 27): Tên đơn vị
+                        if unit_name_input:
+                            new_row_values[27] = unit_name_input
+
+                        file_rows.append(new_row_values)
+
+            M = len(file_rows)
+            if M == 0:
+                print(f"⚠️ File '{file_path.name}' không có dòng dữ liệu học sinh nào. Bỏ qua.")
+                continue
+
+            print(f"  -> Trích xuất được: {M} dòng dữ liệu học sinh.")
+
+            # ==================================================================
+            # XUẤT FILE EXCEL LẺ ĐÃ CHUẨN HÓA VÀO THƯ MỤC 'Da_Chuan_Hoa'
+            # ==================================================================
+            wb_out = openpyxl.load_workbook(io.BytesIO(template_bytes))
+            ws_out = wb_out.active
+            ws_out.title = "Data"
+
+            yellow_cell_count = 0
+            for r in range(M):
+                row_vals = file_rows[r]
+                row_vals[0] = r + 1  # Đánh lại STT 1..M cho file lẻ
+                ws_out.append(row_vals)
+                curr_row = ws_out.max_row
+                apply_cached_fonts(ws_out, curr_row, cached_fonts)
+
+                for c in range(1, 28):
+                    if is_cell_empty(row_vals[c]):
+                        ws_out.cell(row=curr_row, column=c + 1).fill = yellow_fill
+                        yellow_cell_count += 1
+
+            out_file_path = output_dir / file_path.name
+            try:
+                wb_out.save(out_file_path)
+            except PermissionError:
+                print(f"❌ Lỗi: Không thể ghi file '{out_file_path.name}'. Vui lòng đóng file nếu đang mở trong Excel và thử lại.")
+                continue
+
+            processed_files_count += 1
+            total_rows_extracted += M
+            print(f"  -> Xuất file: Da_Chuan_Hoa/{out_file_path.name} ({M} học sinh | {yellow_cell_count} ô thiếu tô vàng)")
+
+        except Exception as e:
+            print(f"❌ Lỗi khi xử lý file {file_path.name}: {e}")
+
+    # Báo cáo tổng kết Công đoạn 1
+    print("\n" + "=" * 80)
+    print(" HOÀN THÀNH CÔNG ĐOẠN 1 ".center(80, "="))
+    print(f"✅ Đã chuẩn hóa thành công: {processed_files_count}/{len(excel_files)} file Excel nguồn.")
+    print(f"✅ Tổng số học sinh: {total_rows_extracted} dòng dữ liệu.")
+    print(f"📁 Toàn bộ các file chuẩn hóa lẻ đã được lưu tại thư mục:")
+    print(f"   {output_dir.absolute()}")
+    print("=" * 80)
+
+    if skipped_sheets_summary:
+        print("\n" + "=" * 100)
+        print(" DANH SÁCH CÁC SHEET BỊ BỎ QUA (SAI CẤU TRÚC)".center(100))
+        print("=" * 100)
+        print(f"| {'Tên File':<30} | {'Tên Sheet':<25} | {'Các cột hiện có'}")
+        print("-" * 100)
+        for info in skipped_sheets_summary:
+            f_name = info['file'][:27] + "..." if len(info['file']) > 30 else info['file']
+            s_name = info['sheet'][:22] + "..." if len(info['sheet']) > 25 else info['sheet']
+            print(f"| {f_name:<30} | {s_name:<25} | {info['columns']}")
+        print("=" * 100)
+
+
+# ==============================================================================
+# CÔNG ĐOẠN 2: QUÉT CÁC FILE ĐÃ CHUẨN HÓA & TẠO FILE EXCEL TỔNG HỢP
+# ==============================================================================
+def stage2_merge_normalized_files():
+    """
+    Quét các file đã chuẩn hóa (thứ tự ABC), gộp toàn bộ thành 1 file Excel tổng hợp duy nhất.
+    Đánh lại số thứ tự (STT) liên tục 1..N.
+    Giữ nguyên định dạng và màu tô vàng của các ô bị thiếu.
+    KHÔNG cần chuẩn hóa lại ngày sinh và ngày cấp bằng.
+    """
+    print("\n" + "=" * 80)
+    print(" CÔNG ĐOẠN 2: QUÉT CÁC FILE ĐÃ CHUẨN HÓA & TẠO FILE TỔNG HỢP ".center(80, "="))
+    print("=" * 80)
+
+    print("Đang mở cửa sổ chọn thư mục chứa file đã chuẩn hóa...")
+    folder_path = get_folder_path_mac("Chọn thư mục chứa file đã chuẩn hóa (thư mục Da_Chuan_Hoa hoặc thư mục nguồn):")
+    if not folder_path:
+        print("Bạn đã hủy chọn thư mục.")
+        return
+
+    folder = Path(folder_path)
+
+    # Tự động nhận diện nếu người dùng chọn thư mục cha có chứa thư mục con 'Da_Chuan_Hoa'
+    if folder.name != "Da_Chuan_Hoa" and (folder / "Da_Chuan_Hoa").is_dir():
+        sub_files = [f for f in (folder / "Da_Chuan_Hoa").glob("*.xlsx") if not f.name.startswith("~$") and not f.name.startswith("._")]
+        if sub_files:
+            folder = folder / "Da_Chuan_Hoa"
+            print(f"-> Tự động nhận diện và sử dụng thư mục con: {folder.name}/")
+
+    print(f"Thư mục làm việc: {folder.absolute()}")
+
+    if not TEMPLATE_PATH.exists():
+        print(f"❌ Lỗi: Không tìm thấy file mẫu '{TEMPLATE_PATH.name}' tại: {TEMPLATE_PATH.parent}")
+        return
+
+    try:
+        with open(TEMPLATE_PATH, "rb") as f:
+            template_bytes = f.read()
+        wb_out = openpyxl.load_workbook(io.BytesIO(template_bytes))
+        ws_out = wb_out.active
+        ws_out.title = "Data"
+        cached_fonts = get_cached_row_fonts(ws_out, ws_out.max_row, max_col=28)
+    except Exception as e:
+        print(f"❌ Lỗi khi đọc file mẫu template.xlsx: {e}")
+        return
+
+    yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
+
+    # Lấy danh sách file chuẩn hóa, sắp xếp ABC
+    excel_files = sorted(
+        [
+            f for f in folder.glob("*.xlsx")
+            if not f.name.startswith("~$")
+            and not f.name.startswith("._")
+            and not f.name.endswith("_TongHop.xlsx")
+            and not f.name.endswith("_Xong.xlsx")
+            and f.is_file()
+        ],
+        key=lambda x: x.name.lower()
+    )
+
+    if not excel_files:
+        print(f"⚠️ Không tìm thấy file Excel (*.xlsx) nào trong thư mục: {folder.name}")
+        return
+
+    print(f"\n📁 Tìm thấy {len(excel_files)} file đã chuẩn hóa cần gộp (thứ tự quét: ABC):")
+
+    count_files = 0
+    total_student_rows = 0
+
+    for file_idx, file_path in enumerate(excel_files, start=1):
+        print(f"  [{file_idx}/{len(excel_files)}] Đang đọc: {file_path.name} ...", end=" ")
+        try:
+            wb_in = openpyxl.load_workbook(file_path)
+            ws_in = wb_in['Data'] if 'Data' in wb_in.sheetnames else wb_in.active
+
+            # Tìm dòng tiêu đề
+            header_row_idx = 2
+            for r in range(1, min(10, ws_in.max_row + 1)):
+                row_vals = [clean_whitespace(str(ws_in.cell(row=r, column=c).value or '')) for c in range(1, 10)]
+                row_lower = [v.lower() for v in row_vals]
+                if any(s in ["stt", "số tt", "số thứ tự"] for s in row_lower) or any("họ" in s and "tên" in s for s in row_lower):
+                    header_row_idx = r
+                    break
+
+            file_student_count = 0
+            for r in range(header_row_idx + 1, ws_in.max_row + 1):
+                cells = [ws_in.cell(row=r, column=c) for c in range(1, 29)]
+                # Bỏ qua dòng trống hoàn toàn hoặc thiếu STT / Họ tên / dòng tổng kết
+                if not any(c.value is not None and str(c.value).strip() != "" for c in cells[:15]):
+                    continue
+                if is_summary_or_footer_row(cells) or not is_valid_stt(cells[0].value) or is_cell_empty(cells[4].value):
+                    continue
+
+                row_vals = [clean_whitespace(c.value) for c in cells]
+
+                # Nhận diện trạng thái tô vàng từ ô trong file chuẩn hóa
+                row_yellow = []
+                for c in cells:
+                    is_yel = is_cell_yellow(c) or is_cell_empty(c.value)
+                    row_yellow.append(is_yel)
+
+                total_student_rows += 1
+                file_student_count += 1
+                row_vals[0] = total_student_rows  # Đánh lại STT 1..N liên tục toàn bộ file tổng
+
+                ws_out.append(row_vals)
+                curr_row = ws_out.max_row
+                apply_cached_fonts(ws_out, curr_row, cached_fonts)
+
+                for col_idx, is_yel in enumerate(row_yellow, start=1):
+                    if is_yel and col_idx > 1:
+                        ws_out.cell(row=curr_row, column=col_idx).fill = yellow_fill
+
+            count_files += 1
+            print(f"-> Gộp {file_student_count:>4} học sinh.")
+
+        except Exception as e:
+            print(f"❌ Lỗi khi đọc file {file_path.name}: {e}")
+
+    # Đường dẫn lưu file tổng hợp
+    save_dir = folder.parent if folder.name == "Da_Chuan_Hoa" else folder
+    out_path = save_dir / f"{save_dir.name}_TongHop.xlsx"
+
+    try:
+        wb_out.save(out_path)
+        print("\n" + "=" * 80)
+        print(" HOÀN THÀNH CÔNG ĐOẠN 2 ".center(80, "="))
+        print(f"✅ Đã gộp thành công: {count_files}/{len(excel_files)} file Excel đã chuẩn hóa.")
+        print(f"✅ Tổng số học sinh: {total_student_rows} dòng dữ liệu.")
+        print(f"📁 File TỔNG HỢP đã lưu tại:")
+        print(f"   {out_path.absolute()}")
+        print("=" * 80)
+    except PermissionError:
+        print(f"\n❌ Lỗi: Không thể lưu file '{out_path.name}' do file đang được mở trong Excel.")
+        print("👉 Vui lòng ĐÓNG file trong Excel rồi chạy lại để lưu file tổng hợp.")
+    except Exception as e:
+        print(f"❌ Lỗi khi lưu file tổng hợp: {e}")
+
+
+# ==============================================================================
+# CÔNG ĐOẠN 3: LỌC & GHÉP DỮ LIỆU CHƯA NHẬP TỪ FILE NHIỀU SHEET
+# ==============================================================================
+def stage3_filter_unimported_records():
+    """
+    Xử lý một file Excel chứa nhiều sheet có cùng cấu trúc:
+    - Hàng tiêu đề có cấu trúc chuẩn với cột Tên đơn vị là AB, cột Kết quả nhập là AC.
+    - Trích ra các dòng dữ liệu (giữ nguyên STT ban đầu và dữ liệu gốc).
+    - Với mỗi dòng có Kết quả nhập khác "Đã nhập": tô màu vàng toàn bộ dòng đó.
+    - Giữ lại kèm thêm 5 dòng liền trước và 5 dòng liền sau nó để làm tham chiếu sửa dữ liệu.
+    - Ghép toàn bộ vào một sheet duy nhất và xuất ra file Excel có tên "KetQuaNhap.xlsx" trong cùng thư mục với file nguồn.
+    """
+    print("\n" + "=" * 80)
+    print(" CÔNG ĐOẠN 3: LỌC & GHÉP DỮ LIỆU CHƯA NHẬP TỪ FILE NHIỀU SHEET ".center(80, "="))
+    print("=" * 80)
+
+    print("Đang mở cửa sổ chọn file Excel nguồn...")
+    file_path_str = get_file_path_mac("Chọn file Excel chứa các sheet kết quả nhập:")
+    if not file_path_str:
+        print("Bạn đã hủy chọn file.")
+        return
+
+    file_path = Path(file_path_str)
+    if not file_path.is_file():
+        print(f"❌ Lỗi: File không tồn tại: {file_path}")
+        return
+
+    print(f"File nguồn đã chọn: {file_path.absolute()}")
+
+    if not TEMPLATE_PATH.exists():
+        print(f"❌ Lỗi: Không tìm thấy file mẫu '{TEMPLATE_PATH.name}' tại: {TEMPLATE_PATH.parent}")
+        return
+
+    try:
+        with open(TEMPLATE_PATH, "rb") as f:
+            template_bytes = f.read()
+        wb_tpl = openpyxl.load_workbook(io.BytesIO(template_bytes))
+        ws_tpl = wb_tpl.active
+        cached_fonts = get_cached_row_fonts(ws_tpl, ws_tpl.max_row, max_col=28)
+        # Thêm font cho cột AC (cột thứ 29)
+        cached_fonts.append(Font(name=cached_fonts[0].name, size=cached_fonts[0].size) if cached_fonts and cached_fonts[0] else None)
+    except Exception as e:
+        print(f"❌ Lỗi khi đọc file mẫu template.xlsx: {e}")
+        return
+
+    yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
+
+    print("\nĐang mở và đọc dữ liệu từ file Excel (vui lòng chờ)...")
+    try:
+        wb_in = openpyxl.load_workbook(file_path, data_only=True)
+    except Exception as e:
+        print(f"❌ Lỗi khi mở file Excel '{file_path.name}': {e}")
+        return
+
+    visible_sheets = [ws for ws in wb_in.worksheets if ws.sheet_state == 'visible']
+    if not visible_sheets:
+        print("⚠️ File Excel không có sheet nào hiển thị dữ liệu.")
+        return
+
+    print(f"📁 Tìm thấy tổng cộng {len(visible_sheets)} sheet dữ liệu cần quét:")
+
+    all_kept_rows = []
+    total_scanned_rows = 0
+    total_imported_rows = 0
+    total_unimported_rows = 0
+    processed_sheets_count = 0
+    skipped_sheets = []
+
+    for sheet_idx, ws_in in enumerate(visible_sheets, start=1):
+        print(f"\n[{sheet_idx}/{len(visible_sheets)}] Quét Sheet: '{ws_in.title}' ...", end=" ")
+
+        # 1. Tìm dòng tiêu đề và xác định vị trí cột Kết quả nhập (AC - index 28)
+        header_row_idx = None
+        result_col_idx = 28  # Mặc định AC (cột thứ 29)
+
+        for r in range(1, min(30, ws_in.max_row + 1)):
+            row_vals = [clean_whitespace(str(ws_in.cell(row=r, column=c).value or '')) for c in range(1, min(35, ws_in.max_column + 1))]
+            row_lower = [v.lower() for v in row_vals]
+
+            has_stt = any(s in ["stt", "số tt", "số thứ tự", "stt.", "tt", "tt."] for s in row_lower[:5])
+            has_name = any(("họ" in s and "tên" in s) for s in row_lower)
+            has_res = any("kết quả" in s for s in row_lower)
+
+            if has_stt or has_name or has_res:
+                header_row_idx = r
+                for idx, h in enumerate(row_lower):
+                    if "kết quả" in h or "ket qua" in h:
+                        result_col_idx = idx
+                        break
+                break
+
+        start_extracting = False
+        empty_consecutive_rows = 0
+        sheet_all_students = []
+
+        for row in ws_in.iter_rows():
+            row_idx = row[0].row if hasattr(row[0], 'row') else 0
+
+            # Bỏ qua tuyệt đối các dòng trước và chính dòng tiêu đề
+            if header_row_idx is not None and row_idx <= header_row_idx:
+                continue
+
+            cell_a_val = row[0].value
+            cell_a_str = str(cell_a_val).strip() if cell_a_val is not None else ""
+
+            name_cell_val = row[4].value if len(row) > 4 else None
+            name_cell_str = clean_whitespace(str(name_cell_val)) if name_cell_val is not None else ""
+            has_letters_in_name = bool(re.search(r'[a-zA-ZÀ-ỹ]', name_cell_str))
+
+            is_row_empty = not any(c.value is not None and str(c.value).strip() != "" for c in row[:15])
+
+            if not start_extracting:
+                is_stt_one = bool(re.match(r'^0*1(\.0*)?$', cell_a_str))
+                if (is_stt_one and has_letters_in_name) or (has_letters_in_name and name_cell_str.lower() not in ["họ và tên", "họ tên", "họ, chữ đệm và tên"]):
+                    start_extracting = True
+
+            if start_extracting:
+                if is_row_empty:
+                    empty_consecutive_rows += 1
+                    if empty_consecutive_rows >= 20:
+                        break
+                    continue
+                else:
+                    empty_consecutive_rows = 0
+
+                # Bỏ qua nếu là dòng tổng kết, ghi chú cuối bảng (ví dụ: 'Danh sách này có 100 học sinh')
+                if is_summary_or_footer_row(row):
+                    continue
+
+                # Chỉ lấy các dòng dữ liệu với ĐỒNG THỜI STT là số hợp lệ và Họ tên không trống
+                if not is_valid_stt(cell_a_val) or is_cell_empty(name_cell_val) or not has_letters_in_name:
+                    continue
+
+                # Lấy giá trị các ô trong dòng
+                row_values = [cell.value for cell in row]
+                required_len = max(29, result_col_idx + 1)
+                while len(row_values) < required_len:
+                    row_values.append(None)
+
+                # Kiểm tra giá trị cột Kết quả nhập (AC)
+                result_raw = row_values[result_col_idx]
+                result_str = clean_whitespace(str(result_raw)) if result_raw is not None else ""
+                is_unimported = (result_str.lower() != "đã nhập")
+
+                # Lấy 29 cột và làm sạch khoảng trắng thừa (giữ nguyên dữ liệu gốc ngày sinh, giới tính, dân tộc...)
+                new_row_values = row_values[:29]
+                while len(new_row_values) < 29:
+                    new_row_values.append(None)
+
+                new_row_values = [clean_whitespace(val) for val in new_row_values]
+
+                # Cột D (Index 3): Tên văn bằng (nếu rỗng thì điền mặc định)
+                if not new_row_values[3]:
+                    new_row_values[3] = "Bằng tốt nghiệp trung học cơ sở"
+                # Cột Y (Index 24): Trạng thái số hóa (nếu rỗng thì điền mặc định)
+                if not new_row_values[24]:
+                    new_row_values[24] = "Đã số hóa đầy đủ, chính xác"
+
+                # Giữ nguyên giá trị cột Kết quả nhập tại index 28 (AC)
+                new_row_values[28] = result_str
+
+                sheet_all_students.append((new_row_values, is_unimported))
+
+        total_sheet_students = len(sheet_all_students)
+        if total_sheet_students == 0:
+            print("-> ⚠️ Không tìm thấy dòng dữ liệu học sinh nào.")
+            skipped_sheets.append(ws_in.title)
+            continue
+
+        # Tìm các index của dòng chưa nhập (khác "Đã nhập")
+        target_indices = [i for i, (_, is_unimp) in enumerate(sheet_all_students) if is_unimp]
+        sheet_unimp_count = len(target_indices)
+        sheet_imp_count = total_sheet_students - sheet_unimp_count
+
+        total_scanned_rows += total_sheet_students
+        total_imported_rows += sheet_imp_count
+        total_unimported_rows += sheet_unimp_count
+
+        if sheet_unimp_count == 0:
+            print(f"-> Quét {total_sheet_students:>4} học sinh | 100% đã nhập ({sheet_imp_count}). Bỏ qua.")
+            continue
+
+        # Giữ lại dòng chưa nhập kèm thêm 5 dòng liền trước và 5 dòng liền sau
+        keep_indices = set()
+        for t_idx in target_indices:
+            start_k = max(0, t_idx - 5)
+            end_k = min(total_sheet_students, t_idx + 5 + 1)
+            for k in range(start_k, end_k):
+                keep_indices.add(k)
+
+        sorted_keep_indices = sorted(keep_indices)
+
+        for k in sorted_keep_indices:
+            r_vals, is_unimp = sheet_all_students[k]
+            all_kept_rows.append({
+                "values": r_vals,
+                "is_highlight": is_unimp  # True: dòng chưa nhập (cần tô vàng), False: dòng tham chiếu
+            })
+
+        processed_sheets_count += 1
+        print(f"-> Quét {total_sheet_students:>4} dòng | Chưa nhập: {sheet_unimp_count:>3} | Xuất kèm ±5 dòng tham chiếu: {len(sorted_keep_indices):>3}")
+
+    M = len(all_kept_rows)
+    print("\n" + "-" * 80)
+    print(f"TỔNG KẾT: Đã quét {total_scanned_rows} dòng | Đã nhập: {total_imported_rows} | Chưa nhập: {total_unimported_rows} | Tổng xuất ra: {M} dòng.")
+    print("-" * 80)
+
+    # Khởi tạo file xuất ra
+    try:
+        wb_out = openpyxl.load_workbook(io.BytesIO(template_bytes))
+        ws_out = wb_out.active
+        ws_out.title = "KetQuaNhap"
+
+        # Thiết lập cột thứ 29 (AC) - Kết quả nhập
+        ws_out.cell(row=2, column=29, value="Kết quả nhập")
+        cell_ab2 = ws_out.cell(row=2, column=28)
+        cell_ac2 = ws_out.cell(row=2, column=29)
+        if cell_ab2.has_style:
+            if cell_ab2.font:
+                cell_ac2.font = copy.copy(cell_ab2.font)
+            if cell_ab2.fill:
+                cell_ac2.fill = copy.copy(cell_ab2.fill)
+            if cell_ab2.border:
+                cell_ac2.border = copy.copy(cell_ab2.border)
+            if cell_ab2.alignment:
+                cell_ac2.alignment = copy.copy(cell_ab2.alignment)
+
+        # Mở rộng ô gộp dòng 1 từ A1:AB1 thành A1:AC1 (nếu có)
+        try:
+            ws_out.unmerge_cells("A1:AB1")
+            ws_out.merge_cells("A1:AC1")
+        except Exception:
+            pass
+
+        ws_out.column_dimensions['AC'].width = 25
+
+        yellow_rows_count = 0
+        ref_rows_count = 0
+        yellow_cell_count = 0
+
+        for item in all_kept_rows:
+            row_vals = item["values"]
+            is_highlight = item["is_highlight"]
+
+            # Giữ nguyên STT gốc từ file nguồn (chuyển float dạng 1.0 thành int nếu cần)
+            if isinstance(row_vals[0], float) and row_vals[0].is_integer():
+                row_vals[0] = int(row_vals[0])
+            elif isinstance(row_vals[0], str) and row_vals[0].isdigit():
+                row_vals[0] = int(row_vals[0])
+
+            ws_out.append(row_vals)
+            curr_row = ws_out.max_row
+            apply_cached_fonts(ws_out, curr_row, cached_fonts)
+
+            if is_highlight:
+                # Dòng chưa nhập: TÔ VÀNG TOÀN BỘ CỘT CỦA DÒNG (Từ cột 1 đến 29)
+                for c in range(1, 30):
+                    ws_out.cell(row=curr_row, column=c).fill = yellow_fill
+                yellow_rows_count += 1
+            else:
+                # Dòng tham chiếu: Giữ nguyên màu nền bình thường (chỉ tô vàng ô thiếu thông tin nếu có)
+                ref_rows_count += 1
+                for c in range(1, 28):
+                    if is_cell_empty(row_vals[c]):
+                        ws_out.cell(row=curr_row, column=c + 1).fill = yellow_fill
+                        yellow_cell_count += 1
+
+        out_file_path = file_path.parent / "KetQuaNhap.xlsx"
+        # Tránh ghi đè nếu file nguồn trùng tên KetQuaNhap.xlsx
+        if file_path.resolve() == out_file_path.resolve():
+            out_file_path = file_path.parent / "KetQuaNhap_Loc.xlsx"
+
+        wb_out.save(out_file_path)
+
+        print("\n" + "=" * 80)
+        print(" HOÀN THÀNH XỬ LÝ FILE KẾT QUẢ NHẬP ".center(80, "="))
+        print(f"✅ Đã quét thành công: {processed_sheets_count}/{len(visible_sheets)} sheet từ file '{file_path.name}'.")
+        print(f"✅ Tổng số học sinh chưa nhập (TÔ VÀNG NGUYÊN DÒNG): {yellow_rows_count} dòng.")
+        print(f"✅ Tổng số học sinh tham chiếu (±5 dòng liền kề): {ref_rows_count} dòng.")
+        print(f"✅ Tổng số dòng dữ liệu xuất ra: {len(all_kept_rows)} dòng.")
+        print(f"📁 File kết quả đã được lưu tại:")
+        print(f"   {out_file_path.absolute()}")
+        print("=" * 80)
+
+    except PermissionError:
+        print(f"\n❌ Lỗi: Không thể lưu file '{out_file_path.name}' do file đang được mở trong Excel.")
+        print("👉 Vui lòng ĐÓNG file trong Excel rồi chạy lại chức năng này.")
+    except Exception as e:
+        print(f"\n❌ Lỗi khi xuất file Excel: {e}")
+
+
+# ==============================================================================
+# MENU ĐIỀU KHIỂN CHÍNH
+# ==============================================================================
+def main():
+    while True:
+        print("\n" + "=" * 75)
+        print("     CÔNG CỤ XỬ LÝ & SỐ HÓA VĂN BẰNG CHỨNG CHỈ THCS".center(75))
+        print("=" * 75)
+        print("  [1] Chuẩn hóa hàng tiêu đề và dữ liệu")
+        print("      -> Quét từng file nguồn (thứ tự ABC) & chuẩn hóa cấu trúc 28 cột")
+        print("      -> Chuẩn hóa ngày sinh và ngày cấp bằng về dạng dd/MM/yyyy")
+        print("      -> Tự động tô màu vàng vào các ô/cột bị thiếu dữ liệu")
+        print("      -> Xuất các file Excel lẻ đã chuẩn hóa vào thư mục 'Da_Chuan_Hoa'")
+        print()
+        print("  [2] Quét các file đã chuẩn hóa và tạo lại file Excel tổng hợp")
+        print("      -> Quét toàn bộ file trong thư mục 'Da_Chuan_Hoa'")
+        print("      -> Đánh lại STT liên tục 1..N, giữ nguyên tô vàng các ô thiếu")
+        print("      -> Giữ nguyên ngày sinh (không cần chuẩn hóa lại)")
+        print("      -> Xuất ra file Excel tổng hợp: <Tên_Thư_Mục>_TongHop.xlsx")
+        print()
+        print("  [3] Lọc & ghép dữ liệu chưa nhập từ file Kết quả nhập")
+        print("      -> Xử lý 1 file Excel chứa nhiều sheet có cùng cấu trúc")
+        print("      -> Hàng tiêu đề chuẩn cột Tên đơn vị là AB, Kết quả nhập là AC")
+        print("      -> Giữ nguyên STT và dữ liệu gốc (không đánh lại STT)")
+        print("      -> TÔ VÀNG TOÀN BỘ DÒNG có Kết quả nhập KHÁC 'Đã nhập'")
+        print("      -> Giữ kèm thêm 5 dòng liền trước và 5 dòng liền sau để tham chiếu")
+        print("      -> Ghép vào 1 sheet duy nhất & xuất file 'KetQuaNhap.xlsx' cùng thư mục")
+        print()
+        print("  [0] Thoát chương trình")
+        print("=" * 75)
+
+        choice = input("👉 Chọn chức năng [0-3]: ").strip()
+
+        try:
+            if choice == "1":
+                stage1_normalize_individual_files()
+            elif choice == "2":
+                stage2_merge_normalized_files()
+            elif choice == "3":
+                stage3_filter_unimported_records()
+            elif choice in ["0", "q", "exit"]:
+                print("\nĐã thoát chương trình. Tạm biệt!\n")
+                break
+            else:
+                print("\n⚠️ Lựa chọn không hợp lệ! Vui lòng nhập số từ 0 đến 3.")
+        except KeyboardInterrupt:
+            print("\n\n⚠️ Đã hủy thao tác hiện tại theo yêu cầu người dùng (quay lại Menu chính).")
+
+        try:
+            input("\nNhấn Enter để quay lại Menu chính...")
+        except KeyboardInterrupt:
+            print("\n")
+
+if __name__ == "__main__":
+    main()
