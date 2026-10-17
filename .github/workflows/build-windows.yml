@@ -5,9 +5,14 @@ on:
   push:
     branches: [ main, master ]
 
+permissions:
+  contents: write
+
 jobs:
   build-windows:
     runs-on: windows-latest
+    permissions:
+      contents: write
 
     steps:
     - name: Checkout code
@@ -32,3 +37,16 @@ jobs:
       with:
         name: SoHoa_VBCC_Windows_x64
         path: dist/SoHoa_VBCC.exe
+
+    - name: Publish to GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: latest
+        name: "SoHoa_VBCC - Bản phát hành Windows (.exe)"
+        body: |
+          ### 🚀 File thực thi Windows (.exe)
+          - Tải trực tiếp file **`SoHoa_VBCC.exe`** ở mục **Assets** bên dưới.
+          - Chạy trực tiếp trên Windows, không cần cài đặt Python.
+        files: dist/SoHoa_VBCC.exe
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
