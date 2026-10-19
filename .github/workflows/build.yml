@@ -1,0 +1,107 @@
+name: Build & Release Multi-Platform (Windows & macOS)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build Windows (.exe)
+    runs-on: windows-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install openpyxl pyinstaller
+
+    - name: Build .exe with PyInstaller
+      run: |
+        pyinstaller --noconfirm --onefile --console --name "SoHoa_VBCC" --add-data "template.xlsx;." main.py
+
+    - name: Upload Windows Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: SoHoa_VBCC_Windows
+        path: dist/SoHoa_VBCC.exe
+
+  build-macos:
+    name: Build macOS (Universal2)
+    runs-on: macos-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install openpyxl pyinstaller
+
+    - name: Build macOS Binary with PyInstaller (Universal2)
+      run: |
+        pyinstaller --noconfirm --onefile --console --target-architecture universal2 --name "SoHoa_VBCC_macOS" --add-data "template.xlsx:." main.py
+        chmod +x dist/SoHoa_VBCC_macOS
+        cd dist
+        zip -r SoHoa_VBCC_macOS.zip SoHoa_VBCC_macOS
+        cd ..
+
+    - name: Upload macOS Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: SoHoa_VBCC_macOS
+        path: dist/SoHoa_VBCC_macOS.zip
+
+  publish-release:
+    name: Publish Multi-Platform Release
+    needs: [build-windows, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+
+    - name: Prepare release files
+      run: |
+        mkdir release_files
+        cp SoHoa_VBCC_Windows/SoHoa_VBCC.exe release_files/
+        cp SoHoa_VBCC_macOS/SoHoa_VBCC_macOS.zip release_files/
+        ls -la release_files/
+
+    - name: Publish to GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: latest
+        name: "SoHoa_VBCC - Bản phát hành Windows & macOS"
+        body: |
+          ### 🚀 Tải về ứng dụng chạy trực tiếp (Không cần cài đặt Python)
+
+          | Hệ điều hành | Tệp tải về | Hướng dẫn sử dụng |
+          | :--- | :--- | :--- |
+          | **Windows (x64)** | **`SoHoa_VBCC.exe`** | Tải về và click đúp để chạy trực tiếp trên Windows 10/11. |
+          | **macOS (Apple Silicon & Intel)** | **`SoHoa_VBCC_macOS.zip`** | Giải nén, click đúp file `SoHoa_VBCC_macOS` để chạy trong Terminal. |
+
+          ---
+          > [!NOTE]
+          > **Mẹo cho người dùng macOS lần đầu mở file:**
+          > Nếu macOS hiển thị cảnh báo bảo mật Gatekeeper (*"Không thể mở ứng dụng vì chưa xác minh nhà phát triển"*):
+          > 👉 Bạn chỉ cần **Click chuột phải** (hoặc giữ phím `Control` + Click) vào file `SoHoa_VBCC_macOS` $\rightarrow$ chọn **Open (Mở)** $\rightarrow$ chọn tiếp **Open** là ứng dụng sẽ chạy bình thường (chỉ cần làm 1 lần đầu).
+        files: |
+          release_files/SoHoa_VBCC.exe
+          release_files/SoHoa_VBCC_macOS.zip
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

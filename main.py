@@ -8,6 +8,7 @@ import os
 import sys
 import subprocess
 import datetime
+import math
 import re
 import io
 import copy
@@ -147,7 +148,6 @@ def clean_whitespace(value):
     if value is None:
         return ""
     if isinstance(value, float):
-        import math
         if math.isnan(value):
             return ""
     if isinstance(value, str):
@@ -181,7 +181,6 @@ def is_cell_empty(val):
     if val is None:
         return True
     if isinstance(val, float):
-        import math
         if math.isnan(val):
             return True
     s = str(val).strip()
@@ -197,10 +196,9 @@ def is_cell_yellow(cell):
 
 def is_valid_stt(val):
     """Kiểm tra ô có phải là Số thứ tự hợp lệ của học sinh (số nguyên dương: 1, 2, 3...)."""
-    if val is None:
+    if val is None or isinstance(val, bool):
         return False
     if isinstance(val, (int, float)):
-        import math
         if math.isnan(val):
             return False
         return val > 0 and float(val).is_integer()
@@ -649,6 +647,76 @@ def map_code_to_text(col_idx, value):
 
 
 # ==============================================================================
+# CHUẨN HÓA & ĐỐI SOÁT NIÊN KHÓA (CỘT O) VÀ NGÀY CẤP BẰNG (CỘT S)
+# ==============================================================================
+def normalize_nien_khoa(val_nien_khoa, val_ngay_cap_bang):
+    """
+    Chuẩn hóa Niên khóa (Cột O) và kiểm tra sự phù hợp với Ngày cấp bằng (Cột S):
+    - Chuẩn hóa về dạng YYYY-YYYY.
+    - Nếu Cột O trống: lấy Y_ra từ Cột S và tự tính Y_vao = Y_ra - 4.
+    - Nếu Y_ra - Y_vao != 4: lấy Y_ra từ Cột S và tự tính Y_vao = Y_ra - 4.
+    - Nếu Y_ra - Y_vao == 4: để nguyên dạng YYYY-YYYY.
+    """
+    # 1. Trích xuất năm cấp bằng (Y_ra_s) từ Cột S
+    y_ra_s = None
+    if val_ngay_cap_bang is not None:
+        s_date = str(val_ngay_cap_bang).strip()
+        m_year = re.search(r'\b(19\d{2}|20\d{2})\b', s_date)
+        if m_year:
+            y_ra_s = int(m_year.group(1))
+
+    # 2. Kiểm tra nếu Cột O bị trống
+    is_empty_o = False
+    if val_nien_khoa is None:
+        is_empty_o = True
+    else:
+        s_val = str(val_nien_khoa).strip()
+        if not s_val or s_val.lower() in ("none", "nan", "null", "<na>"):
+            is_empty_o = True
+
+    if is_empty_o:
+        if y_ra_s is not None:
+            return f"{y_ra_s - 4}-{y_ra_s}"
+        return ""
+
+    # 3. Cột O có dữ liệu -> Làm sạch và bóc tách Y_vao, Y_ra
+    s_clean = clean_whitespace(str(val_nien_khoa))
+    s_clean = re.sub(r'\.0+$', '', s_clean)
+
+    # Tìm mẫu 2 số đại diện cho năm vào và năm ra: VD '2016-2020', '2016/2020', '2016 - 2020', '2016-20'
+    m = re.search(r'(\d{4})\s*[-/–—._~]\s*(\d{2,4})', s_clean)
+    if m:
+        y1_str, y2_str = m.groups()
+        y1 = int(y1_str)
+        if len(y2_str) == 2:
+            y2_val = int(y2_str)
+            century = (y1 // 100) * 100
+            if y2_val < (y1 % 100):
+                y2 = century + 100 + y2_val
+            else:
+                y2 = century + y2_val
+        else:
+            y2 = int(y2_str)
+
+        # Kiểm tra hiệu số năm
+        if y2 - y1 == 4:
+            # Nếu Y_ra - Y_vao = 4 thì để nguyên dạng YYYY-YYYY
+            return f"{y1}-{y2}"
+        else:
+            # Nếu Y_ra - Y_vao khác 4: lấy Y_ra từ Cột S và tự tính Y_vao
+            if y_ra_s is not None:
+                return f"{y_ra_s - 4}-{y_ra_s}"
+            return f"{y1}-{y2}"
+
+    # Nếu không khớp mẫu 2 năm (ví dụ chỉ nhập 1 năm hoặc text):
+    # Coi như Y_ra - Y_vao khác 4 -> lấy Y_ra từ Cột S nếu có
+    if y_ra_s is not None:
+        return f"{y_ra_s - 4}-{y_ra_s}"
+
+    return s_clean
+
+
+# ==============================================================================
 # CHUẨN HÓA NGÀY THÁNG
 # ==============================================================================
 def format_date_to_text(value):
@@ -661,7 +729,6 @@ def format_date_to_text(value):
         return ""
 
     if isinstance(value, float):
-        import math
         if math.isnan(value):
             return ""
 
@@ -753,7 +820,7 @@ def stage1_normalize_individual_files():
     print("=" * 80)
 
     print("Đang mở cửa sổ chọn thư mục nguồn...")
-    folder_path = get_folder_path_mac("Chọn thư mục chứa các file Excel nguồn cần chuẩn hóa:")
+    folder_path = get_folder_path("Chọn thư mục chứa các file Excel nguồn cần chuẩn hóa:")
     if not folder_path:
         print("Bạn đã hủy chọn thư mục.")
         return
@@ -775,6 +842,7 @@ def stage1_normalize_individual_files():
         wb_tpl = openpyxl.load_workbook(io.BytesIO(template_bytes))
         ws_tpl = wb_tpl.active
         cached_fonts = get_cached_row_fonts(ws_tpl, ws_tpl.max_row, max_col=28)
+        wb_tpl.close()
     except Exception as e:
         print(f"❌ Lỗi khi đọc file mẫu template.xlsx: {e}")
         return
@@ -815,6 +883,8 @@ def stage1_normalize_individual_files():
         print(f"[{file_idx}/{len(excel_files)}] ĐANG XỬ LÝ FILE: {file_path.name}")
         print("=" * 80)
 
+        wb_in = None
+        wb_out = None
         try:
             wb_in = openpyxl.load_workbook(file_path, data_only=True)
             file_rows = []
@@ -913,6 +983,8 @@ def stage1_normalize_individual_files():
                         new_row_values[11] = map_code_to_text(11, new_row_values[11])
                         # Cột M (Index 12): Nơi sinh (1..75 tỉnh/thành)
                         new_row_values[12] = map_code_to_text(12, new_row_values[12])
+                        # Cột O (Index 14): Niên khóa (chuẩn hóa YYYY-YYYY, đối soát cột S)
+                        new_row_values[14] = normalize_nien_khoa(new_row_values[14], new_row_values[18])
                         # Cột AA (Index 26): Mã đơn vị
                         if unit_code_input:
                             new_row_values[26] = unit_code_input
@@ -962,6 +1034,17 @@ def stage1_normalize_individual_files():
 
         except Exception as e:
             print(f"❌ Lỗi khi xử lý file {file_path.name}: {e}")
+        finally:
+            if wb_in is not None:
+                try:
+                    wb_in.close()
+                except Exception:
+                    pass
+            if wb_out is not None:
+                try:
+                    wb_out.close()
+                except Exception:
+                    pass
 
     # Báo cáo tổng kết Công đoạn 1
     print("\n" + "=" * 80)
@@ -1000,7 +1083,7 @@ def stage2_merge_normalized_files():
     print("=" * 80)
 
     print("Đang mở cửa sổ chọn thư mục chứa file đã chuẩn hóa...")
-    folder_path = get_folder_path_mac("Chọn thư mục chứa file đã chuẩn hóa (thư mục Da_Chuan_Hoa hoặc thư mục nguồn):")
+    folder_path = get_folder_path("Chọn thư mục chứa file đã chuẩn hóa (thư mục Da_Chuan_Hoa hoặc thư mục nguồn):")
     if not folder_path:
         print("Bạn đã hủy chọn thư mục.")
         return
@@ -1057,8 +1140,9 @@ def stage2_merge_normalized_files():
 
     for file_idx, file_path in enumerate(excel_files, start=1):
         print(f"  [{file_idx}/{len(excel_files)}] Đang đọc: {file_path.name} ...", end=" ")
+        wb_in = None
         try:
-            wb_in = openpyxl.load_workbook(file_path)
+            wb_in = openpyxl.load_workbook(file_path, data_only=True)
             ws_in = wb_in['Data'] if 'Data' in wb_in.sheetnames else wb_in.active
 
             # Tìm dòng tiêu đề
@@ -1104,6 +1188,12 @@ def stage2_merge_normalized_files():
 
         except Exception as e:
             print(f"❌ Lỗi khi đọc file {file_path.name}: {e}")
+        finally:
+            if wb_in is not None:
+                try:
+                    wb_in.close()
+                except Exception:
+                    pass
 
     # Đường dẫn lưu file tổng hợp
     save_dir = folder.parent if folder.name == "Da_Chuan_Hoa" else folder
@@ -1123,6 +1213,11 @@ def stage2_merge_normalized_files():
         print("👉 Vui lòng ĐÓNG file trong Excel rồi chạy lại để lưu file tổng hợp.")
     except Exception as e:
         print(f"❌ Lỗi khi lưu file tổng hợp: {e}")
+    finally:
+        try:
+            wb_out.close()
+        except Exception:
+            pass
 
 
 # ==============================================================================
@@ -1142,7 +1237,7 @@ def stage3_filter_unimported_records():
     print("=" * 80)
 
     print("Đang mở cửa sổ chọn file Excel nguồn...")
-    file_path_str = get_file_path_mac("Chọn file Excel chứa các sheet kết quả nhập:")
+    file_path_str = get_file_path("Chọn file Excel chứa các sheet kết quả nhập:")
     if not file_path_str:
         print("Bạn đã hủy chọn file.")
         return
@@ -1166,6 +1261,7 @@ def stage3_filter_unimported_records():
         cached_fonts = get_cached_row_fonts(ws_tpl, ws_tpl.max_row, max_col=28)
         # Thêm font cho cột AC (cột thứ 29)
         cached_fonts.append(Font(name=cached_fonts[0].name, size=cached_fonts[0].size) if cached_fonts and cached_fonts[0] else None)
+        wb_tpl.close()
     except Exception as e:
         print(f"❌ Lỗi khi đọc file mẫu template.xlsx: {e}")
         return
@@ -1327,12 +1423,25 @@ def stage3_filter_unimported_records():
         processed_sheets_count += 1
         print(f"-> Quét {total_sheet_students:>4} dòng | Chưa nhập: {sheet_unimp_count:>3} | Xuất kèm ±5 dòng tham chiếu: {len(sorted_keep_indices):>3}")
 
+    try:
+        wb_in.close()
+    except Exception:
+        pass
+
     M = len(all_kept_rows)
     print("\n" + "-" * 80)
     print(f"TỔNG KẾT: Đã quét {total_scanned_rows} dòng | Đã nhập: {total_imported_rows} | Chưa nhập: {total_unimported_rows} | Tổng xuất ra: {M} dòng.")
     print("-" * 80)
 
+    if M == 0:
+        print("\n" + "=" * 80)
+        print("🎉 THÔNG BÁO: Tất cả học sinh trong các sheet đều ở trạng thái 'Đã nhập'!".center(80))
+        print("Không có bản ghi nào bị lỗi hoặc chưa nhập cần xử lý.")
+        print("=" * 80)
+        return
+
     # Khởi tạo file xuất ra
+    wb_out = None
     try:
         wb_out = openpyxl.load_workbook(io.BytesIO(template_bytes))
         ws_out = wb_out.active
@@ -1414,6 +1523,12 @@ def stage3_filter_unimported_records():
         print("👉 Vui lòng ĐÓNG file trong Excel rồi chạy lại chức năng này.")
     except Exception as e:
         print(f"\n❌ Lỗi khi xuất file Excel: {e}")
+    finally:
+        if wb_out is not None:
+            try:
+                wb_out.close()
+            except Exception:
+                pass
 
 
 # ==============================================================================
@@ -1457,6 +1572,7 @@ def stage4_split_by_school():
         wb_tpl = openpyxl.load_workbook(io.BytesIO(template_bytes))
         ws_tpl = wb_tpl.active
         cached_fonts_28 = get_cached_row_fonts(ws_tpl, ws_tpl.max_row, max_col=28)
+        wb_tpl.close()
     except Exception as e:
         print(f"❌ Lỗi khi đọc file mẫu template.xlsx: {e}")
         return
@@ -1595,6 +1711,11 @@ def stage4_split_by_school():
         col_letter = get_col_letter(school_col_idx)
         print(f"-> Trích xuất được {sheet_student_count:>4} học sinh (Cột trường: {col_letter}).")
 
+    try:
+        wb_in.close()
+    except Exception:
+        pass
+
     if total_students_found == 0:
         print("\n⚠️ Không tìm thấy dòng dữ liệu học sinh nào trong file Excel đã chọn!")
         return
@@ -1702,6 +1823,11 @@ def stage4_split_by_school():
         except Exception as e:
             print(f"  [{idx:>2}/{len(school_groups)}] ❌ Lỗi khi xuất file '{file_name}': {e}")
             error_count += 1
+        finally:
+            try:
+                wb_out.close()
+            except Exception:
+                pass
 
     print("\n" + "=" * 80)
     print(" HOÀN THÀNH TÁCH FILE THEO TÊN TRƯỜNG ".center(80, "="))

@@ -21,3 +21,9 @@ dist/
 # Microsoft Excel temp files
 ~$*.xlsx
 ~$*.xls
+
+# Thư mục và file dữ liệu xuất ra của chương trình
+Da_Chuan_Hoa/
+Tach_Theo_Truong/
+*_TongHop.xlsx
+KetQuaNhap*.xlsx
