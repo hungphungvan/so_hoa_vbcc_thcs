@@ -281,27 +281,333 @@ def get_file_format_info(ws):
 
     return "INVALID", [], None
 
+# ==============================================================================
+# DANH MỤC ÁNH XẠ MÃ SỐ SANG VĂN BẢN (4 SHEET CHUẨN)
+# ==============================================================================
+GENDER_MAP = {
+    1: "Nam",
+    2: "Khác",
+    3: "Nữ"
+}
+
+ETHNIC_MAP = {
+    1: "Mạ",
+    2: "Kháng",
+    3: "Hà Nhì",
+    4: "Hrê",
+    5: "Lào",
+    6: "Mường",
+    7: "Chu-ru",
+    8: "Mnông",
+    9: "Ra-glai",
+    10: "Cống",
+    11: "Bru-Vân Kiều",
+    12: "Si La",
+    13: "Xinh-mun",
+    14: "La Hủ",
+    15: "Khác",
+    16: "Dao",
+    17: "Xtiêng",
+    18: "Lự",
+    19: "Pu Péo",
+    20: "Bố Y",
+    21: "Cơ-tu",
+    22: "Phù Lá",
+    23: "Chăm",
+    24: "Gia-rai",
+    25: "Ba-na",
+    26: "Ngái",
+    27: "Co",
+    28: "Sán Chay",
+    29: "Kinh",
+    30: "Ơ-đu",
+    31: "Chứt",
+    32: "Rơ-măm",
+    33: "Thái",
+    34: "La Ha",
+    35: "La-chí",
+    36: "Giáy",
+    37: "Ê-đê",
+    38: "Sán Dìu",
+    39: "Gié-Triêng",
+    40: "Mảng",
+    41: "Nùng",
+    42: "LôLô",
+    43: "Brâu",
+    44: "Chơ-ro",
+    45: "Thổ",
+    46: "Khơmú",
+    47: "Ta-ôi",
+    48: "H'Mông",
+    49: "Pà Thẻn",
+    50: "Tày",
+    51: "Cờ lao"
+}
+
+NATIONALITY_MAP = {
+    1: "Lit-va",
+    2: "Kê-nia",
+    3: "Hy Lạp",
+    4: "Dăm-bia",
+    5: "Vê-nê-xu-ê-la",
+    6: "CH Trung Phi",
+    7: "Cô-lôm-bi-a",
+    8: "Nam-mi-bia",
+    9: "Thụy Sỹ",
+    10: "Et-to-ni",
+    11: "Giooc-đa-ni",
+    12: "Cooxxta Rica",
+    13: "Na Uy",
+    14: "I-ra-li-a",
+    15: "Xu-đăng",
+    16: "Dominica",
+    17: "Pa-Ki-xtan",
+    18: "Ka-dắc-xtan",
+    19: "Li Băng",
+    20: "Áp-ga-ni-xtan",
+    21: "Turkmênistan",
+    22: "Phần Lan",
+    23: "Quatar",
+    24: "Vương Quốc Anh",
+    25: "Sri-lan-ka",
+    26: "Ê-cu-a-đo",
+    27: "Goa-tê-ma-la",
+    28: "Công-Kinshasa",
+    29: "Ả rập Xê út",
+    30: "Pa-na-ma",
+    31: "Hà Lan",
+    32: "CHDCND Lào",
+    33: "Ma-la0uy",
+    34: "Ma-na-cô",
+    35: "Guy-a-na",
+    36: "Pa-pua Niu Ghi - nê",
+    37: "Gam-bi-a",
+    38: "Ha-i-ti",
+    39: "Libi",
+    40: "Thái Lan",
+    41: "Môn-đô-va",
+    42: "Căm-Pu-Chia",
+    43: "Úc",
+    44: "Đài Loan",
+    45: "Tây Ban Nha",
+    46: "Nam phi",
+    47: "Bồ Đào Nha",
+    48: "No-giê",
+    49: "Gha-na",
+    50: "I-rắc",
+    51: "Ni Di Lân",
+    52: "Ca-na-đa",
+    53: "Bu-run-đi",
+    54: "CHND Trung Hoa",
+    55: "Tat-gi-ki-xtan",
+    56: "Dim-ba-buê",
+    57: "Mi-cờ-rô-nê-xia-a",
+    58: "Ru-ma-no",
+    59: "Nga",
+    60: "Phi-li-pin",
+    61: "Croát-chia-a",
+    62: "Be-lo-rut-xia",
+    63: "Sat",
+    64: "Ba-ranh",
+    65: "U-krai-na",
+    66: "En Xan-va-đo",
+    67: "Buốc-ki-na-pha-xô",
+    68: "Ma Rốc",
+    69: "Liên Bang Nga",
+    70: "Cư-rơ-gư-dơ-xtan",
+    71: "I-ran",
+    72: "Pu-ec-to Ri-cô",
+    73: "Nê-Pan",
+    74: "My-an-ma",
+    75: "Quần đảo Sô-lô-môn",
+    76: "Cô-oét",
+    77: "Ôn-đu-rát",
+    78: "Hàn Quốc",
+    79: "U-dơ-bê-ki-xtan",
+    80: "Tôn-ga",
+    81: "Sec-bi-a",
+    82: "Ma-đa-gát-xka",
+    83: "Việt Nam",
+    84: "Ma-lai-xi-a",
+    85: "Man-đi-vơ",
+    86: "Hung-ga-ri",
+    87: "Tan-da-nia",
+    88: "Thụy Điển",
+    89: "Việt Nam",
+    90: "Ma Cao",
+    91: "Mỹ",
+    92: "Ma-li",
+    93: "Các Tiểu vương quốc Ả Rập Thống Nhất",
+    94: "Tu-va-lu",
+    95: "Li-bê-ri-a",
+    96: "B-ru-nây",
+    97: "I-xra-en",
+    98: "U-ru-goay",
+    99: "Phi-Ghi",
+    100: "Cuba",
+    101: "Ai-xlen",
+    102: "Latvia",
+    103: "Hồng Công",
+    104: "Xê nê gan",
+    105: "Man-ta",
+    106: "Pa-ra-goay",
+    107: "Mông-tê-nê-groo",
+    108: "Thổ Nhĩ Kỳ",
+    109: "Mông Cổ",
+    110: "Mê hi cô",
+    111: "Đông -ti-mo",
+    112: "Quần đảo Ma-rơ-san",
+    113: "Slô-vac-ki-a",
+    114: "Ô man",
+    115: "Gru-dia",
+    116: "An giê ri",
+    117: "Ki-ri-ba-ti",
+    118: "Ấn Độ",
+    119: "Ni-ca-ra-goa",
+    120: "Pê - ru",
+    121: "Ruanđa",
+    122: "Gia-mai-ca",
+    123: "Bun-ga-ri",
+    124: "Luc-xem-bua",
+    125: "Ba Lan",
+    126: "Nam Xu-đăng",
+    127: "Chi lê",
+    128: "Xi-ga-po",
+    129: "U-gan-da",
+    130: "Nhật Bản",
+    131: "Si-ri-a",
+    132: "A-rơ-len",
+    133: "Ghi nê",
+    134: "Tuy-ni-di",
+    135: "Áo",
+    136: "Đan Mạch",
+    137: "Sô-ma-li",
+    138: "Mau-ri-ti-út",
+    139: "Cộng hòa Séc",
+    140: "Đức",
+    141: "To-go",
+    142: "Pháp",
+    143: "Va-nu-a-tu",
+    144: "Palestine",
+    145: "A-déc-bai-gian",
+    146: "Ăng -gô-la",
+    147: "Can-mơ-run",
+    148: "Lit-ten-xten",
+    149: "Tây Sa-moa",
+    150: "Ma-xê-đô-ni-a",
+    151: "Ni-giê-ri-a",
+    152: "Y-ê-men",
+    153: "In-đô-nê-xi-a",
+    154: "Mô-dăm-bich",
+    155: "Ac-hen-ti-na",
+    156: "Xi-ê-a Lê- ôn",
+    157: "Slô-ven-ni-a",
+    158: "Triều Tiên",
+    159: "Ai cập"
+}
+
+BIRTHPLACE_MAP = {
+    1: "Tỉnh Bắc Ninh",
+    2: "Tỉnh Bà Rịa - Vũng Tàu",
+    3: "Thành phố Hải Phòng",
+    4: "Tỉnh Lâm Đồng",
+    5: "Tỉnh Phú Yên",
+    6: "Tỉnh Thái Nguyên",
+    7: "Tỉnh Đắk Lắk",
+    8: "Tỉnh Kon Tum",
+    9: "Tỉnh Nghệ Tĩnh",
+    10: "Tỉnh Long An",
+    11: "Tỉnh Vĩnh Phúc",
+    12: "Tỉnh Yên Bái",
+    13: "Tỉnh Thừa Thiên Huế",
+    14: "Tỉnh Quảng Nam",
+    15: "Tỉnh Hà Tây",
+    16: "Tỉnh Bình Trị Thiên",
+    17: "Tỉnh Trà Vinh",
+    18: "Tỉnh Hà Nam Ninh",
+    19: "Tỉnh Ninh Bình",
+    20: "Tỉnh Lạng Sơn",
+    21: "Tỉnh Quảng Ninh",
+    22: "Tỉnh Quảng Bình",
+    23: "Tỉnh Gia Lai",
+    24: "Tỉnh Đồng Tháp",
+    25: "Tỉnh Tiền Giang",
+    26: "Thành phố Hà Nội",
+    27: "Tỉnh Phú Khánh",
+    28: "Tỉnh Bình Dương",
+    29: "Tỉnh Bắc Giang",
+    30: "Tỉnh Bắc Kạn",
+    31: "Tỉnh Phú Thọ",
+    32: "Tỉnh Hà Giang",
+    33: "Tỉnh Minh Hải",
+    34: "Tỉnh Hà Bắc",
+    35: "Tỉnh Quảng Ngãi",
+    36: "Tỉnh Đồng Nai",
+    37: "Tỉnh Hoà Bình",
+    38: "Tỉnh Thái Bình",
+    39: "Tỉnh Điện Biên",
+    40: "Tỉnh Bình Định",
+    41: "Tỉnh Lào Cai",
+    42: "Tỉnh Hải Hưng",
+    43: "Tỉnh Đắk Nông",
+    44: "Tỉnh Hải Dương",
+    45: "Tỉnh Hưng Yên",
+    46: "Tỉnh Kiên Giang",
+    47: "Thành phố Cần Thơ",
+    48: "Thành phố Hồ Chí Minh",
+    49: "Tỉnh Bạc Liêu",
+    50: "Tỉnh Lai Châu",
+    51: "Tỉnh Cà Mau",
+    52: "Tỉnh Hà Sơn Bình",
+    53: "Tỉnh Quảng Trị",
+    54: "Tỉnh An Giang",
+    55: "Thành phố Đà Nẵng",
+    56: "Tỉnh Cao Bằng",
+    57: "Tỉnh Tuyên Quang",
+    58: "Tỉnh Nghệ An",
+    59: "Tỉnh Bình Thuận",
+    60: "Tỉnh Sơn La",
+    61: "Tỉnh Bến Tre",
+    62: "Tỉnh Khánh Hòa",
+    63: "Tỉnh Vĩnh Phú",
+    64: "Tỉnh Ninh Thuận",
+    65: "Tỉnh Hà Nam",
+    66: "Tỉnh Bình Phước",
+    67: "Tỉnh Tây Ninh",
+    68: "Tỉnh Nam Định",
+    69: "Tỉnh Sông Bé",
+    70: "Tỉnh Hà Tĩnh",
+    71: "Tỉnh Thanh Hóa",
+    72: "Tỉnh Bắc Thái",
+    73: "Tỉnh Vĩnh Long",
+    74: "Tỉnh Sóc Trăng",
+    75: "Tỉnh Hậu Giang"
+}
+
 def map_code_to_text(col_idx, value):
     """
-    Chuyển đổi mã số sang văn bản theo quy định:
-    - Cột J (Index 9 - Giới tính): 1 -> 'Nam', 2 -> 'Khác', 3 -> 'Nữ'
-    - Cột K (Index 10 - Dân tộc): 29 -> 'Kinh'
+    Chuyển đổi mã số sang văn bản theo 4 danh mục chuẩn:
+    - Cột J (Index 9 - Giới tính): 1 -> Nam, 2 -> Khác, 3 -> Nữ
+    - Cột K (Index 10 - Dân tộc): 1..51 -> Tên dân tộc (29 -> Kinh)
+    - Cột L (Index 11 - Quốc tịch): 1..159 -> Tên quốc tịch (83, 89 -> Việt Nam)
+    - Cột M (Index 12 - Nơi sinh): 1..75 -> Tên tỉnh/thành phố
+    Nếu giá trị đã là tên chữ hoặc không có trong danh mục, giữ nguyên giá trị hợp lệ.
     """
     if value is None:
         return ""
     s_val = str(value).strip()
+    if not s_val or s_val.lower() in ("none", "nan", "null", "<na>"):
+        return ""
+
+    # Loại bỏ phần thập phân .0 nếu là số nguyên lưu dạng float (ví dụ: 1.0 -> 1, 29.0 -> 29)
     s_clean = re.sub(r'\.0+$', '', s_val)
 
-    # Cột J: Giới tính
+    # 1. Cột J (Index 9): Giới tính
     if col_idx == 9:
         if s_clean.isdigit():
             c_num = int(s_clean)
-            if c_num == 1:
-                return "Nam"
-            elif c_num == 2:
-                return "Khác"
-            elif c_num == 3:
-                return "Nữ"
+            if c_num in GENDER_MAP:
+                return GENDER_MAP[c_num]
         s_lower = s_clean.lower()
         if s_lower == "nam":
             return "Nam"
@@ -309,13 +615,35 @@ def map_code_to_text(col_idx, value):
             return "Nữ"
         elif s_lower in ["khác", "khac"]:
             return "Khác"
+        return s_val
 
-    # Cột K: Dân tộc
+    # 2. Cột K (Index 10): Dân tộc
     elif col_idx == 10:
-        if s_clean.isdigit() and int(s_clean) == 29:
-            return "Kinh"
+        if s_clean.isdigit():
+            c_num = int(s_clean)
+            if c_num in ETHNIC_MAP:
+                return ETHNIC_MAP[c_num]
         if s_clean.lower() == "kinh":
             return "Kinh"
+        return s_val
+
+    # 3. Cột L (Index 11): Quốc tịch
+    elif col_idx == 11:
+        if s_clean.isdigit():
+            c_num = int(s_clean)
+            if c_num in NATIONALITY_MAP:
+                return NATIONALITY_MAP[c_num]
+        if s_clean.lower() in ["việt nam", "viet nam", "vn"]:
+            return "Việt Nam"
+        return s_val
+
+    # 4. Cột M (Index 12): Nơi sinh
+    elif col_idx == 12:
+        if s_clean.isdigit():
+            c_num = int(s_clean)
+            if c_num in BIRTHPLACE_MAP:
+                return BIRTHPLACE_MAP[c_num]
+        return s_val
 
     return value
 
@@ -579,8 +907,12 @@ def stage1_normalize_individual_files():
                         new_row_values[24] = "Đã số hóa đầy đủ, chính xác"
                         # Cột J (Index 9): Giới tính (1->Nam, 2->Khác, 3->Nữ)
                         new_row_values[9] = map_code_to_text(9, new_row_values[9])
-                        # Cột K (Index 10): Dân tộc (29->Kinh)
+                        # Cột K (Index 10): Dân tộc (1..51, 29->Kinh)
                         new_row_values[10] = map_code_to_text(10, new_row_values[10])
+                        # Cột L (Index 11): Quốc tịch (1..159, 83/89->Việt Nam)
+                        new_row_values[11] = map_code_to_text(11, new_row_values[11])
+                        # Cột M (Index 12): Nơi sinh (1..75 tỉnh/thành)
+                        new_row_values[12] = map_code_to_text(12, new_row_values[12])
                         # Cột AA (Index 26): Mã đơn vị
                         if unit_code_input:
                             new_row_values[26] = unit_code_input
