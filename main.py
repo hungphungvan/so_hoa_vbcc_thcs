@@ -805,14 +805,84 @@ def format_date_to_text(value):
     return val_norm
 
 
+def is_valid_dmy(val):
+    """Kiểm tra chuỗi có đúng chuẩn dd/MM/yyyy hợp lệ thực tế không."""
+    if not val or not isinstance(val, str):
+        return False
+    m = re.match(r'^(\d{2})/(\d{2})/(\d{4})$', val.strip())
+    if not m:
+        return False
+    d, m, y = map(int, m.groups())
+    if not (1900 <= y <= 2100):
+        return False
+    try:
+        datetime.date(y, m, d)
+        return True
+    except ValueError:
+        return False
+
+
+def prompt_fix_date(file_name, sheet_name, row_idx, student_name, stt_val, field_name, raw_val, current_norm_val, date_cache):
+    """
+    Hiển thị thông báo và cho phép người dùng nhập tay ngày tháng nếu chưa đúng dạng dd/MM/yyyy.
+    Hỗ trợ nhớ kết quả đã nhập (date_cache) để tự động áp dụng cho các dòng sau có cùng giá trị lỗi.
+    Trả về: (new_val, skip_all)
+    """
+    raw_key = (field_name, clean_whitespace(str(raw_val)))
+    if raw_key in date_cache:
+        cached_val = date_cache[raw_key]
+        return cached_val, False
+
+    raw_display = str(raw_val).strip() if raw_val is not None else "(Trống)"
+    curr_display = str(current_norm_val).strip() if current_norm_val else "(Chưa xác định)"
+
+    print("\n" + "-" * 80)
+    print("⚠️  PHÁT HIỆN NGÀY THÁNG CHƯA ĐÚNG ĐỊNH DẠNG dd/MM/yyyy")
+    print(f"   • Tệp nguồn : {file_name} (Sheet: '{sheet_name}', Dòng: {row_idx})")
+    print(f"   • Học sinh  : {student_name} (STT: {stt_val})")
+    print(f"   • Trường sai: [ {field_name} ]")
+    print(f"   • Giá trị gốc trong file Excel : '{raw_display}'")
+    print(f"   • Kết quả tự động chuẩn hóa   : '{curr_display}'")
+    print("-" * 80)
+
+    while True:
+        prompt_text = (
+            "👉 Nhập ngày chuẩn dd/MM/yyyy (hoặc gõ ddmmyyyy)\n"
+            "   [Bấm Enter để giữ nguyên | Gõ 'all' để bỏ qua tất cả các lỗi sau]: "
+        )
+        try:
+            user_input = input(prompt_text).strip()
+        except (KeyboardInterrupt, EOFError):
+            print("\n   -> Bỏ qua nhập tay.")
+            return current_norm_val, True
+
+        if not user_input:
+            # Bấm Enter để giữ nguyên
+            date_cache[raw_key] = current_norm_val
+            return current_norm_val, False
+
+        if user_input.lower() in ["all", "skip", "bo qua", "bỏ qua"]:
+            print("   -> Đã chọn bỏ qua tất cả cảnh báo nhập tay còn lại.")
+            return current_norm_val, True
+
+        # Thử chuẩn hóa chuỗi người dùng nhập (ví dụ gõ 5/6/2005 hoặc 05062005)
+        formatted = format_date_to_text(user_input)
+        if is_valid_dmy(formatted):
+            print(f"   ✅ Đã cập nhật {field_name}: {formatted}")
+            date_cache[raw_key] = formatted
+            return formatted, False
+        else:
+            print(f"   ⚠️ Giá trị '{user_input}' chưa đúng dạng dd/MM/yyyy hợp lệ. Vui lòng nhập lại (hoặc bấm Enter để bỏ qua):")
+
+
 # ==============================================================================
 # CÔNG ĐOẠN 1: CHUẨN HÓA TIÊU ĐỀ & DỮ LIỆU TỪNG FILE LẺ
 # ==============================================================================
 def stage1_normalize_individual_files():
     """
     Quét từng file nguồn (thứ tự ABC), chuẩn hóa tiêu đề và dữ liệu về dạng 28 cột.
-    Chuẩn hóa ngày sinh và ngày cấp bằng.
-    Tự động tô màu vàng vào các ô bị thiếu dữ liệu (chạy tự động 100%, không hỏi tương tác).
+    Chuẩn hóa ngày sinh và ngày cấp bằng (hiển thị giá trị gốc và dấu nhắc nhập tay nếu ngày chưa đúng chuẩn dd/MM/yyyy).
+    Tự động tô màu vàng vào các ô bị thiếu dữ liệu.
     Xuất file lẻ cho từng file nguồn vào thư mục 'Da_Chuan_Hoa'.
     """
     print("\n" + "=" * 80)
@@ -877,6 +947,8 @@ def stage1_normalize_individual_files():
     processed_files_count = 0
     total_rows_extracted = 0
     skipped_sheets_summary = []
+    skip_all_date_prompt = False
+    date_cache = {}
 
     for file_idx, file_path in enumerate(excel_files, start=1):
         print("\n" + "=" * 80)
@@ -955,15 +1027,38 @@ def stage1_normalize_individual_files():
                         while len(row_values) < required_len:
                             row_values.append(None)
 
+                        clean_stt = int(cell_a_val) if isinstance(cell_a_val, (int, float)) and float(cell_a_val).is_integer() else str(cell_a_val or '')
+
                         # Chuẩn hóa Ngày sinh (Cột I -> Index 8)
+                        raw_dob = row[8].value if len(row) > 8 else None
                         row_values[8] = format_date_to_text(row_values[8])
+                        if not skip_all_date_prompt and not is_valid_dmy(row_values[8]) and not is_cell_empty(raw_dob):
+                            row_values[8], skip_all_date_prompt = prompt_fix_date(
+                                file_path.name, ws_in.title, row_idx,
+                                name_cell_str, clean_stt,
+                                "Ngày sinh", raw_dob, row_values[8], date_cache
+                            )
 
                         # Cắt bỏ 3 cột Q, R, S nếu là dạng AE và chuẩn hóa Ngày cấp bằng
                         if remove_qrs:
+                            raw_grad = row[21].value if len(row) > 21 else None
                             row_values[21] = format_date_to_text(row_values[21])
+                            if not skip_all_date_prompt and not is_valid_dmy(row_values[21]) and not is_cell_empty(raw_grad):
+                                row_values[21], skip_all_date_prompt = prompt_fix_date(
+                                    file_path.name, ws_in.title, row_idx,
+                                    name_cell_str, clean_stt,
+                                    "Ngày cấp bằng", raw_grad, row_values[21], date_cache
+                                )
                             new_row_values = (row_values[:16] + row_values[19:])[:28]
                         else:
+                            raw_grad = row[18].value if len(row) > 18 else None
                             row_values[18] = format_date_to_text(row_values[18])
+                            if not skip_all_date_prompt and not is_valid_dmy(row_values[18]) and not is_cell_empty(raw_grad):
+                                row_values[18], skip_all_date_prompt = prompt_fix_date(
+                                    file_path.name, ws_in.title, row_idx,
+                                    name_cell_str, clean_stt,
+                                    "Ngày cấp bằng", raw_grad, row_values[18], date_cache
+                                )
                             new_row_values = row_values[:28]
 
                         while len(new_row_values) < 28:
@@ -1851,7 +1946,7 @@ def main():
         print("=" * 75)
         print("  [1] Chuẩn hóa hàng tiêu đề và dữ liệu")
         print("      -> Quét từng file nguồn (thứ tự ABC) & chuẩn hóa cấu trúc 28 cột")
-        print("      -> Chuẩn hóa ngày sinh và ngày cấp bằng về dạng dd/MM/yyyy")
+        print("      -> Chuẩn hóa ngày sinh và ngày cấp bằng (nhắc nhập tay nếu ngày chưa chuẩn)")
         print("      -> Tự động tô màu vàng vào các ô/cột bị thiếu dữ liệu")
         print("      -> Xuất các file Excel lẻ đã chuẩn hóa vào thư mục 'Da_Chuan_Hoa'")
         print()
