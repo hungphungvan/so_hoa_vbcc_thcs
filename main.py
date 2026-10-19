@@ -700,10 +700,13 @@ def normalize_nien_khoa(val_nien_khoa, val_ngay_cap_bang=None):
     """
     Chuẩn hóa sơ bộ Niên khóa (Cột O):
     Nếu bóc tách được 2 năm có Y_ra - Y_vao = 4 thì trả về định dạng YYYY-YYYY.
+    Nếu bóc tách được 2 năm nhưng hiệu khác 4, vẫn chuẩn hóa về dạng YYYY-YYYY để rà soát.
     Nếu không, giữ nguyên chuỗi gốc đã làm sạch.
     """
     is_valid, y1, y2, fmt = parse_nien_khoa(val_nien_khoa)
     if is_valid:
+        return fmt
+    if y1 and y2:
         return fmt
     return clean_whitespace(str(val_nien_khoa)) if val_nien_khoa is not None else ""
 
@@ -1143,10 +1146,34 @@ def prompt_fix_nien_khoa_with_context(
     Trả về: (new_val, skip_all)
     """
     cache_key = clean_whitespace(str(raw_val)) if raw_val is not None else ""
+    norm_key = clean_whitespace(str(current_norm_val)) if current_norm_val is not None else ""
+
     if cache_key in nien_khoa_cache:
         cached_val = nien_khoa_cache[cache_key]
         print(f"   ⚡ Tự động áp dụng Niên khóa đã nhớ cho '{raw_val if raw_val is not None else '(Trống)'}': {cached_val}")
         return cached_val, False
+
+    if norm_key and norm_key in nien_khoa_cache:
+        cached_val = nien_khoa_cache[norm_key]
+        print(f"   ⚡ Tự động áp dụng Niên khóa đã nhớ cho '{current_norm_val}': {cached_val}")
+        return cached_val, False
+
+    # Xác định giá trị mặc định của Y_ra từ cặp Y_vao - Y_ra sau chuẩn hóa
+    default_y_ra = None
+    default_nk = None
+
+    is_valid, y1, y2, fmt_nk = parse_nien_khoa(current_norm_val)
+    if not y2:
+        is_valid, y1, y2, fmt_nk = parse_nien_khoa(raw_val)
+
+    if y2:
+        default_y_ra = y2
+        default_nk = f"{default_y_ra - 4}-{default_y_ra}"
+    else:
+        m_single = re.search(r'\b(19\d{2}|20\d{2})\b', str(current_norm_val or raw_val or ""))
+        if m_single:
+            default_y_ra = int(m_single.group(1))
+            default_nk = f"{default_y_ra - 4}-{default_y_ra}"
 
     raw_display = str(raw_val).strip() if raw_val is not None else "(Trống)"
     curr_display = str(current_norm_val).strip() if current_norm_val else "(Trống)"
@@ -1158,6 +1185,8 @@ def prompt_fix_nien_khoa_with_context(
     print(f"   • Trường sai: [ Niên khóa ]")
     print(f"   • Giá trị gốc trong file Excel : '{raw_display}'")
     print(f"   • Kết quả hiện tại             : '{curr_display}'")
+    if default_nk:
+        print(f"   • Mặc định Y_ra = {default_y_ra}        -> Niên khóa chuẩn: '{default_nk}'")
     print("-" * 95)
 
     if adjacent_records:
@@ -1187,10 +1216,16 @@ def prompt_fix_nien_khoa_with_context(
 
         print("└───┴──────┴────────────────────────┴──────────────┴─────────────┴────────────────┴─────────────────────────┘")
 
-    prompt_text = (
-        "\n👉 Nhập Năm ra trường (ví dụ: 2020) hoặc Niên khóa (ví dụ: 2016-2020)\n"
-        "   [Bấm Enter để giữ nguyên | Gõ 'all' để bỏ qua tất cả các lỗi sau]: "
-    )
+    if default_nk:
+        prompt_text = (
+            f"\n👉 Nhập Năm ra trường (ví dụ: {default_y_ra}) hoặc Niên khóa (ví dụ: {default_nk})\n"
+            f"   [Bấm Enter để lấy mặc định {default_nk} | Gõ 'all' để bỏ qua tất cả các lỗi sau]: "
+        )
+    else:
+        prompt_text = (
+            "\n👉 Nhập Năm ra trường (ví dụ: 2020) hoặc Niên khóa (ví dụ: 2016-2020)\n"
+            "   [Bấm Enter để giữ nguyên | Gõ 'all' để bỏ qua tất cả các lỗi sau]: "
+        )
 
     while True:
         try:
@@ -1199,10 +1234,19 @@ def prompt_fix_nien_khoa_with_context(
             print("\n   -> Bỏ qua nhập tay.")
             return current_norm_val, True
 
-        if not user_input:
-            # Bấm Enter để giữ nguyên
-            nien_khoa_cache[cache_key] = current_norm_val
-            return current_norm_val, False
+        if not user_input or (default_nk and user_input.lower() in ["y", "yes", "c", "co", "có", "ok"]):
+            # Bấm Enter (hoặc 'y'): Lấy giá trị mặc định theo Y_ra nếu có
+            if default_nk:
+                print(f"   ✅ Đã lấy Niên khóa mặc định theo Y_ra ({default_y_ra}): {default_nk} (đã ghi nhớ)")
+                if cache_key:
+                    nien_khoa_cache[cache_key] = default_nk
+                if norm_key:
+                    nien_khoa_cache[norm_key] = default_nk
+                return default_nk, False
+            else:
+                if cache_key:
+                    nien_khoa_cache[cache_key] = current_norm_val
+                return current_norm_val, False
 
         if user_input.lower() in ["all", "skip", "bo qua", "bỏ qua"]:
             print("   -> Đã chọn bỏ qua tất cả cảnh báo nhập tay còn lại.")
@@ -1215,7 +1259,10 @@ def prompt_fix_nien_khoa_with_context(
             y_vao = y_ra - 4
             fmt = f"{y_vao}-{y_ra}"
             print(f"   ✅ Đã tự tính Niên khóa: {fmt} (từ năm ra trường {y_ra}, đã ghi nhớ)")
-            nien_khoa_cache[cache_key] = fmt
+            if cache_key:
+                nien_khoa_cache[cache_key] = fmt
+            if norm_key:
+                nien_khoa_cache[norm_key] = fmt
             return fmt, False
 
         m_2 = re.match(r'^(\d{2})$', user_input)
@@ -1225,20 +1272,30 @@ def prompt_fix_nien_khoa_with_context(
             y_vao = y_ra - 4
             fmt = f"{y_vao}-{y_ra}"
             print(f"   ✅ Đã tự tính Niên khóa: {fmt} (từ năm ra trường {y_ra}, đã ghi nhớ)")
-            nien_khoa_cache[cache_key] = fmt
+            if cache_key:
+                nien_khoa_cache[cache_key] = fmt
+            if norm_key:
+                nien_khoa_cache[norm_key] = fmt
             return fmt, False
 
         # 2. Hỗ trợ gõ đầy đủ dạng 2 năm (ví dụ: 2016-2020, 2016 2020, 2016/2020...)
         is_valid, y1, y2, fmt = parse_nien_khoa(user_input)
         if is_valid:
             print(f"   ✅ Đã cập nhật Niên khóa: {fmt} (đã ghi nhớ cho các dòng tương tự)")
-            nien_khoa_cache[cache_key] = fmt
+            if cache_key:
+                nien_khoa_cache[cache_key] = fmt
+            if norm_key:
+                nien_khoa_cache[norm_key] = fmt
             return fmt, False
         else:
             if y1 is not None and y2 is not None:
-                print(f"   ⚠️ Giá trị '{user_input}' có hiệu số {y2} - {y1} = {y2 - y1} (khác 4). Vui lòng nhập lại (hoặc bấm Enter để giữ nguyên):")
+                err_msg = f"   ⚠️ Giá trị '{user_input}' có hiệu số {y2} - {y1} = {y2 - y1} (khác 4)."
+                if default_nk:
+                    print(f"{err_msg} Vui lòng nhập lại (hoặc bấm Enter để lấy mặc định {default_nk}):")
+                else:
+                    print(f"{err_msg} Vui lòng nhập lại:")
             else:
-                print(f"   ⚠️ Giá trị '{user_input}' chưa hợp lệ. Vui lòng gõ Năm ra trường (ví dụ: 2020) hoặc Niên khóa (ví dụ: 2016-2020):")
+                print(f"   ⚠️ Giá trị '{user_input}' chưa hợp lệ. Vui lòng gõ Năm ra trường (ví dụ: {default_y_ra or 2020}) hoặc Niên khóa (ví dụ: {default_nk or '2016-2020'}):")
 
 
 # ==============================================================================
