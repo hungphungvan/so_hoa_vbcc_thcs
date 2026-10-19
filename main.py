@@ -658,41 +658,22 @@ def map_code_to_text(col_idx, value):
 # ==============================================================================
 # CHUẨN HÓA & ĐỐI SOÁT NIÊN KHÓA (CỘT O) VÀ NGÀY CẤP BẰNG (CỘT S)
 # ==============================================================================
-def normalize_nien_khoa(val_nien_khoa, val_ngay_cap_bang):
+def parse_nien_khoa(val_nien_khoa):
     """
-    Chuẩn hóa Niên khóa (Cột O) và kiểm tra sự phù hợp với Ngày cấp bằng (Cột S):
+    Kiểm tra và bóc tách Niên khóa (Cột O):
     - Chuẩn hóa về dạng YYYY-YYYY.
-    - Nếu Cột O trống: lấy Y_ra từ Cột S và tự tính Y_vao = Y_ra - 4.
-    - Nếu Y_ra - Y_vao != 4: lấy Y_ra từ Cột S và tự tính Y_vao = Y_ra - 4.
-    - Nếu Y_ra - Y_vao == 4: để nguyên dạng YYYY-YYYY.
+    - Trả về: (is_valid_diff_4, y_vao, y_ra, formatted_str)
+      Nếu hiệu Y_ra - Y_vao == 4: is_valid_diff_4 = True.
     """
-    # 1. Trích xuất năm cấp bằng (Y_ra_s) từ Cột S
-    y_ra_s = None
-    if val_ngay_cap_bang is not None:
-        s_date = str(val_ngay_cap_bang).strip()
-        m_year = re.search(r'\b(19\d{2}|20\d{2})\b', s_date)
-        if m_year:
-            y_ra_s = int(m_year.group(1))
-
-    # 2. Kiểm tra nếu Cột O bị trống
-    is_empty_o = False
     if val_nien_khoa is None:
-        is_empty_o = True
-    else:
-        s_val = str(val_nien_khoa).strip()
-        if not s_val or s_val.lower() in ("none", "nan", "null", "<na>"):
-            is_empty_o = True
+        return False, None, None, ""
+    s_val = str(val_nien_khoa).strip()
+    if not s_val or s_val.lower() in ("none", "nan", "null", "<na>"):
+        return False, None, None, ""
 
-    if is_empty_o:
-        if y_ra_s is not None:
-            return f"{y_ra_s - 4}-{y_ra_s}"
-        return ""
-
-    # 3. Cột O có dữ liệu -> Làm sạch và bóc tách Y_vao, Y_ra
-    s_clean = clean_whitespace(str(val_nien_khoa))
+    s_clean = clean_whitespace(s_val)
     s_clean = re.sub(r'\.0+$', '', s_clean)
 
-    # Tìm mẫu 2 số đại diện cho năm vào và năm ra: VD '2016-2020', '2016/2020', '2016 - 2020', '2016-20'
     m = re.search(r'(\d{4})\s*[-/–—._~]\s*(\d{2,4})', s_clean)
     if m:
         y1_str, y2_str = m.groups()
@@ -707,22 +688,24 @@ def normalize_nien_khoa(val_nien_khoa, val_ngay_cap_bang):
         else:
             y2 = int(y2_str)
 
-        # Kiểm tra hiệu số năm
         if y2 - y1 == 4:
-            # Nếu Y_ra - Y_vao = 4 thì để nguyên dạng YYYY-YYYY
-            return f"{y1}-{y2}"
+            return True, y1, y2, f"{y1}-{y2}"
         else:
-            # Nếu Y_ra - Y_vao khác 4: lấy Y_ra từ Cột S và tự tính Y_vao
-            if y_ra_s is not None:
-                return f"{y_ra_s - 4}-{y_ra_s}"
-            return f"{y1}-{y2}"
+            return False, y1, y2, f"{y1}-{y2}"
 
-    # Nếu không khớp mẫu 2 năm (ví dụ chỉ nhập 1 năm hoặc text):
-    # Coi như Y_ra - Y_vao khác 4 -> lấy Y_ra từ Cột S nếu có
-    if y_ra_s is not None:
-        return f"{y_ra_s - 4}-{y_ra_s}"
+    return False, None, None, s_clean
 
-    return s_clean
+
+def normalize_nien_khoa(val_nien_khoa, val_ngay_cap_bang=None):
+    """
+    Chuẩn hóa sơ bộ Niên khóa (Cột O):
+    Nếu bóc tách được 2 năm có Y_ra - Y_vao = 4 thì trả về định dạng YYYY-YYYY.
+    Nếu không, giữ nguyên chuỗi gốc đã làm sạch.
+    """
+    is_valid, y1, y2, fmt = parse_nien_khoa(val_nien_khoa)
+    if is_valid:
+        return fmt
+    return clean_whitespace(str(val_nien_khoa)) if val_nien_khoa is not None else ""
 
 
 # ==============================================================================
@@ -1025,6 +1008,93 @@ def prompt_fix_date(file_name, sheet_name, row_idx, student_name, stt_val, field
     )
 
 
+def prompt_fix_nien_khoa_with_context(
+    file_name, sheet_name, row_idx, student_name, stt_val,
+    raw_val, current_norm_val, adjacent_records, nien_khoa_cache
+):
+    """
+    Hiển thị thông báo, bảng đối chiếu +-2 học sinh liền kề (Ngày sinh, Niên khóa, Ngày cấp bằng)
+    cho phép người dùng nhập tay niên khóa. Tự động ghi nhớ để áp dụng cho các dòng tương tự.
+    Trả về: (new_val, skip_all)
+    """
+    cache_key = clean_whitespace(str(raw_val)) if raw_val is not None else ""
+    if cache_key in nien_khoa_cache:
+        cached_val = nien_khoa_cache[cache_key]
+        print(f"   ⚡ Tự động áp dụng Niên khóa đã nhớ cho '{raw_val if raw_val is not None else '(Trống)'}': {cached_val}")
+        return cached_val, False
+
+    raw_display = str(raw_val).strip() if raw_val is not None else "(Trống)"
+    curr_display = str(current_norm_val).strip() if current_norm_val else "(Trống)"
+
+    print("\n" + "=" * 95)
+    print("⚠️  PHÁT HIỆN NIÊN KHÓA CHƯA ĐÚNG QUY CHUẨN (Y_ra - Y_vao khác 4)")
+    print(f"   • Tệp nguồn : {file_name} (Sheet: '{sheet_name}', Dòng Excel: {row_idx})")
+    print(f"   • Học sinh  : {student_name} (STT: {stt_val})")
+    print(f"   • Trường sai: [ Niên khóa ]")
+    print(f"   • Giá trị gốc trong file Excel : '{raw_display}'")
+    print(f"   • Kết quả hiện tại             : '{curr_display}'")
+    print("-" * 95)
+
+    if adjacent_records:
+        print("📋 BẢNG ĐỐI CHIẾU HỌC SINH LIỀN KỀ:")
+        print("┌───┬──────┬────────────────────────┬──────────────┬─────────────┬────────────────┬─────────────────────────┐")
+        print(f"│   │{format_cell('STT', 6, '^')}│{format_cell(' Họ và tên', 24)}│{format_cell('Ngày sinh', 14, '^')}│{format_cell('Niên khóa', 13, '^')}│{format_cell('Ngày cấp bằng', 16, '^')}│{format_cell(' Ghi chú', 25)}│")
+        print("├───┼──────┼────────────────────────┼──────────────┼─────────────┼────────────────┼─────────────────────────┤")
+
+        for rec in adjacent_records:
+            is_curr = rec.get("is_current", False)
+            pointer = " 👉" if is_curr else "   "
+            stt_str = str(rec.get("stt", ""))
+            name_str = " " + str(rec.get("name", ""))
+            dob_str = str(rec.get("dob", "")) if rec.get("dob") else "(Trống)"
+            cohort_str = str(rec.get("cohort", "")) if rec.get("cohort") else "(Trống)"
+            grad_str = str(rec.get("grad", "")) if rec.get("grad") else "(Trống)"
+
+            note_str = " <-- LỖI NIÊN KHÓA" if is_curr else ""
+
+            c_stt = format_cell(stt_str, 6, '^')
+            c_name = format_cell(name_str, 24, '<')
+            c_dob = format_cell(dob_str, 14, '^')
+            c_cohort = format_cell(cohort_str, 13, '^')
+            c_grad = format_cell(grad_str, 16, '^')
+            c_note = format_cell(note_str, 25, '<')
+            print(f"│{pointer}│{c_stt}│{c_name}│{c_dob}│{c_cohort}│{c_grad}│{c_note}│")
+
+        print("└───┴──────┴────────────────────────┴──────────────┴─────────────┴────────────────┴─────────────────────────┘")
+
+    prompt_text = (
+        "\n👉 Nhập niên khóa chuẩn YYYY-YYYY (ví dụ: 2016-2020)\n"
+        "   [Bấm Enter để giữ nguyên | Gõ 'all' để bỏ qua tất cả các lỗi sau]: "
+    )
+
+    while True:
+        try:
+            user_input = input(prompt_text).strip()
+        except (KeyboardInterrupt, EOFError):
+            print("\n   -> Bỏ qua nhập tay.")
+            return current_norm_val, True
+
+        if not user_input:
+            # Bấm Enter để giữ nguyên
+            nien_khoa_cache[cache_key] = current_norm_val
+            return current_norm_val, False
+
+        if user_input.lower() in ["all", "skip", "bo qua", "bỏ qua"]:
+            print("   -> Đã chọn bỏ qua tất cả cảnh báo nhập tay còn lại.")
+            return current_norm_val, True
+
+        is_valid, y1, y2, fmt = parse_nien_khoa(user_input)
+        if is_valid:
+            print(f"   ✅ Đã cập nhật Niên khóa: {fmt} (đã ghi nhớ cho các dòng tương tự)")
+            nien_khoa_cache[cache_key] = fmt
+            return fmt, False
+        else:
+            if y1 is not None and y2 is not None:
+                print(f"   ⚠️ Giá trị '{user_input}' có hiệu số {y2} - {y1} = {y2 - y1} (khác 4). Vui lòng nhập lại (hoặc bấm Enter để giữ nguyên):")
+            else:
+                print(f"   ⚠️ Giá trị '{user_input}' chưa đúng dạng YYYY-YYYY (ví dụ: 2016-2020). Vui lòng nhập lại (hoặc bấm Enter để giữ nguyên):")
+
+
 # ==============================================================================
 # CÔNG ĐOẠN 1: CHUẨN HÓA TIÊU ĐỀ & DỮ LIỆU TỪNG FILE LẺ
 # ==============================================================================
@@ -1098,6 +1168,7 @@ def stage1_normalize_individual_files():
     total_rows_extracted = 0
     skipped_sheets_summary = []
     skip_all_date_prompt = False
+    skip_all_nien_khoa_prompt = False
     date_cache = {}
 
     for file_idx, file_path in enumerate(excel_files, start=1):
@@ -1107,6 +1178,7 @@ def stage1_normalize_individual_files():
 
         wb_in = None
         wb_out = None
+        nien_khoa_cache = {}
         try:
             wb_in = openpyxl.load_workbook(file_path, data_only=True)
             file_rows = []
@@ -1180,8 +1252,9 @@ def stage1_normalize_individual_files():
 
                         clean_stt = int(cell_a_val) if isinstance(cell_a_val, (int, float)) and float(cell_a_val).is_integer() else str(cell_a_val or '')
 
-                        # Lấy giá trị ngày gốc để đối chiếu khi cần nhập tay
+                        # Lấy giá trị ngày gốc & niên khóa gốc để đối chiếu khi cần nhập tay
                         raw_dob = row[8].value if len(row) > 8 else None
+                        raw_nien_khoa = row[14].value if len(row) > 14 else None
                         if remove_qrs:
                             raw_grad = row[21].value if len(row) > 21 else None
                             new_row_values = (row_values[:16] + row_values[19:])[:28]
@@ -1197,7 +1270,7 @@ def stage1_normalize_individual_files():
                         # Chuẩn hóa sơ bộ định dạng ngày tháng và niên khóa
                         new_row_values[8] = format_date_to_text(new_row_values[8])
                         new_row_values[18] = format_date_to_text(new_row_values[18])
-                        new_row_values[14] = normalize_nien_khoa(new_row_values[14], new_row_values[18])
+                        new_row_values[14] = normalize_nien_khoa(new_row_values[14])
 
                         sheet_students.append({
                             "row_idx": row_idx,
@@ -1205,16 +1278,18 @@ def stage1_normalize_individual_files():
                             "name": name_cell_str,
                             "raw_dob": raw_dob,
                             "raw_grad": raw_grad,
+                            "raw_nien_khoa": raw_nien_khoa,
                             "row_values": new_row_values
                         })
 
-                # Công đoạn 1.2: Rà soát & sửa ngày tháng tương tác với bảng đối chiếu +-2 học sinh liền kề
+                # Công đoạn 1.2: Rà soát & sửa ngày tháng, niên khóa tương tác với bảng đối chiếu +-2 học sinh liền kề
                 for i, student in enumerate(sheet_students):
                     row_idx = student["row_idx"]
                     name_cell_str = student["name"]
                     clean_stt = student["clean_stt"]
                     raw_dob = student["raw_dob"]
                     raw_grad = student["raw_grad"]
+                    raw_nien_khoa = student["raw_nien_khoa"]
                     row_values = student["row_values"]
 
                     # Hàm lấy danh sách +-2 học sinh liền kề (kèm Niên khóa, Ngày sinh, Ngày cấp bằng)
@@ -1246,10 +1321,8 @@ def stage1_normalize_individual_files():
                             "Ngày cấp bằng", raw_grad, row_values[18], row_values[14],
                             adj_recs, sugg_date, sugg_reason, date_cache
                         )
-                        # Tự động cập nhật lại Niên khóa theo Ngày cấp bằng mới
-                        row_values[14] = normalize_nien_khoa(row_values[14], row_values[18])
 
-                    # 2. Rà soát Ngày sinh (Cột I - Index 8) SAU
+                    # 2. Rà soát Ngày sinh (Cột I - Index 8)
                     if not skip_all_date_prompt and not is_valid_dmy(row_values[8]) and not is_cell_empty(raw_dob):
                         adj_recs = get_adjacent_records(i)
                         sugg_date, sugg_reason = generate_date_suggestion(
@@ -1261,6 +1334,20 @@ def stage1_normalize_individual_files():
                             "Ngày sinh", raw_dob, row_values[8], row_values[14],
                             adj_recs, sugg_date, sugg_reason, date_cache
                         )
+
+                    # 3. Rà soát & chuẩn hóa Niên khóa (Cột O - Index 14)
+                    is_valid_nk, y1, y2, fmt_nk = parse_nien_khoa(row_values[14])
+                    if is_valid_nk:
+                        row_values[14] = fmt_nk
+                    else:
+                        if not skip_all_nien_khoa_prompt:
+                            adj_recs = get_adjacent_records(i)
+                            row_values[14], skip_all_nien_khoa_prompt = prompt_fix_nien_khoa_with_context(
+                                file_path.name, ws_in.title, row_idx,
+                                name_cell_str, clean_stt,
+                                raw_nien_khoa, row_values[14],
+                                adj_recs, nien_khoa_cache
+                            )
 
                     # Áp dụng các trường cố định và mã danh mục
                     # Cột D (Index 3): Tên văn bằng cố định
@@ -1275,8 +1362,6 @@ def stage1_normalize_individual_files():
                     row_values[11] = map_code_to_text(11, row_values[11])
                     # Cột M (Index 12): Nơi sinh (1..75 tỉnh/thành)
                     row_values[12] = map_code_to_text(12, row_values[12])
-                    # Cột O (Index 14): Niên khóa (chuẩn hóa YYYY-YYYY, đối soát cột S)
-                    row_values[14] = normalize_nien_khoa(row_values[14], row_values[18])
                     # Cột AA (Index 26): Mã đơn vị
                     if unit_code_input:
                         row_values[26] = unit_code_input
