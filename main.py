@@ -814,6 +814,94 @@ def is_valid_dmy(val):
         return False
 
 
+def format_grad_date_to_text(value):
+    """
+    Chuẩn hóa Ngày, tháng, năm cấp bằng (Cột S):
+    Cho phép: đầy đủ dd/MM/yyyy, tháng/năm MM/yyyy, chỉ có năm yyyy, hoặc để trống "".
+    """
+    if value is None:
+        return ""
+    val_str = str(value).strip()
+    if not val_str or val_str.lower() in ("none", "nan", "null", "trong", "trống", "xoa", "xóa"):
+        return ""
+
+    # Loại bỏ phần thập phân .0 nếu là số nguyên float
+    val_clean = re.sub(r'\.0+$', '', val_str)
+
+    # Nếu là số serial Excel
+    if isinstance(value, (int, float)) and 10000 <= value <= 80000:
+        try:
+            dt = from_excel(value)
+            return dt.strftime("%d/%m/%Y")
+        except:
+            pass
+
+    # Dạng số liền 5-6 chữ số (ví dụ: 062020 hoặc 62020 -> MM/yyyy)
+    if val_clean.isdigit() and len(val_clean) in (5, 6):
+        padded = val_clean.zfill(6)
+        m, y = int(padded[:2]), int(padded[2:])
+        if 1 <= m <= 12 and 1900 <= y <= 2100:
+            return f"{m:02d}/{y}"
+
+    # Làm sạch dấu phân cách
+    val_norm = re.sub(r'[/.\-\s]+', '/', val_clean).strip('/')
+    if not val_norm or val_norm.lower() in ("none", "nan", "null", "trong", "trống"):
+        return ""
+
+    # Dạng MM/yyyy hoặc M/yyyy -> chuẩn hóa MM/yyyy
+    m_my = re.match(r'^(\d{1,2})/(\d{4})$', val_norm)
+    if m_my:
+        m, y = m_my.groups()
+        if 1 <= int(m) <= 12 and 1900 <= int(y) <= 2100:
+            return f"{int(m):02d}/{y}"
+
+    # Dạng chỉ có 4 chữ số năm yyyy
+    m_year = re.match(r'^(\d{4})$', val_norm)
+    if m_year:
+        y_int = int(m_year.group(1))
+        if 1900 <= y_int <= 2100:
+            return m_year.group(1)
+
+    # Còn lại dùng chuẩn hóa thông thường format_date_to_text
+    return format_date_to_text(value)
+
+
+def is_valid_grad_date(val):
+    """
+    Kiểm tra Ngày, tháng, năm cấp bằng (Cột S) có hợp lệ không.
+    Hợp lệ khi:
+    - Trống hoặc None (cho phép trống)
+    - dd/MM/yyyy hợp lệ
+    - MM/yyyy hợp lệ
+    - yyyy hợp lệ (1900..2100)
+    """
+    if val is None:
+        return True
+    s = str(val).strip()
+    if not s or s.lower() in ("none", "nan", "null", "<na>", "trong", "trống"):
+        return True
+
+    # 1. Đầy đủ dd/MM/yyyy
+    if is_valid_dmy(s):
+        return True
+
+    # 2. Tháng/Năm MM/yyyy
+    m_my = re.match(r'^(\d{2})/(\d{4})$', s)
+    if m_my:
+        m, y = map(int, m_my.groups())
+        if 1 <= m <= 12 and 1900 <= y <= 2100:
+            return True
+
+    # 3. Chỉ có năm yyyy
+    m_y = re.match(r'^(\d{4})$', s)
+    if m_y:
+        y = int(m_y.group(1))
+        if 1900 <= y <= 2100:
+            return True
+
+    return False
+
+
 def format_cell(text, width, align='<'):
     """Căn lề và cắt ngắn văn bản hiển thị trong bảng terminal."""
     s = unicodedata.normalize('NFC', str(text)) if text is not None else ""
@@ -835,7 +923,7 @@ def generate_date_suggestion(field_name, raw_val, norm_val, student_cohort, all_
         # Tìm ngày cấp bằng hợp lệ phổ biến nhất trong sheet
         valid_grads = [
             s["row_values"][18] for s in all_sheet_students
-            if is_valid_dmy(s["row_values"][18])
+            if is_valid_grad_date(s["row_values"][18]) and s["row_values"][18]
         ]
         if valid_grads:
             most_common, count = Counter(valid_grads).most_common(1)[0]
@@ -862,11 +950,13 @@ def generate_date_suggestion(field_name, raw_val, norm_val, student_cohort, all_
             # Tìm ngày cấp bằng phổ biến nhất trong sheet
             grads = [
                 s["row_values"][18] for s in all_sheet_students
-                if is_valid_dmy(s["row_values"][18])
+                if is_valid_grad_date(s["row_values"][18]) and s["row_values"][18]
             ]
             if grads:
                 most_common_grad = Counter(grads).most_common(1)[0][0]
-                y_ra = int(most_common_grad.split('/')[2])
+                m_yr = re.search(r'(\d{4})$', str(most_common_grad))
+                if m_yr:
+                    y_ra = int(m_yr.group(1))
 
         y_expected = (y_ra - 15) if y_ra else None
 
@@ -897,26 +987,30 @@ def prompt_fix_date_with_context(
     """
     Hiển thị thông báo, bảng đối chiếu +-2 học sinh liền kề (kèm Niên khóa) và gợi ý thông minh
     cho phép người dùng nhập tay hoặc bấm 'y' để chấp nhận gợi ý.
-    Trả về: (new_val, skip_all)
+    Trả về: (new_val, skip_all, was_kept_original)
     """
     # Chỉ tự động áp dụng cache cho Ngày cấp bằng (vì học sinh cùng lớp tốt nghiệp cùng ngày)
     if field_name == "Ngày cấp bằng":
         raw_key = (field_name, clean_whitespace(str(raw_val)))
         if raw_key in date_cache:
             cached_val = date_cache[raw_key]
-            print(f"   ⚡ Tự động áp dụng Ngày cấp bằng đã nhớ cho '{raw_val}': {cached_val}")
-            return cached_val, False
+            disp = cached_val if cached_val else "(Trống)"
+            print(f"   ⚡ Tự động áp dụng Ngày cấp bằng đã nhớ cho '{raw_val if raw_val is not None else '(Trống)'}': {disp}")
+            return cached_val, False, False
 
     raw_display = str(raw_val).strip() if raw_val is not None else "(Trống)"
-    curr_display = str(current_norm_val).strip() if current_norm_val else "(Chưa xác định)"
+    curr_display = str(current_norm_val).strip() if current_norm_val else "(Trống)"
 
     print("\n" + "=" * 95)
-    print("⚠️  PHÁT HIỆN NGÀY THÁNG CHƯA ĐÚNG ĐỊNH DẠNG dd/MM/yyyy")
+    if field_name == "Ngày cấp bằng":
+        print("⚠️  PHÁT HIỆN NGÀY CẤP BẰNG CHƯA ĐÚNG ĐỊNH DẠNG (dd/MM/yyyy, MM/yyyy, yyyy)")
+    else:
+        print("⚠️  PHÁT HIỆN NGÀY SINH CHƯA ĐÚNG ĐỊNH DẠNG dd/MM/yyyy")
     print(f"   • Tệp nguồn : {file_name} (Sheet: '{sheet_name}', Dòng Excel: {row_idx})")
     print(f"   • Học sinh  : {student_name} (STT: {stt_val})")
     print(f"   • Trường sai: [ {field_name} ]")
     print(f"   • Giá trị gốc trong file Excel : '{raw_display}'")
-    print(f"   • Kết quả tự động chuẩn hóa   : '{curr_display}'")
+    print(f"   • Kết quả hiện tại             : '{curr_display}'")
     print("-" * 95)
 
     if adjacent_records:
@@ -948,64 +1042,95 @@ def prompt_fix_date_with_context(
 
         print("└───┴──────┴────────────────────────┴─────────────┴──────────────┴────────────────┴─────────────────────┘")
 
-    if smart_suggestion:
-        reason_info = f" ({suggestion_reason})" if suggestion_reason else ""
-        print(f"\n💡 GỢI Ý THÔNG MINH: {smart_suggestion}{reason_info}")
-        print(f"👉 [Bấm 'y' hoặc 'Y' để chấp nhận gợi ý: {smart_suggestion}]")
-        prompt_text = (
-            "   Hoặc nhập ngày chuẩn dd/MM/yyyy (hoặc gõ ddmmyyyy)\n"
-            "   [Bấm Enter để giữ nguyên | Gõ 'all' để bỏ qua tất cả các lỗi sau]: "
-        )
+    if field_name == "Ngày cấp bằng":
+        if smart_suggestion:
+            reason_info = f" ({suggestion_reason})" if suggestion_reason else ""
+            print(f"\n💡 GỢI Ý THÔNG MINH: {smart_suggestion}{reason_info}")
+            print(f"👉 [Bấm 'y' hoặc 'Y' để chấp nhận gợi ý: {smart_suggestion}]")
+            prompt_text = (
+                "   Hoặc nhập Ngày cấp bằng (dd/MM/yyyy, MM/yyyy, yyyy hoặc gõ 'trong' để để trống)\n"
+                "   [Bấm Enter để giữ nguyên | Gõ 'all' để bỏ qua tất cả các lỗi sau]: "
+            )
+        else:
+            print()
+            prompt_text = (
+                "👉 Nhập Ngày cấp bằng (dd/MM/yyyy, MM/yyyy, yyyy hoặc gõ 'trong' để để trống)\n"
+                "   [Bấm Enter để giữ nguyên | Gõ 'all' để bỏ qua tất cả các lỗi sau]: "
+            )
     else:
-        print()
-        prompt_text = (
-            "👉 Nhập ngày chuẩn dd/MM/yyyy (hoặc gõ ddmmyyyy)\n"
-            "   [Bấm Enter để giữ nguyên | Gõ 'all' để bỏ qua tất cả các lỗi sau]: "
-        )
+        if smart_suggestion:
+            reason_info = f" ({suggestion_reason})" if suggestion_reason else ""
+            print(f"\n💡 GỢI Ý THÔNG MINH: {smart_suggestion}{reason_info}")
+            print(f"👉 [Bấm 'y' hoặc 'Y' để chấp nhận gợi ý: {smart_suggestion}]")
+            prompt_text = (
+                "   Hoặc nhập ngày sinh chuẩn dd/MM/yyyy (hoặc gõ ddmmyyyy)\n"
+                "   [Bấm Enter để giữ nguyên (sẽ ghi nhận 'Chưa số hóa' & 'Sai ngày sinh') | Gõ 'all' để bỏ qua]: "
+            )
+        else:
+            print()
+            prompt_text = (
+                "👉 Nhập ngày sinh chuẩn dd/MM/yyyy (hoặc gõ ddmmyyyy)\n"
+                "   [Bấm Enter để giữ nguyên (sẽ ghi nhận 'Chưa số hóa' & 'Sai ngày sinh') | Gõ 'all' để bỏ qua]: "
+            )
 
     while True:
         try:
             user_input = input(prompt_text).strip()
         except (KeyboardInterrupt, EOFError):
             print("\n   -> Bỏ qua nhập tay.")
-            return current_norm_val, True
+            return current_norm_val, True, True
 
         if not user_input:
             # Bấm Enter để giữ nguyên
             if field_name == "Ngày cấp bằng":
                 raw_key = (field_name, clean_whitespace(str(raw_val)))
                 date_cache[raw_key] = current_norm_val
-            return current_norm_val, False
+            return current_norm_val, False, True
 
         if user_input.lower() in ["all", "skip", "bo qua", "bỏ qua"]:
             print("   -> Đã chọn bỏ qua tất cả cảnh báo nhập tay còn lại.")
-            return current_norm_val, True
+            return current_norm_val, True, True
 
         if smart_suggestion and user_input.lower() in ["y", "yes", "c", "co", "có", "ok"]:
             print(f"   ✅ Đã chấp nhận gợi ý cho {field_name}: {smart_suggestion}")
             if field_name == "Ngày cấp bằng":
                 raw_key = (field_name, clean_whitespace(str(raw_val)))
                 date_cache[raw_key] = smart_suggestion
-            return smart_suggestion, False
+            return smart_suggestion, False, False
 
-        # Thử chuẩn hóa chuỗi người dùng nhập (ví dụ gõ 5/6/2005 hoặc 05062005)
-        formatted = format_date_to_text(user_input)
-        if is_valid_dmy(formatted):
-            print(f"   ✅ Đã cập nhật {field_name}: {formatted}")
-            if field_name == "Ngày cấp bằng":
+        if field_name == "Ngày cấp bằng":
+            if user_input.lower() in ["trong", "trống", "none", "null", "xoa", "xóa"]:
+                print(f"   ✅ Đã cập nhật {field_name}: (Trống)")
+                raw_key = (field_name, clean_whitespace(str(raw_val)))
+                date_cache[raw_key] = ""
+                return "", False, False
+
+            formatted = format_grad_date_to_text(user_input)
+            if is_valid_grad_date(formatted):
+                disp = formatted if formatted else "(Trống)"
+                print(f"   ✅ Đã cập nhật {field_name}: {disp}")
                 raw_key = (field_name, clean_whitespace(str(raw_val)))
                 date_cache[raw_key] = formatted
-            return formatted, False
+                return formatted, False, False
+            else:
+                print(f"   ⚠️ Giá trị '{user_input}' chưa đúng dạng Ngày cấp bằng (dd/MM/yyyy, MM/yyyy, yyyy hoặc 'trong'). Vui lòng nhập lại (hoặc bấm Enter để giữ nguyên):")
         else:
-            print(f"   ⚠️ Giá trị '{user_input}' chưa đúng dạng dd/MM/yyyy hợp lệ. Vui lòng nhập lại (hoặc bấm Enter để bỏ qua):")
+            # field_name == "Ngày sinh"
+            formatted = format_date_to_text(user_input)
+            if is_valid_dmy(formatted):
+                print(f"   ✅ Đã cập nhật {field_name}: {formatted}")
+                return formatted, False, False
+            else:
+                print(f"   ⚠️ Giá trị '{user_input}' chưa đúng dạng dd/MM/yyyy hợp lệ. Vui lòng nhập lại (hoặc bấm Enter để giữ nguyên):")
 
 
 def prompt_fix_date(file_name, sheet_name, row_idx, student_name, stt_val, field_name, raw_val, current_norm_val, date_cache):
     """Hàm bọc tương thích ngược."""
-    return prompt_fix_date_with_context(
+    val, skip, _ = prompt_fix_date_with_context(
         file_name, sheet_name, row_idx, student_name, stt_val,
         field_name, raw_val, current_norm_val, "", [], None, None, date_cache
     )
+    return val, skip
 
 
 def prompt_fix_nien_khoa_with_context(
@@ -1290,7 +1415,7 @@ def stage1_normalize_individual_files():
 
                         # Chuẩn hóa sơ bộ định dạng ngày tháng và niên khóa
                         new_row_values[8] = format_date_to_text(new_row_values[8])
-                        new_row_values[18] = format_date_to_text(new_row_values[18])
+                        new_row_values[18] = format_grad_date_to_text(new_row_values[18])
                         new_row_values[14] = normalize_nien_khoa(new_row_values[14])
 
                         sheet_students.append({
@@ -1330,13 +1455,16 @@ def stage1_normalize_individual_files():
                             })
                         return adj
 
+                    # Biến cờ theo dõi lỗi ngày sinh của học sinh này
+                    is_dob_error = False
+
                     # 1. Rà soát Ngày cấp bằng (Cột S - Index 18) TRƯỚC
-                    if not skip_all_date_prompt and not is_valid_dmy(row_values[18]) and not is_cell_empty(raw_grad):
+                    if not skip_all_date_prompt and not is_valid_grad_date(row_values[18]):
                         adj_recs = get_adjacent_records(i)
                         sugg_date, sugg_reason = generate_date_suggestion(
                             "Ngày cấp bằng", raw_grad, row_values[18], row_values[14], sheet_students
                         )
-                        row_values[18], skip_all_date_prompt = prompt_fix_date_with_context(
+                        row_values[18], skip_all_date_prompt, _ = prompt_fix_date_with_context(
                             file_path.name, ws_in.title, row_idx,
                             name_cell_str, clean_stt,
                             "Ngày cấp bằng", raw_grad, row_values[18], row_values[14],
@@ -1344,17 +1472,22 @@ def stage1_normalize_individual_files():
                         )
 
                     # 2. Rà soát Ngày sinh (Cột I - Index 8)
-                    if not skip_all_date_prompt and not is_valid_dmy(row_values[8]) and not is_cell_empty(raw_dob):
-                        adj_recs = get_adjacent_records(i)
-                        sugg_date, sugg_reason = generate_date_suggestion(
-                            "Ngày sinh", raw_dob, row_values[8], row_values[14], sheet_students
-                        )
-                        row_values[8], skip_all_date_prompt = prompt_fix_date_with_context(
-                            file_path.name, ws_in.title, row_idx,
-                            name_cell_str, clean_stt,
-                            "Ngày sinh", raw_dob, row_values[8], row_values[14],
-                            adj_recs, sugg_date, sugg_reason, date_cache
-                        )
+                    if not is_valid_dmy(row_values[8]):
+                        if not skip_all_date_prompt:
+                            adj_recs = get_adjacent_records(i)
+                            sugg_date, sugg_reason = generate_date_suggestion(
+                                "Ngày sinh", raw_dob, row_values[8], row_values[14], sheet_students
+                            )
+                            row_values[8], skip_all_date_prompt, kept_as_is = prompt_fix_date_with_context(
+                                file_path.name, ws_in.title, row_idx,
+                                name_cell_str, clean_stt,
+                                "Ngày sinh", raw_dob, row_values[8], row_values[14],
+                                adj_recs, sugg_date, sugg_reason, date_cache
+                            )
+                            if kept_as_is or not is_valid_dmy(row_values[8]):
+                                is_dob_error = True
+                        else:
+                            is_dob_error = True
 
                     # 3. Rà soát & chuẩn hóa Niên khóa (Cột O - Index 14)
                     is_valid_nk, y1, y2, fmt_nk = parse_nien_khoa(row_values[14])
@@ -1373,8 +1506,21 @@ def stage1_normalize_individual_files():
                     # Áp dụng các trường cố định và mã danh mục
                     # Cột D (Index 3): Tên văn bằng cố định
                     row_values[3] = "Bằng tốt nghiệp trung học cơ sở"
-                    # Cột Y (Index 24): Trạng thái số hóa cố định
-                    row_values[24] = "Đã số hóa đầy đủ, chính xác"
+                    # Cột Y (Index 24): Trạng thái số hóa
+                    # Cột Z (Index 25): Thông tin chưa bảo đảm đầy đủ, chính xác và nguyên nhân
+                    if is_dob_error:
+                        row_values[24] = "Chưa số hóa"
+                        z_curr = clean_whitespace(str(row_values[25])) if row_values[25] is not None else ""
+                        if z_curr and z_curr.lower() not in ("none", "nan", "null"):
+                            if "Sai ngày sinh" not in z_curr:
+                                row_values[25] = f"Sai ngày sinh; {z_curr}"
+                        else:
+                            row_values[25] = "Sai ngày sinh"
+                    else:
+                        row_values[24] = "Đã số hóa đầy đủ, chính xác"
+                        if row_values[25] and "Sai ngày sinh" in str(row_values[25]):
+                            z_cleaned = clean_whitespace(str(row_values[25]).replace("Sai ngày sinh;", "").replace("Sai ngày sinh", "").strip("; "))
+                            row_values[25] = z_cleaned if z_cleaned else None
                     # Cột J (Index 9): Giới tính (1->Nam, 2->Khác, 3->Nữ)
                     row_values[9] = map_code_to_text(9, row_values[9])
                     # Cột K (Index 10): Dân tộc (1..51, 29->Kinh)
