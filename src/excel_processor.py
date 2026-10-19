@@ -3,6 +3,7 @@ import sys
 import io
 import re
 import copy
+import unicodedata
 from pathlib import Path
 import openpyxl
 from openpyxl.styles import Font, PatternFill
@@ -136,13 +137,14 @@ def extract_cohort_from_text(text: str) -> str:
     return ""
 
 def match_school_from_text(text: str, allowed_schools: list[str]) -> str:
-    """Tìm trường khớp trong chuỗi văn bản (tên file, tên thư mục, tên sheet)."""
+    """Tìm trường khớp trong chuỗi văn bản (tên file, tên thư mục, tên sheet). Hỗ trợ chuẩn xác tiếng Việt có dấu, ký tự & và Unicode NFD/NFC."""
     if not text or not allowed_schools:
         return ""
-    text_clean = re.sub(r'[_\-\.]', ' ', text).lower()
+    text_nfc = unicodedata.normalize('NFC', str(text))
+    text_clean = re.sub(r'[_\-\.]', ' ', text_nfc).lower()
     for sch in allowed_schools:
-        sch_clean = sch.lower()
-        if sch_clean in text_clean:
+        sch_nfc = unicodedata.normalize('NFC', str(sch)).lower()
+        if sch_nfc in text_clean:
             return sch
     # Fuzzy match nếu gần khớp
     close = fuzzy_match_school(text_clean, allowed_schools, n=1, cutoff=0.75)

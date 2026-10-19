@@ -1,6 +1,7 @@
 import io
 import re
 import copy
+import unicodedata
 from datetime import datetime
 from pathlib import Path
 import openpyxl
@@ -16,10 +17,10 @@ from src.normalizer import (
 )
 
 def sanitize_filename(name: str) -> str:
-    r"""Loại bỏ các ký tự cấm của Windows/macOS (\ / : * ? " < > |) khỏi tên file/thư mục."""
+    r"""Loại bỏ các ký tự cấm của Windows/macOS (\ / : * ? " < > |) khỏi tên file/thư mục. Giữ nguyên tiếng Việt có dấu và ký tự & hoàn toàn hợp lệ."""
     if not name:
         return "Chua_Xac_Dinh"
-    s = str(name).strip()
+    s = unicodedata.normalize('NFC', str(name)).strip()
     s = re.sub(r'[\\/*?:"<>|]', '_', s)
     s = re.sub(r'\s+', ' ', s).strip()
     s = re.sub(r'_+', '_', s).strip('._ ')

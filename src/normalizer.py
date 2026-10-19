@@ -14,7 +14,8 @@ def clean_whitespace(value):
         if math.isnan(value):
             return ""
     if isinstance(value, str):
-        cleaned = re.sub(r'\s+', ' ', value).strip()
+        cleaned = unicodedata.normalize('NFC', value)
+        cleaned = re.sub(r'\s+', ' ', cleaned).strip()
         if cleaned.lower() in ("none", "nan", "null", "<na>"):
             return ""
         return cleaned
