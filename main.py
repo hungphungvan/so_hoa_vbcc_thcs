@@ -800,21 +800,61 @@ def format_date_to_text(value):
     return val_norm
 
 
+def check_dob_validity(val):
+    """
+    Kiểm tra tính hợp lệ của ngày sinh (Cột I):
+    Trả về: (is_valid, err_type, err_desc)
+    - Hợp lệ: (True, 0, "")
+    - Kiểu 1 (Sai định dạng dd/MM/yyyy): (False, 1, "Sai định dạng ngày sinh")
+    - Kiểu 2 (Đúng định dạng dd/MM/yyyy nhưng sai lôgic): (False, 2, "Ngày sinh không hợp lệ: <giải thích cụ thể>")
+    """
+    if val is None:
+        return False, 1, "Sai định dạng ngày sinh"
+    s = str(val).strip()
+    if not s or s.lower() in ("none", "nan", "null", "<na>"):
+        return False, 1, "Sai định dạng ngày sinh"
+
+    m = re.match(r'^(\d{2})/(\d{2})/(\d{4})$', s)
+    if not m:
+        return False, 1, "Sai định dạng ngày sinh"
+
+    d, m_val, y = map(int, m.groups())
+
+    if m_val < 1 or m_val > 12:
+        return False, 2, f"Ngày sinh không hợp lệ: Tháng {m_val:02d} không tồn tại"
+
+    if d == 0:
+        return False, 2, "Ngày sinh không hợp lệ: Ngày 00 không tồn tại"
+
+    if not (1900 <= y <= 2100):
+        return False, 2, f"Ngày sinh không hợp lệ: Năm sinh {y} không hợp lý (1900-2100)"
+
+    if m_val == 2:
+        is_leap = (y % 4 == 0 and y % 100 != 0) or (y % 400 == 0)
+        max_d = 29 if is_leap else 28
+        if d > max_d:
+            if not is_leap and d == 29:
+                return False, 2, f"Ngày sinh không hợp lệ: Năm {y} không phải năm nhuận nên tháng 02 không thể có 29 ngày"
+            else:
+                return False, 2, f"Ngày sinh không hợp lệ: Tháng 02 năm {y} không thể có {d:02d} ngày"
+    elif m_val in (4, 6, 9, 11):
+        if d > 30:
+            return False, 2, f"Ngày sinh không hợp lệ: Tháng {m_val:02d} không thể có {d:02d} ngày"
+    else:
+        if d > 31:
+            return False, 2, f"Ngày sinh không hợp lệ: Tháng {m_val:02d} không thể có {d:02d} ngày"
+
+    try:
+        datetime.date(y, m_val, d)
+        return True, 0, ""
+    except ValueError as e:
+        return False, 2, f"Ngày sinh không hợp lệ: {e}"
+
+
 def is_valid_dmy(val):
     """Kiểm tra chuỗi có đúng chuẩn dd/MM/yyyy hợp lệ thực tế không."""
-    if not val or not isinstance(val, str):
-        return False
-    m = re.match(r'^(\d{2})/(\d{2})/(\d{4})$', val.strip())
-    if not m:
-        return False
-    d, m, y = map(int, m.groups())
-    if not (1900 <= y <= 2100):
-        return False
-    try:
-        datetime.date(y, m, d)
-        return True
-    except ValueError:
-        return False
+    is_valid, _, _ = check_dob_validity(val)
+    return is_valid
 
 
 def format_grad_date_to_text(value):
@@ -1008,7 +1048,12 @@ def prompt_fix_date_with_context(
     if field_name == "Ngày cấp bằng":
         print("⚠️  PHÁT HIỆN NGÀY CẤP BẰNG CHƯA ĐÚNG ĐỊNH DẠNG (dd/MM/yyyy, MM/yyyy, yyyy)")
     else:
-        print("⚠️  PHÁT HIỆN NGÀY SINH CHƯA ĐÚNG ĐỊNH DẠNG dd/MM/yyyy")
+        is_dob_v, err_type, err_desc = check_dob_validity(current_norm_val)
+        if err_type == 2:
+            print("⚠️  PHÁT HIỆN NGÀY SINH SAI LÔGIC (Đúng định dạng dd/MM/yyyy nhưng ngày/tháng không hợp lệ)")
+            print(f"   • Chi tiết lỗi : {err_desc}")
+        else:
+            print("⚠️  PHÁT HIỆN NGÀY SINH SAI ĐỊNH DẠNG dd/MM/yyyy")
     print(f"   • Tệp nguồn : {file_name} (Sheet: '{sheet_name}', Dòng Excel: {row_idx})")
     print(f"   • Học sinh  : {student_name} (STT: {stt_val})")
     print(f"   • Trường sai: [ {field_name} ]")
@@ -1061,19 +1106,21 @@ def prompt_fix_date_with_context(
                 "   [Bấm Enter để giữ nguyên | Gõ 'all' để bỏ qua tất cả các lỗi sau]: "
             )
     else:
+        is_dob_v, err_type, err_desc = check_dob_validity(current_norm_val)
+        hint_reason = err_desc if err_desc else "Sai định dạng ngày sinh"
         if smart_suggestion:
             reason_info = f" ({suggestion_reason})" if suggestion_reason else ""
             print(f"\n💡 GỢI Ý THÔNG MINH: {smart_suggestion}{reason_info}")
             print(f"👉 [Bấm 'y' hoặc 'Y' để chấp nhận gợi ý: {smart_suggestion}]")
             prompt_text = (
                 "   Hoặc nhập ngày sinh chuẩn dd/MM/yyyy (hoặc gõ ddmmyyyy)\n"
-                "   [Bấm Enter để giữ nguyên (sẽ ghi nhận 'Chưa số hóa' & 'Sai ngày sinh') | Gõ 'all' để bỏ qua]: "
+                f"   [Bấm Enter để giữ nguyên (sẽ ghi nhận 'Chưa số hóa' & '{hint_reason}') | Gõ 'all' để bỏ qua]: "
             )
         else:
             print()
             prompt_text = (
                 "👉 Nhập ngày sinh chuẩn dd/MM/yyyy (hoặc gõ ddmmyyyy)\n"
-                "   [Bấm Enter để giữ nguyên (sẽ ghi nhận 'Chưa số hóa' & 'Sai ngày sinh') | Gõ 'all' để bỏ qua]: "
+                f"   [Bấm Enter để giữ nguyên (sẽ ghi nhận 'Chưa số hóa' & '{hint_reason}') | Gõ 'all' để bỏ qua]: "
             )
 
     while True:
@@ -1120,11 +1167,15 @@ def prompt_fix_date_with_context(
         else:
             # field_name == "Ngày sinh"
             formatted = format_date_to_text(user_input)
-            if is_valid_dmy(formatted):
+            is_valid, user_err_type, user_err_desc = check_dob_validity(formatted)
+            if is_valid:
                 print(f"   ✅ Đã cập nhật {field_name}: {formatted}")
                 return formatted, False, False
             else:
-                print(f"   ⚠️ Giá trị '{user_input}' chưa đúng dạng dd/MM/yyyy hợp lệ. Vui lòng nhập lại (hoặc bấm Enter để giữ nguyên):")
+                if user_err_type == 2:
+                    print(f"   ⚠️ Giá trị '{user_input}' đúng định dạng nhưng sai lôgic ({user_err_desc}). Vui lòng nhập lại (hoặc bấm Enter để giữ nguyên):")
+                else:
+                    print(f"   ⚠️ Giá trị '{user_input}' chưa đúng dạng dd/MM/yyyy hợp lệ. Vui lòng nhập lại (hoặc bấm Enter để giữ nguyên):")
 
 
 def prompt_fix_date(file_name, sheet_name, row_idx, student_name, stt_val, field_name, raw_val, current_norm_val, date_cache):
@@ -1354,6 +1405,8 @@ def stage1_normalize_individual_files():
             and not f.name.startswith("._")
             and not f.name.endswith("_TongHop.xlsx")
             and not f.name.endswith("_Xong.xlsx")
+            and not f.name.endswith("_DS_Lỗi.xlsx")
+            and not f.name.endswith("_DS_Loi.xlsx")
             and f.is_file()
         ],
         key=lambda x: x.name.lower()
@@ -1369,6 +1422,8 @@ def stage1_normalize_individual_files():
 
     processed_files_count = 0
     total_rows_extracted = 0
+    total_error_files_count = 0
+    total_error_students_count = 0
     skipped_sheets_summary = []
     skip_all_date_prompt = False
     skip_all_nien_khoa_prompt = False
@@ -1529,7 +1584,9 @@ def stage1_normalize_individual_files():
                         )
 
                     # 2. Rà soát Ngày sinh (Cột I - Index 8)
-                    if not is_valid_dmy(row_values[8]):
+                    is_valid_dob, dob_err_type, dob_err_desc = check_dob_validity(row_values[8])
+                    dob_final_desc = ""
+                    if not is_valid_dob:
                         if not skip_all_date_prompt:
                             adj_recs = get_adjacent_records(i)
                             sugg_date, sugg_reason = generate_date_suggestion(
@@ -1541,10 +1598,13 @@ def stage1_normalize_individual_files():
                                 "Ngày sinh", raw_dob, row_values[8], row_values[14],
                                 adj_recs, sugg_date, sugg_reason, date_cache
                             )
-                            if kept_as_is or not is_valid_dmy(row_values[8]):
+                            is_valid_after, dob_err_type_after, dob_err_desc_after = check_dob_validity(row_values[8])
+                            if kept_as_is or not is_valid_after:
                                 is_dob_error = True
+                                dob_final_desc = dob_err_desc_after
                         else:
                             is_dob_error = True
+                            dob_final_desc = dob_err_desc
 
                     # 3. Rà soát & chuẩn hóa Niên khóa (Cột O - Index 14)
                     is_valid_nk, y1, y2, fmt_nk = parse_nien_khoa(row_values[14])
@@ -1569,15 +1629,16 @@ def stage1_normalize_individual_files():
                         row_values[24] = "Chưa số hóa"
                         z_curr = clean_whitespace(str(row_values[25])) if row_values[25] is not None else ""
                         if z_curr and z_curr.lower() not in ("none", "nan", "null"):
-                            if "Sai ngày sinh" not in z_curr:
-                                row_values[25] = f"Sai ngày sinh; {z_curr}"
+                            if dob_final_desc not in z_curr:
+                                row_values[25] = f"{dob_final_desc}; {z_curr}"
                         else:
-                            row_values[25] = "Sai ngày sinh"
+                            row_values[25] = dob_final_desc
                     else:
                         row_values[24] = "Đã số hóa đầy đủ, chính xác"
-                        if row_values[25] and "Sai ngày sinh" in str(row_values[25]):
-                            z_cleaned = clean_whitespace(str(row_values[25]).replace("Sai ngày sinh;", "").replace("Sai ngày sinh", "").strip("; "))
-                            row_values[25] = z_cleaned if z_cleaned else None
+                        if row_values[25]:
+                            z_str = str(row_values[25])
+                            z_cleaned = re.sub(r'(Sai định dạng ngày sinh|Ngày sinh không hợp lệ:[^;]+|Sai ngày sinh)\s*;?\s*', '', z_str).strip('; ')
+                            row_values[25] = clean_whitespace(z_cleaned) if z_cleaned else None
                     # Cột J (Index 9): Giới tính (1->Nam, 2->Khác, 3->Nữ)
                     row_values[9] = map_code_to_text(9, row_values[9])
                     # Cột K (Index 10): Dân tộc (1..51, 29->Kinh)
@@ -1633,6 +1694,42 @@ def stage1_normalize_individual_files():
             total_rows_extracted += M
             print(f"  -> Xuất file: Da_Chuan_Hoa/{out_file_path.name} ({M} học sinh | {yellow_cell_count} ô thiếu tô vàng)")
 
+            # ==================================================================
+            # TRÍCH XUẤT FILE DANH SÁCH LỖI: "Tên file gốc" + "_DS_Lỗi.xlsx"
+            # Gồm các học sinh có Cột Y là "Chưa số hóa"
+            # ==================================================================
+            error_file_rows = [r for r in file_rows if r[24] == "Chưa số hóa"]
+            if error_file_rows:
+                wb_err = openpyxl.load_workbook(io.BytesIO(template_bytes))
+                ws_err = wb_err.active
+                ws_err.title = "DS_Loi"
+
+                for err_idx, err_row in enumerate(error_file_rows, start=1):
+                    err_row_copy = list(err_row)
+                    err_row_copy[0] = err_idx  # Đánh lại STT 1..K cho danh sách lỗi
+                    ws_err.append(err_row_copy)
+                    curr_err_row = ws_err.max_row
+                    apply_cached_fonts(ws_err, curr_err_row, cached_fonts)
+
+                    for c in range(1, 28):
+                        if is_cell_empty(err_row_copy[c]):
+                            ws_err.cell(row=curr_err_row, column=c + 1).fill = yellow_fill
+
+                err_file_name = f"{file_path.stem}_DS_Lỗi.xlsx"
+                err_file_path = output_dir / err_file_name
+                try:
+                    wb_err.save(err_file_path)
+                    total_error_files_count += 1
+                    total_error_students_count += len(error_file_rows)
+                    print(f"  -> ⚠️ Trích xuất file lỗi: Da_Chuan_Hoa/{err_file_name} ({len(error_file_rows)} học sinh Chưa số hóa)")
+                except PermissionError:
+                    print(f"❌ Lỗi: Không thể ghi file lỗi '{err_file_name}'. Vui lòng đóng file nếu đang mở trong Excel và thử lại.")
+                finally:
+                    try:
+                        wb_err.close()
+                    except Exception:
+                        pass
+
         except Exception as e:
             print(f"❌ Lỗi khi xử lý file {file_path.name}: {e}")
         finally:
@@ -1654,6 +1751,8 @@ def stage1_normalize_individual_files():
     print(f"✅ Tổng số học sinh: {total_rows_extracted} dòng dữ liệu.")
     print(f"📁 Toàn bộ các file chuẩn hóa lẻ đã được lưu tại thư mục:")
     print(f"   {output_dir.absolute()}")
+    if total_error_students_count > 0:
+        print(f"⚠️ Đã trích xuất {total_error_files_count} file danh sách lỗi (*_DS_Lỗi.xlsx) với tổng cộng {total_error_students_count} học sinh Chưa số hóa.")
     print("=" * 80)
 
     if skipped_sheets_summary:
@@ -1693,7 +1792,13 @@ def stage2_merge_normalized_files():
 
     # Tự động nhận diện nếu người dùng chọn thư mục cha có chứa thư mục con 'Da_Chuan_Hoa'
     if folder.name != "Da_Chuan_Hoa" and (folder / "Da_Chuan_Hoa").is_dir():
-        sub_files = [f for f in (folder / "Da_Chuan_Hoa").glob("*.xlsx") if not f.name.startswith("~$") and not f.name.startswith("._")]
+        sub_files = [
+            f for f in (folder / "Da_Chuan_Hoa").glob("*.xlsx")
+            if not f.name.startswith("~$")
+            and not f.name.startswith("._")
+            and not f.name.endswith("_DS_Lỗi.xlsx")
+            and not f.name.endswith("_DS_Loi.xlsx")
+        ]
         if sub_files:
             folder = folder / "Da_Chuan_Hoa"
             print(f"-> Tự động nhận diện và sử dụng thư mục con: {folder.name}/")
@@ -1725,6 +1830,8 @@ def stage2_merge_normalized_files():
             and not f.name.startswith("._")
             and not f.name.endswith("_TongHop.xlsx")
             and not f.name.endswith("_Xong.xlsx")
+            and not f.name.endswith("_DS_Lỗi.xlsx")
+            and not f.name.endswith("_DS_Loi.xlsx")
             and f.is_file()
         ],
         key=lambda x: x.name.lower()
@@ -1738,6 +1845,7 @@ def stage2_merge_normalized_files():
 
     count_files = 0
     total_student_rows = 0
+    all_tonghop_error_rows = []
 
     for file_idx, file_path in enumerate(excel_files, start=1):
         print(f"  [{file_idx}/{len(excel_files)}] Đang đọc: {file_path.name} ...", end=" ")
@@ -1784,6 +1892,9 @@ def stage2_merge_normalized_files():
                     if is_yel and col_idx > 1:
                         ws_out.cell(row=curr_row, column=col_idx).fill = yellow_fill
 
+                if len(row_vals) > 24 and row_vals[24] == "Chưa số hóa":
+                    all_tonghop_error_rows.append(list(row_vals))
+
             count_files += 1
             print(f"-> Gộp {file_student_count:>4} học sinh.")
 
@@ -1808,6 +1919,33 @@ def stage2_merge_normalized_files():
         print(f"✅ Tổng số học sinh: {total_student_rows} dòng dữ liệu.")
         print(f"📁 File TỔNG HỢP đã lưu tại:")
         print(f"   {out_path.absolute()}")
+
+        # Trích xuất file tổng hợp lỗi nếu có học sinh Chưa số hóa
+        if all_tonghop_error_rows:
+            wb_err_th = openpyxl.load_workbook(io.BytesIO(template_bytes))
+            ws_err_th = wb_err_th.active
+            ws_err_th.title = "DS_Loi_TongHop"
+            for err_idx, err_row in enumerate(all_tonghop_error_rows, start=1):
+                err_row_copy = list(err_row)
+                err_row_copy[0] = err_idx
+                ws_err_th.append(err_row_copy)
+                c_row = ws_err_th.max_row
+                apply_cached_fonts(ws_err_th, c_row, cached_fonts)
+                for c in range(1, 28):
+                    if is_cell_empty(err_row_copy[c]):
+                        ws_err_th.cell(row=c_row, column=c + 1).fill = yellow_fill
+            err_th_path = save_dir / f"{save_dir.name}_TongHop_DS_Lỗi.xlsx"
+            try:
+                wb_err_th.save(err_th_path)
+                print(f"⚠️ Đã trích xuất file tổng hợp lỗi: {err_th_path.name} ({len(all_tonghop_error_rows)} học sinh Chưa số hóa)")
+            except PermissionError:
+                pass
+            finally:
+                try:
+                    wb_err_th.close()
+                except Exception:
+                    pass
+
         print("=" * 80)
     except PermissionError:
         print(f"\n❌ Lỗi: Không thể lưu file '{out_path.name}' do file đang được mở trong Excel.")
