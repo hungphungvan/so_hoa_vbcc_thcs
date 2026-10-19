@@ -1063,7 +1063,7 @@ def prompt_fix_nien_khoa_with_context(
         print("└───┴──────┴────────────────────────┴──────────────┴─────────────┴────────────────┴─────────────────────────┘")
 
     prompt_text = (
-        "\n👉 Nhập niên khóa chuẩn YYYY-YYYY (ví dụ: 2016-2020)\n"
+        "\n👉 Nhập Năm ra trường (ví dụ: 2020) hoặc Niên khóa (ví dụ: 2016-2020)\n"
         "   [Bấm Enter để giữ nguyên | Gõ 'all' để bỏ qua tất cả các lỗi sau]: "
     )
 
@@ -1083,6 +1083,27 @@ def prompt_fix_nien_khoa_with_context(
             print("   -> Đã chọn bỏ qua tất cả cảnh báo nhập tay còn lại.")
             return current_norm_val, True
 
+        # 1. Hỗ trợ người dùng chỉ gõ Năm ra trường (ví dụ: 2020 hoặc 20) -> tự tính Y_vao = Y_ra - 4
+        m_4 = re.match(r'^(19\d{2}|20\d{2})$', user_input)
+        if m_4:
+            y_ra = int(m_4.group(1))
+            y_vao = y_ra - 4
+            fmt = f"{y_vao}-{y_ra}"
+            print(f"   ✅ Đã tự tính Niên khóa: {fmt} (từ năm ra trường {y_ra}, đã ghi nhớ)")
+            nien_khoa_cache[cache_key] = fmt
+            return fmt, False
+
+        m_2 = re.match(r'^(\d{2})$', user_input)
+        if m_2:
+            val_2 = int(m_2.group(1))
+            y_ra = (2000 + val_2) if val_2 <= 50 else (1900 + val_2)
+            y_vao = y_ra - 4
+            fmt = f"{y_vao}-{y_ra}"
+            print(f"   ✅ Đã tự tính Niên khóa: {fmt} (từ năm ra trường {y_ra}, đã ghi nhớ)")
+            nien_khoa_cache[cache_key] = fmt
+            return fmt, False
+
+        # 2. Hỗ trợ gõ đầy đủ dạng 2 năm (ví dụ: 2016-2020, 2016 2020, 2016/2020...)
         is_valid, y1, y2, fmt = parse_nien_khoa(user_input)
         if is_valid:
             print(f"   ✅ Đã cập nhật Niên khóa: {fmt} (đã ghi nhớ cho các dòng tương tự)")
@@ -1092,7 +1113,7 @@ def prompt_fix_nien_khoa_with_context(
             if y1 is not None and y2 is not None:
                 print(f"   ⚠️ Giá trị '{user_input}' có hiệu số {y2} - {y1} = {y2 - y1} (khác 4). Vui lòng nhập lại (hoặc bấm Enter để giữ nguyên):")
             else:
-                print(f"   ⚠️ Giá trị '{user_input}' chưa đúng dạng YYYY-YYYY (ví dụ: 2016-2020). Vui lòng nhập lại (hoặc bấm Enter để giữ nguyên):")
+                print(f"   ⚠️ Giá trị '{user_input}' chưa hợp lệ. Vui lòng gõ Năm ra trường (ví dụ: 2020) hoặc Niên khóa (ví dụ: 2016-2020):")
 
 
 # ==============================================================================
