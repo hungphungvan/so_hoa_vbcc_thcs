@@ -19,9 +19,16 @@ Hệ thống được đóng gói tự động qua **GitHub Actions** thành cá
 | 🍏 **macOS (Apple Silicon & Intel)** | [**`SoHoa_VBCC_macOS.zip`**](https://github.com/hungphungvan/so_hoa_vbcc_thcs/releases/latest) | Giải nén, click đúp file `SoHoa_VBCC_macOS.app` (hoặc nhị phân) để chạy. |
 
 > [!NOTE]
-> **Mẹo cho người dùng macOS lần đầu mở file:**
-> Nếu macOS hiển thị cảnh báo bảo mật Gatekeeper (*"Không thể mở ứng dụng vì chưa xác minh nhà phát triển"*):
-> 👉 Bạn chỉ cần **Click chuột phải** (hoặc giữ phím `Control` + Click) vào ứng dụng $\rightarrow$ chọn **Open (Mở)** $\rightarrow$ chọn tiếp **Open** là ứng dụng sẽ chạy bình thường (chỉ cần làm 1 lần đầu).
+> **Hướng dẫn khởi chạy trên macOS:**
+> 
+> **Cách 1: Chạy từ thư mục mã nguồn (Khuyên dùng)**
+> 👉 Click đúp vào tệp **`Chay_Chuong_Trinh.command`** trong thư mục dự án để khởi động ngay giao diện đồ họa.
+> 
+> **Cách 2: Chạy tệp đóng gói tải từ GitHub Releases**
+> Nếu tải tệp `SoHoa_VBCC_macOS.zip` về và macOS báo *"Không thể mở ứng dụng"* do cơ chế kiểm soát bảo mật Gatekeeper:
+> 1. Mở ứng dụng **Terminal**.
+> 2. Gõ lệnh: `xattr -cr ` (có dấu cách ở cuối), sau đó kéo thả file `SoHoa_VBCC_macOS.app` vào Terminal rồi nhấn **Enter**.
+> 3. Hoặc **Click chuột phải** (hoặc giữ phím `Control` + Click) vào ứng dụng $\rightarrow$ chọn **Open (Mở)** $\rightarrow$ chọn tiếp **Open**.
 
 ---
 

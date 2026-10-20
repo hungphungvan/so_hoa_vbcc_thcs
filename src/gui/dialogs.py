@@ -645,7 +645,7 @@ class DataInspectorDialog(tk.Toplevel):
     def __init__(self, parent, all_students: list[dict]):
         super().__init__(parent)
         self.title("🔍 Tra cứu & Đối soát Dữ liệu gốc (Data Inspector)")
-        self.geometry("950, 650")
+        self.geometry("950x650")
         self.transient(parent)
 
         self.all_students = all_students

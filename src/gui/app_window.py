@@ -24,7 +24,7 @@ class MainWindow:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("Công cụ Xử lý & Số hóa Văn bằng Chứng chỉ THCS - Chuẩn hóa dữ liệu & Danh sách tài liệu số hóa")
-        self.root.geometry("1120, 840")
+        self.root.geometry("1120x840")
         self.root.minsize(980, 720)
 
         # Cấu hình style

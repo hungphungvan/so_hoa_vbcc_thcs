@@ -4,8 +4,12 @@
 #     "openpyxl",
 # ]
 # ///
+import os
 import sys
 from pathlib import Path
+
+# Tắt cảnh báo Tkinter cũ trên macOS
+os.environ["TK_SILENCE_DEPRECATION"] = "1"
 
 # Đảm bảo mã hóa UTF-8 cho stdout trên mọi nền tảng
 if sys.stdout and hasattr(sys.stdout, 'reconfigure'):

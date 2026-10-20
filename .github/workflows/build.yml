@@ -58,7 +58,8 @@ jobs:
         pyinstaller --noconfirm --onefile --windowed --name "SoHoa_VBCC_macOS" --add-data "data:data" main.py
         cd dist
         if [ -d "SoHoa_VBCC_macOS.app" ]; then
-          zip -r SoHoa_VBCC_macOS.zip SoHoa_VBCC_macOS.app
+          chmod -R +x SoHoa_VBCC_macOS.app/Contents/MacOS || true
+          zip -r -y SoHoa_VBCC_macOS.zip SoHoa_VBCC_macOS.app
         else
           chmod +x SoHoa_VBCC_macOS || true
           zip -r SoHoa_VBCC_macOS.zip SoHoa_VBCC_macOS

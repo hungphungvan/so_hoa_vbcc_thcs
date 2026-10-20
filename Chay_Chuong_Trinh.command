@@ -3,6 +3,7 @@ cd "$(dirname "$0")"
 
 # Nạp đường dẫn môi trường trên macOS Apple Silicon và Intel
 export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
+export TK_SILENCE_DEPRECATION=1
 
 echo "========================================================================"
 echo "    CÔNG CỤ XỬ LÝ & SỐ HÓA VĂN BẰNG CHỨNG CHỈ THCS    "
