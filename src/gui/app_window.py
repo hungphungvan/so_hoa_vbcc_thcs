@@ -12,6 +12,8 @@ from tkinter.scrolledtext import ScrolledText
 
 from src.lookup_manager import LookupManager, get_data_dir
 from src.excel_processor import ExcelProcessor
+from src.version import APP_VERSION
+from src.updater import check_for_updates_async, check_for_updates, open_release_page
 from src.gui.dialogs import (
     SchoolBlockDialog,
     CohortBlockDialog,
@@ -38,7 +40,7 @@ from src.gui.theme import (
 class MainWindow:
     def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title("Số hóa Văn bằng Chứng chỉ THCS")
+        self.root.title(f"Số hóa Văn bằng Chứng chỉ THCS - v{APP_VERSION}")
         
         # Đặt kích thước và vị trí cửa sổ tối ưu đa nền tảng
         sw = self.root.winfo_screenwidth()
@@ -63,6 +65,7 @@ class MainWindow:
         self.cancel_requested = False
         self.all_unit_students = []
         self.last_output_dir = None
+        self.latest_update_info = None
 
         self._build_ui()
         self._init_data()
@@ -320,6 +323,13 @@ class MainWindow:
         )
         self.inspect_btn.pack(side=tk.LEFT, padx=6)
 
+        self.update_btn = ttk.Button(
+            bottom_frame,
+            text=f"🔄 Bản {APP_VERSION}",
+            command=self._check_update_manually
+        )
+        self.update_btn.pack(side=tk.LEFT, padx=6)
+
         exit_btn = ttk.Button(bottom_frame, text="Thoát", command=self.root.destroy)
         exit_btn.pack(side=tk.RIGHT)
 
@@ -334,6 +344,42 @@ class MainWindow:
         except Exception as e:
             self._log(f"❌ Lỗi nạp danh mục Danh_Muc_Tra_Cuu.xlsx: {e}", "error")
             messagebox.showerror("Lỗi nạp danh mục", f"Không thể đọc file danh mục tra cứu:\n{e}", parent=self.root)
+
+        # Kiểm tra phiên bản mới từ GitHub Releases ngầm
+        check_for_updates_async(self._on_update_checked, current_version=APP_VERSION)
+
+    def _on_update_checked(self, res: dict):
+        """Callback khi kiểm tra phiên bản trên GitHub hoàn thành."""
+        self.latest_update_info = res
+        if res.get("has_update"):
+            latest_v = res.get("latest_version", "")
+            self.root.after(0, lambda: self.update_btn.config(text=f"🔥 Có bản mới {latest_v}!"))
+            self.root.after(0, lambda: self._log(f"\n🔔 PHÁT HIỆN BẢN MỚI: {latest_v} trên GitHub (Bản hiện tại: v{APP_VERSION}). Bấm 'Có bản mới' ở góc dưới để cập nhật!", "warning"))
+
+    def _check_update_manually(self):
+        """Người dùng bấm nút kiểm tra cập nhật thủ công."""
+        info = self.latest_update_info
+        if not info or not info.get("success"):
+            info = check_for_updates(current_version=APP_VERSION)
+            self.latest_update_info = info
+
+        if info.get("has_update"):
+            latest_v = info.get("latest_version", "")
+            notes = info.get("release_notes", "").strip()
+            msg = f"Đã có phiên bản mới: {latest_v} trên GitHub!\n(Phiên bản bạn đang dùng: v{APP_VERSION})\n\n"
+            if notes:
+                msg += f"Thông tin cập nhật:\n{notes[:350]}\n\n"
+            msg += "Bạn có muốn mở trang tải bản cập nhật mới nhất không?"
+            ans = messagebox.askyesno("Cập nhật phần mềm", msg, parent=self.root)
+            if ans:
+                open_release_page(info.get("release_url", ""))
+        elif info.get("success"):
+            messagebox.showinfo("Cập nhật phần mềm", f"Bạn đang sử dụng phiên bản mới nhất (v{APP_VERSION})!", parent=self.root)
+        else:
+            err = info.get("error", "Không thể kết nối Internet")
+            ans = messagebox.askyesno("Kiểm tra cập nhật", f"Không thể kiểm tra cập nhật tự động:\n{err}\n\nBạn có muốn mở trang GitHub Releases để kiểm tra thủ công không?", parent=self.root)
+            if ans:
+                open_release_page()
 
     def _update_unit_combobox(self, unit_list: list[str]):
         self.unit_combo["values"] = unit_list

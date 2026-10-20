@@ -21,6 +21,13 @@ jobs:
       with:
         python-version: '3.11'
 
+    - name: Inject Version
+      shell: bash
+      run: |
+        echo "APP_VERSION = '1.2.${{ github.run_number }}'" > src/version.py
+        echo "APP_NAME = 'CÔNG CỤ SỐ HÓA VĂN BẰNG CHỨNG CHỈ THCS'" >> src/version.py
+        echo "GITHUB_REPO = 'hungphungvan/so_hoa_vbcc_thcs'" >> src/version.py
+
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
@@ -47,6 +54,13 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
+
+    - name: Inject Version
+      shell: bash
+      run: |
+        echo "APP_VERSION = '1.2.${{ github.run_number }}'" > src/version.py
+        echo "APP_NAME = 'CÔNG CỤ SỐ HÓA VĂN BẰNG CHỨNG CHỈ THCS'" >> src/version.py
+        echo "GITHUB_REPO = 'hungphungvan/so_hoa_vbcc_thcs'" >> src/version.py
 
     - name: Install dependencies
       run: |
@@ -90,10 +104,11 @@ jobs:
     - name: Publish to GitHub Release
       uses: softprops/action-gh-release@v2
       with:
-        tag_name: latest
-        name: "SoHoa_VBCC - Bản phát hành Windows & macOS"
+        tag_name: v1.2.${{ github.run_number }}
+        name: "SoHoa_VBCC v1.2.${{ github.run_number }} - Bản phát hành Windows & macOS"
+        make_latest: true
         body: |
-          ### 🚀 Tải về ứng dụng chạy trực tiếp (Không cần cài đặt Python)
+          ### 🚀 Tải về ứng dụng chạy trực tiếp (Không cần cài đặt Python) - Phiên bản v1.2.${{ github.run_number }}
 
           | Hệ điều hành | Tệp tải về | Hướng dẫn sử dụng |
           | :--- | :--- | :--- |

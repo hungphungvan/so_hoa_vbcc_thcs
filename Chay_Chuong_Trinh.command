@@ -14,6 +14,17 @@ echo "    CÔNG CỤ XỬ LÝ & SỐ HÓA VĂN BẰNG CHỨNG CHỈ THCS    "
 echo "========================================================================"
 echo ""
 
+# Tự động đồng bộ mã nguồn mới nhất từ GitHub
+if [ -d ".git" ] && command -v git >/dev/null 2>&1; then
+    echo "--> Đang kiểm tra cập nhật mới nhất từ GitHub..."
+    if git pull --quiet 2>/dev/null; then
+        echo "✅ Đã đồng bộ mã nguồn mới nhất thành công!"
+    else
+        echo "ℹ️ Đang chạy phiên bản hiện tại trên máy."
+    fi
+    echo ""
+fi
+
 # Ưu tiên UV để đảm bảo chạy trên Python 3.12 kèm Tkinter 9.0 hiện đại
 if command -v uv >/dev/null 2>&1; then
     if [ ! -d ".venv" ] || [ ! -f ".venv/bin/python" ]; then

@@ -8,6 +8,20 @@ echo     CÔNG CỤ XỬ LÝ & SỐ HÓA VĂN BẰNG CHỨNG CHỈ THCS
 echo ========================================================================
 echo.
 
+if exist .git (
+    where git >nul 2>nul
+    if %errorlevel% equ 0 (
+        echo --^> Dang kiem tra cap nhat moi nhat tu GitHub...
+        git pull --quiet 2>nul
+        if %errorlevel% equ 0 (
+            echo [OK] Da dong bo ma nguon moi nhat thanh cong!
+        ) else (
+            echo [i] Dang su dung phien ban hien tai tren may.
+        )
+        echo.
+    )
+)
+
 if exist .venv\Scripts\python.exe (
     .venv\Scripts\python.exe main.py
     goto end
