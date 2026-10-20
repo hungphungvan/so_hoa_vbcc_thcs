@@ -221,7 +221,7 @@ class MainWindow:
         gop_frame = ttk.LabelFrame(opt_grid, text="Gộp dữ liệu", padding=6)
         gop_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 4))
 
-        self.opt_gop_truong = tk.BooleanVar(value=True)
+        self.opt_gop_truong = tk.BooleanVar(value=False)
         ttk.Checkbutton(gop_frame, text="Gộp theo Trường", variable=self.opt_gop_truong).pack(anchor=tk.W, pady=3)
 
         self.opt_gop_nam = tk.BooleanVar(value=False)
@@ -231,7 +231,7 @@ class MainWindow:
         tach_frame = ttk.LabelFrame(opt_grid, text="Tách dữ liệu", padding=6)
         tach_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=4)
 
-        self.opt_tach_truong = tk.BooleanVar(value=True)
+        self.opt_tach_truong = tk.BooleanVar(value=False)
         ttk.Checkbutton(tach_frame, text="Tách theo Trường", variable=self.opt_tach_truong).pack(anchor=tk.W, pady=2)
 
         self.opt_tach_nam = tk.BooleanVar(value=False)
@@ -244,7 +244,7 @@ class MainWindow:
         doc_frame = ttk.LabelFrame(opt_grid, text="Danh mục hồ sơ số hóa", padding=6)
         doc_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(4, 0))
 
-        self.opt_doc_truong = tk.BooleanVar(value=True)
+        self.opt_doc_truong = tk.BooleanVar(value=False)
         ttk.Checkbutton(doc_frame, text="Tài liệu số hóa theo Trường", variable=self.opt_doc_truong).pack(anchor=tk.W, pady=2)
 
         self.opt_doc_nam = tk.BooleanVar(value=False)
