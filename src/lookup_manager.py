@@ -6,28 +6,80 @@ import re
 from pathlib import Path
 import openpyxl
 
+def find_data_file(filename: str) -> Path:
+    """Tìm đường dẫn tệp tài nguyên / danh mục tra cứu theo thứ tự ưu tiên:
+    1. Thư mục data đặt bên cạnh file thực thi (.exe trên Windows, .app trên macOS).
+    2. Thư mục làm việc hiện tại (cwd / data hoặc cwd).
+    3. Thư mục bundle đóng gói sẵn của PyInstaller (_MEIPASS / data hoặc _MEIPASS).
+    4. Thư mục data trong mã nguồn dự án.
+    Điều này cho phép người dùng tùy biến Danh_Muc_Tra_Cuu.xlsx bên ngoài mà không cần đóng gói lại phần mềm.
+    """
+    candidates: list[Path] = []
+
+    # 1. Khi chạy file đóng gói (PyInstaller frozen)
+    if getattr(sys, 'frozen', False):
+        exe_path = Path(sys.executable).resolve()
+        # Đối với ứng dụng macOS .app bundle: vd SoHoa_VBCC_macOS.app/Contents/MacOS/SoHoa_VBCC_macOS
+        # Thư mục chứa .app là cha cấp 4 của binary
+        if len(exe_path.parents) >= 4 and exe_path.parent.name == "MacOS" and exe_path.parents[1].name == "Contents":
+            app_dir = exe_path.parents[3]
+            candidates.extend([app_dir / "data", app_dir])
+
+        # Đối với file .exe trên Windows hoặc standalone binary trên Linux/macOS
+        candidates.extend([exe_path.parent / "data", exe_path.parent])
+
+    # 2. Thư mục làm việc hiện tại
+    cwd = Path.cwd().resolve()
+    candidates.extend([cwd / "data", cwd])
+
+    # 3. Khi chạy bản đóng gói PyInstaller (_MEIPASS)
+    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+        base = Path(sys._MEIPASS)
+        candidates.extend([base / "data", base])
+
+    # 4. Khi chạy từ mã nguồn
+    cur = Path(__file__).resolve().parent.parent / "data"
+    candidates.extend([cur, Path(__file__).resolve().parent.parent])
+
+    # Quét theo đúng thứ tự ưu tiên
+    seen = set()
+    for d in candidates:
+        try:
+            resolved_dir = d.resolve()
+            if resolved_dir in seen or not resolved_dir.is_dir():
+                continue
+            seen.add(resolved_dir)
+            target = resolved_dir / filename
+            if target.is_file():
+                return target
+        except Exception:
+            continue
+
+    # Fallback cuối cùng nếu không tìm thấy tệp
+    return get_data_dir() / filename
+
 def get_data_dir() -> Path:
-    """Xác định đường dẫn thư mục data chứa các file mẫu và danh mục tra cứu."""
+    """Xác định đường dẫn thư mục data chính (ưu tiên thư mục chứa Danh_Muc_Tra_Cuu.xlsx)."""
+    p = find_data_file("Danh_Muc_Tra_Cuu.xlsx")
+    if p.is_file():
+        return p.parent
+
     if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
         base = Path(sys._MEIPASS)
         if (base / "data").exists():
             return base / "data"
-        if (base / "Danh_Muc_Tra_Cuu.xlsx").exists():
-            return base
-    # Chạy bình thường từ mã nguồn
+        return base
+
     cur = Path(__file__).resolve().parent.parent / "data"
     if cur.exists():
         return cur
-    cwd_data = Path.cwd() / "data"
-    if cwd_data.exists():
-        return cwd_data
-    return Path(__file__).resolve().parent.parent
+    return Path.cwd()
 
 class LookupManager:
     """Quản lý nạp và tra cứu từ tệp Danh_Muc_Tra_Cuu.xlsx."""
     def __init__(self, excel_path: Path | str | None = None):
         if excel_path is None:
-            self.excel_path = get_data_dir() / "Danh_Muc_Tra_Cuu.xlsx"
+            self.excel_path = find_data_file("Danh_Muc_Tra_Cuu.xlsx")
         else:
             self.excel_path = Path(excel_path)
             

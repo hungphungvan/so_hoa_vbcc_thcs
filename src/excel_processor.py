@@ -11,7 +11,7 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-from src.lookup_manager import LookupManager, get_data_dir
+from src.lookup_manager import LookupManager, get_data_dir, find_data_file
 from src.normalizer import (
     clean_whitespace,
     is_cell_empty,
@@ -161,7 +161,7 @@ class ExcelProcessor:
     def __init__(self, lookup_mgr: LookupManager, template_path: Path | str | None = None):
         self.lookup_mgr = lookup_mgr
         if template_path is None:
-            self.template_path = get_data_dir() / "Mau_DS_Cap_Bang_THCS.xlsx"
+            self.template_path = find_data_file("Mau_DS_Cap_Bang_THCS.xlsx")
         else:
             self.template_path = Path(template_path)
 

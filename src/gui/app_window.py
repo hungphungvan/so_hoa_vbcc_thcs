@@ -329,6 +329,7 @@ class MainWindow:
             self.lookup_mgr = LookupManager()
             self.processor = ExcelProcessor(self.lookup_mgr)
             self._update_unit_combobox(self.lookup_mgr.unit_names_list)
+            self._log(f"📖 Nguồn danh mục: {self.lookup_mgr.excel_path}", "info")
             self._log(f"✅ Đã nạp thành công danh mục tra cứu: {len(self.lookup_mgr.unit_names_list)} đơn vị (kèm Xã/phường & Mã trường).", "success")
         except Exception as e:
             self._log(f"❌ Lỗi nạp danh mục Danh_Muc_Tra_Cuu.xlsx: {e}", "error")

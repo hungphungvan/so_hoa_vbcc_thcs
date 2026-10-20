@@ -141,6 +141,17 @@ Sau khi chuẩn hóa, toàn bộ tệp kết quả được lưu tại thư mụ
 
 ---
 
+## 📁 TÙY BIẾN DANH MỤC TRA CỨU & DANH SÁCH TRƯỜNG (`Danh_Muc_Tra_Cuu.xlsx`)
+
+Phần mềm tích hợp cơ chế nhận diện động ưu tiên tải tài nguyên:
+- **Mặc định**: Tệp danh mục chuẩn đã được đóng gói sẵn bên trong ứng dụng (`.exe` / `.app`).
+- **Khi muốn thêm trường mới hoặc thay đổi danh sách trường/đơn vị**:
+  - Người dùng chỉ cần đặt tệp `Danh_Muc_Tra_Cuu.xlsx` (hoặc thư mục `data/Danh_Muc_Tra_Cuu.xlsx`) **ngay bên cạnh tệp thực thi `SoHoa_VBCC.exe` hoặc ứng dụng `SoHoa_VBCC_macOS.app`**.
+  - Phần mềm sẽ tự động phát hiện và ưu tiên nạp tệp bên ngoài này thay cho tệp mặc định nội bộ mà **không cần phải đóng gói hay build lại mã nguồn**.
+  - Nguồn tệp danh mục đang nạp được hiển thị trực tiếp và minh bạch trên khung nhật ký log (`📖 Nguồn danh mục: ...`) ngay khi mở phần mềm.
+
+---
+
 ## ⚙️ HƯỚNG DẪN ĐÓNG GÓI BẰNG GITHUB ACTIONS
 
 Dự án đã được tích hợp sẵn quy trình CI/CD hoàn toàn tự động tại [`.github/workflows/build.yml`](.github/workflows/build.yml):

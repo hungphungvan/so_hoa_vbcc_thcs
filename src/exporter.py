@@ -10,7 +10,7 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-from src.lookup_manager import get_data_dir
+from src.lookup_manager import get_data_dir, find_data_file
 from src.normalizer import (
     clean_whitespace,
     is_cell_empty,
@@ -86,7 +86,7 @@ class DataExporter:
 
         # Nạp template cho mô-đun 2: Danh sách tài liệu số hóa
         if doc_template_path is None:
-            self.doc_template_path = get_data_dir() / "Mau_DS_Tai_Lieu_So_Hoa.xlsx"
+            self.doc_template_path = find_data_file("Mau_DS_Tai_Lieu_So_Hoa.xlsx")
         else:
             self.doc_template_path = Path(doc_template_path)
 
