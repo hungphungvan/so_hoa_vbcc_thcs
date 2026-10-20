@@ -57,6 +57,15 @@ Phần mềm tự động quét đệ quy toàn bộ thư mục và nhận diệ
 - Tự động bỏ qua các dòng tổng kết, người lập bảng, người ký, thủ trưởng đơn vị dựa trên bộ từ khóa kiểm soát: *"danh sách này có", "tổng số", "tổng cộng", "công nhận tốt nghiệp", "hiệu trưởng", "người ký"...*
 - Tự động dừng quét khi gặp liên tiếp 20 dòng trống.
 
+### 4. Quy trình xử lý toàn cục 4 giai đoạn xuyên suốt tất cả File & Sheet (Global Multi-Phase Pipeline)
+Khác với mô hình cũ xử lý lắt nhắt theo từng Sheet đơn lẻ, phần mềm áp dụng kiến trúc ETL 4 giai đoạn toàn cục:
+1. **Giai đoạn 0 (Trích xuất thô):** Quét nhanh toàn bộ các file & sheet, trích xuất dữ liệu học sinh vào bộ nhớ và đóng file Excel ngay lập tức để giải phóng RAM tối đa.
+2. **Giai đoạn 1 (Chuẩn hóa Ngày sinh Cột I):** Tự động chuẩn hóa format `dd/MM/yyyy` cho 100% học sinh; mở hộp thoại `DateFixDialog` (kèm ngữ cảnh 10 học sinh cùng lớp) để xử lý dứt điểm toàn bộ ngày sinh lỗi.
+3. **Giai đoạn 2 (Chuẩn hóa Tên trường Cột N):** Tự động so khớp danh mục trường trực thuộc của Đơn vị; mở hộp thoại `SchoolBlockDialog` cho các nhóm trường bị trống hoặc có tên lạ ngoài danh mục (kèm tính năng ghi nhớ).
+4. **Giai đoạn 3 (Chuẩn hóa Niên khóa Cột O):** Gom nhóm và tính toán **Năm sinh đa số** chính xác tuyệt đối (do Ngày sinh ở Giai đoạn 1 đã được làm sạch 100%). Tự động chấp nhận nếu $\text{Năm tốt nghiệp} == \text{Năm sinh đa số} + 15$; áp dụng cơ chế bảo vệ an toàn 2 lớp khi dùng cache.
+5. **Giai đoạn 4 (Chuẩn hóa Ngày cấp bằng Cột S):** Khi Trường và Niên khóa đã sạch 100% trên toàn đơn vị, hệ thống tự động gom nhóm `(Trường, Niên khóa)` để điền ngày cấp bằng chuẩn có nhiều học sinh nhất cho các trường hợp chỉ có tháng/năm hoặc năm.
+6. **Giai đoạn 5 (Xuất tệp kết quả):** Tự động tính toán Cột Y (Trạng thái số hóa), Cột Z (Nguyên nhân lỗi) và xuất các tệp Gộp, Tách, Danh sách lỗi và Danh sách tài liệu số hóa theo biểu mẫu.
+
 ---
 
 ## 📋 CHI TIẾT CÁCH LẤY DỮ LIỆU, CHUẨN HÓA, SỬA & BỔ SUNG TỪNG CỘT
