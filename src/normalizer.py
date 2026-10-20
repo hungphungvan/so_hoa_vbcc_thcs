@@ -454,83 +454,79 @@ def fuzzy_match_school(raw_school: str, allowed_schools: list[str], n: int = 5, 
 
 def auto_fill_graduation_dates_by_school_and_cohort(students: list[dict]):
     """
-    Gom nhóm học sinh theo (Tên trường đã học, Niên khóa) và tự động điền Ngày cấp bằng (Cột S):
-    - Đã có dd/MM/yyyy: giữ nguyên.
-    - Dạng MM/yyyy: tìm ngày cùng tháng/năm trong nhóm -> nếu có lấy ngày nhiều nhất, nếu không lấy Mode_group.
-    - Dạng yyyy: tìm ngày cùng năm trong nhóm -> nếu có lấy ngày nhiều nhất, nếu không lấy Mode_group.
-    - Để trống: lấy Mode_group.
-    - Nếu cả nhóm không có ngày nào: để trống.
+    Chuẩn hóa và điền ngày tháng năm cấp bằng (Cột S) theo quy trình 2 bước chuẩn:
+    + Bước 1: Quét và tìm những ngày cấp bằng có dạng chuẩn dd/MM/yyyy cùng với Tên trường và Niên khóa tương ứng.
+      Hình thành bảng dữ liệu: Tên trường | Niên khóa | Ngày cấp bằng, sắp xếp theo thứ tự từ ngày có nhiều HS nhất đến ít nhất.
+      Những HS có ngày cấp bằng hợp lệ dd/MM/yyyy thì giữ nguyên.
+    + Bước 2: Tìm những ngày cấp bằng không đúng:
+      - Dạng MM/yyyy: tìm trong danh sách ngày hợp lệ của đúng (Trường, Niên khóa) ngày có cùng tháng và năm (ưu tiên ngày nhiều HS nhất).
+        Nếu không thấy -> bỏ trống "".
+      - Dạng yyyy: tìm trong danh sách ngày hợp lệ của đúng (Trường, Niên khóa) ngày có cùng năm, lấy ngày có nhiều HS hơn.
+        Nếu không thấy -> bỏ trống "".
+      - Dạng trống hoặc trường hợp khác: bỏ trống "".
     """
-    # 1. Gom nhóm
-    groups: dict[tuple[str, str], list[dict]] = {}
+    # 1. Thu thập danh sách ngày chuẩn dd/MM/yyyy theo (Tên trường, Niên khóa)
+    valid_map: dict[tuple[str, str], list[tuple[str, int]]] = {}
+    school_cohort_dates: dict[tuple[str, str], list[str]] = {}
+
     for st in students:
-        sch = st.get("school", "") or "Chua_Xac_Dinh_Truong"
-        nk = st.get("cohort", "") or "Chua_Xac_Dinh_Nien_Khoa"
-        key = (sch.strip().lower(), nk.strip().lower())
-        if key not in groups:
-            groups[key] = []
-        groups[key].append(st)
+        sch = clean_whitespace(str(st.get("school") or "")).lower()
+        nk = clean_whitespace(str(st.get("cohort") or "")).lower()
+        key = (sch, nk)
 
-    for key, group_students in groups.items():
-        # Thu thập tất cả ngày dd/MM/yyyy hợp lệ thực tế trong nhóm
-        valid_dates = []
-        for st in group_students:
-            g_val = st.get("grad_date", "")
-            if g_val:
-                formatted = format_grad_date_to_text(g_val)
-                is_v, _, _ = check_dob_validity(formatted)
-                if is_v:
-                    valid_dates.append(formatted)
-
-        mode_group = Counter(valid_dates).most_common(1)[0][0] if valid_dates else None
-
-        for st in group_students:
-            curr_grad = st.get("grad_date", "")
-            formatted = format_grad_date_to_text(curr_grad)
-            
-            # 1. Đã là dd/MM/yyyy hợp lệ -> Giữ nguyên
+        g_val = st.get("grad_date", "")
+        if not is_cell_empty(g_val):
+            formatted = format_grad_date_to_text(g_val)
             is_v, _, _ = check_dob_validity(formatted)
             if is_v:
-                st["grad_date"] = formatted
-                continue
+                school_cohort_dates.setdefault(key, []).append(formatted)
 
-            # 2. Dạng MM/yyyy
-            m_my = re.match(r'^(\d{2})/(\d{4})$', formatted)
-            if m_my:
-                target_m, target_y = m_my.groups()
-                same_my = [d for d in valid_dates if d.endswith(f"/{target_m}/{target_y}")]
-                if same_my:
-                    st["grad_date"] = Counter(same_my).most_common(1)[0][0]
-                elif mode_group:
-                    st["grad_date"] = mode_group
-                else:
-                    st["grad_date"] = formatted
-                continue
+    # Đếm tần suất và sắp xếp giảm dần theo số lượng HS
+    for key, date_list in school_cohort_dates.items():
+        valid_map[key] = Counter(date_list).most_common()
 
-            # 3. Dạng yyyy
-            m_y = re.match(r'^(\d{4})$', formatted)
-            if m_y:
-                target_y = m_y.group(1)
-                same_y = [d for d in valid_dates if d.endswith(f"/{target_y}")]
-                if same_y:
-                    st["grad_date"] = Counter(same_y).most_common(1)[0][0]
-                elif mode_group:
-                    st["grad_date"] = mode_group
-                else:
-                    st["grad_date"] = formatted
-                continue
+    # Bước 2: Xử lý các ngày chưa đúng chuẩn
+    for st in students:
+        sch = clean_whitespace(str(st.get("school") or "")).lower()
+        nk = clean_whitespace(str(st.get("cohort") or "")).lower()
+        key = (sch, nk)
+        valid_dates_for_group = valid_map.get(key, [])
 
-            # 4. Trường hợp để trống
-            if is_cell_empty(formatted):
-                if mode_group:
-                    st["grad_date"] = mode_group
-                else:
-                    st["grad_date"] = ""
-            else:
-                if mode_group:
-                    st["grad_date"] = mode_group
-                else:
-                    st["grad_date"] = formatted
+        curr_grad = st.get("grad_date", "")
+        formatted = format_grad_date_to_text(curr_grad)
+
+        # 1. Đã là dd/MM/yyyy hợp lệ -> Giữ nguyên
+        is_v, _, _ = check_dob_validity(formatted)
+        if is_v:
+            st["grad_date"] = formatted
+            continue
+
+        # 2. Dạng MM/yyyy -> Tìm ngày chuẩn cùng tháng & năm
+        m_my = re.match(r'^(\d{2})/(\d{4})$', formatted)
+        if m_my:
+            target_m, target_y = m_my.groups()
+            matched_date = None
+            for d_str, _ in valid_dates_for_group:
+                if d_str.endswith(f"/{target_m}/{target_y}"):
+                    matched_date = d_str
+                    break
+            st["grad_date"] = matched_date if matched_date else ""
+            continue
+
+        # 3. Dạng yyyy -> Tìm ngày chuẩn cùng năm có nhiều HS nhất
+        m_y = re.match(r'^(\d{4})$', formatted)
+        if m_y:
+            target_y = m_y.group(1)
+            matched_date = None
+            for d_str, _ in valid_dates_for_group:
+                if d_str.endswith(f"/{target_y}"):
+                    matched_date = d_str
+                    break
+            st["grad_date"] = matched_date if matched_date else ""
+            continue
+
+        # 4. Trường hợp trống hoặc khác -> Bỏ trống
+        st["grad_date"] = ""
 
 # ==============================================================================
 # XÁC ĐỊNH TRẠNG THÁI SỐ HÓA (CỘT Y) VÀ NGUYÊN NHÂN (CỘT Z)

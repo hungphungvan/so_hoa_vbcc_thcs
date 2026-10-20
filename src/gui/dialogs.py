@@ -21,7 +21,8 @@ def center_window(window, parent=None, width=None, height=None):
 class SchoolBlockDialog(tk.Toplevel):
     """
     Hộp thoại tương tác khi phát hiện Khối học sinh thiếu hoặc sai Tên trường (Cột N).
-    Hiển thị bảng đối chiếu 5 bạn trước và 5 bạn sau, cho phép chọn/áp dụng cho cả khối.
+    Hiển thị thông tin Thư mục, Tên File, Tên Sheet và danh sách gợi ý trường chuẩn từ DS_Don_Vi.
+    Thống nhất 4 cột: Họ và tên, Ngày sinh, Niên khóa, Ngày tháng năm cấp bằng.
     """
     def __init__(self, parent, block_info: dict, allowed_schools: list[str], default_suggestion: str = ""):
         super().__init__(parent)
@@ -36,7 +37,7 @@ class SchoolBlockDialog(tk.Toplevel):
         self.apply_to_all_similar = False
         
         self._build_ui()
-        center_window(self, parent, 850, 520)
+        center_window(self, parent, 880, 560)
 
     def _build_ui(self):
         hdr_frame = ttk.Frame(self, padding=(12, 10))
@@ -46,41 +47,52 @@ class SchoolBlockDialog(tk.Toplevel):
         end_stt = self.block_info.get("end_stt", 1)
         count = self.block_info.get("count", 1)
         raw_val = self.block_info.get("raw_val", "(Trống)")
+        folder_name = self.block_info.get("folder_name", "")
+        file_name = self.block_info.get("file_name", "")
+        sheet_name = self.block_info.get("sheet_name", "")
         
         title_lbl = ttk.Label(
             hdr_frame, 
-            text=f"⚠️ PHÁT HIỆN KHỐI {count} HỌC SINH CẦN XÁC ĐỊNH TÊN TRƯỜNG (STT {start_stt} -> {end_stt})",
+            text=f"⚠️ XÁC ĐỊNH TÊN TRƯỜNG CHO {count} HỌC SINH (STT {start_stt} -> {end_stt})",
             font=("Segoe UI", 11, "bold"),
             foreground="#B71C1C"
         )
         title_lbl.pack(anchor=tk.W)
         
+        info_lines = []
+        if folder_name:
+            info_lines.append(f"📁 Thư mục: {folder_name}")
+        info_lines.append(f"📄 Tệp: {file_name}")
+        info_lines.append(f"📑 Sheet: {sheet_name}")
+        info_lines.append(f"🏷️ Giá trị gốc: '{raw_val}'")
+        
         sub_lbl = ttk.Label(
             hdr_frame,
-            text=f"Tệp: {self.block_info.get('file_name', '')} | Sheet: {self.block_info.get('sheet_name', '')} | Giá trị gốc: '{raw_val}'",
+            text=" | ".join(info_lines),
             font=("Segoe UI", 9)
         )
         sub_lbl.pack(anchor=tk.W, pady=(2, 0))
 
-        tbl_frame = ttk.LabelFrame(self, text="📋 Bảng đối chiếu học sinh tham chiếu (5 trước và 5 sau)", padding=6)
+        tbl_frame = ttk.LabelFrame(self, text="📋 Bảng đối chiếu học sinh tham chiếu", padding=6)
         tbl_frame.pack(fill=tk.BOTH, expand=True, padx=12, pady=4)
         
-        columns = ("pos", "stt", "name", "school", "cohort", "grad")
+        # Thống nhất 4 cột: Họ và tên, Ngày sinh, Niên khóa, Ngày cấp bằng
+        columns = ("pos", "stt", "name", "dob", "cohort", "grad")
         self.tree = ttk.Treeview(tbl_frame, columns=columns, show="headings", height=8)
         
         self.tree.heading("pos", text="")
         self.tree.heading("stt", text="STT")
         self.tree.heading("name", text="Họ và tên")
-        self.tree.heading("school", text="Tên trường đã học")
+        self.tree.heading("dob", text="Ngày sinh")
         self.tree.heading("cohort", text="Niên khóa")
-        self.tree.heading("grad", text="Ngày cấp bằng")
+        self.tree.heading("grad", text="Ngày tháng năm cấp bằng")
         
-        self.tree.column("pos", width=40, anchor=tk.CENTER)
-        self.tree.column("stt", width=60, anchor=tk.CENTER)
-        self.tree.column("name", width=180, anchor=tk.W)
-        self.tree.column("school", width=220, anchor=tk.W)
-        self.tree.column("cohort", width=100, anchor=tk.CENTER)
-        self.tree.column("grad", width=110, anchor=tk.CENTER)
+        self.tree.column("pos", width=36, anchor=tk.CENTER)
+        self.tree.column("stt", width=54, anchor=tk.CENTER)
+        self.tree.column("name", width=220, anchor=tk.W)
+        self.tree.column("dob", width=120, anchor=tk.CENTER)
+        self.tree.column("cohort", width=120, anchor=tk.CENTER)
+        self.tree.column("grad", width=140, anchor=tk.CENTER)
         
         scrollbar = ttk.Scrollbar(tbl_frame, orient=tk.VERTICAL, command=self.tree.yview)
         self.tree.configure(yscrollcommand=scrollbar.set)
@@ -95,56 +107,61 @@ class SchoolBlockDialog(tk.Toplevel):
                 pos_icon,
                 r.get("stt", ""),
                 r.get("name", ""),
-                r.get("school", "") or "(Chưa có)",
-                r.get("cohort", ""),
-                r.get("grad", "")
+                r.get("dob", "") or "(Chưa có)",
+                r.get("cohort", "") or "(Trống)",
+                r.get("grad", "") or "(Trống)"
             ))
             if is_curr:
                 self.tree.tag_configure("highlight", background="#FFF3E0", foreground="#BF360C")
                 self.tree.item(item_id, tags=("highlight",))
 
-        act_frame = ttk.LabelFrame(self, text="💡 Lựa chọn Tên trường áp dụng cho khối học sinh này", padding=10)
+        act_frame = ttk.LabelFrame(self, text="💡 Chọn Tên trường chuẩn từ danh mục DS_Don_Vi áp dụng cho nhóm này", padding=10)
         act_frame.pack(fill=tk.X, padx=12, pady=8)
         
-        if self.default_suggestion:
+        # Gợi ý thông minh (Fuzzy match hoặc từ ngữ cảnh)
+        fuzzy_suggestions = self.block_info.get("fuzzy_suggestions", [])
+        if self.default_suggestion and self.default_suggestion not in fuzzy_suggestions:
+            fuzzy_suggestions.insert(0, self.default_suggestion)
+
+        if fuzzy_suggestions:
             sugg_box = ttk.Frame(act_frame)
             sugg_box.pack(fill=tk.X, pady=(0, 6))
-            ttk.Label(sugg_box, text="Gợi ý tự động từ bạn liền kề: ", font=("Segoe UI", 9)).pack(side=tk.LEFT)
-            ttk.Label(sugg_box, text=f"'{self.default_suggestion}'", font=("Segoe UI", 9, "bold"), foreground="#1B5E20").pack(side=tk.LEFT)
-            
-            sugg_btn = ttk.Button(sugg_box, text="👉 Áp dụng gợi ý", command=self._apply_suggestion)
-            sugg_btn.pack(side=tk.RIGHT)
+            ttk.Label(sugg_box, text="Gợi ý gần đúng nhất: ", font=("Segoe UI", 9, "bold")).pack(side=tk.LEFT)
+            for s_opt in fuzzy_suggestions[:3]:
+                btn = ttk.Button(sugg_box, text=f"👉 {s_opt}", command=lambda opt=s_opt: self._pick_suggestion(opt))
+                btn.pack(side=tk.LEFT, padx=3)
 
         select_box = ttk.Frame(act_frame)
         select_box.pack(fill=tk.X, pady=4)
-        ttk.Label(select_box, text="Hoặc chọn trường trực thuộc: ", font=("Segoe UI", 9)).pack(side=tk.LEFT)
+        ttk.Label(select_box, text="Chọn tên trường chuẩn trực thuộc: ", font=("Segoe UI", 9)).pack(side=tk.LEFT)
         
-        self.school_var = tk.StringVar(value=self.default_suggestion or (self.allowed_schools[0] if self.allowed_schools else ""))
-        self.school_combo = ttk.Combobox(select_box, textvariable=self.school_var, values=self.allowed_schools, width=45)
+        init_val = self.default_suggestion or (fuzzy_suggestions[0] if fuzzy_suggestions else (self.allowed_schools[0] if self.allowed_schools else ""))
+        self.school_var = tk.StringVar(value=init_val)
+        self.school_combo = ttk.Combobox(select_box, textvariable=self.school_var, values=self.allowed_schools, width=50, state="readonly")
         self.school_combo.pack(side=tk.LEFT, padx=6)
         
         self.remember_var = tk.BooleanVar(value=True)
-        rem_chk = ttk.Checkbutton(act_frame, text="Tự động ghi nhớ cho các khối tương tự tiếp theo", variable=self.remember_var)
+        rem_chk = ttk.Checkbutton(act_frame, text="Tự động ghi nhớ ánh xạ này cho các trường hợp tương tự tiếp theo", variable=self.remember_var)
         rem_chk.pack(anchor=tk.W, pady=(4, 0))
 
         btn_frame = ttk.Frame(self, padding=(12, 8))
         btn_frame.pack(fill=tk.X)
         
         count = self.block_info.get("count", 1)
-        ok_btn = ttk.Button(btn_frame, text=f"✅ Áp dụng cho cả {count} học sinh", command=self._confirm)
+        ok_btn = ttk.Button(btn_frame, text=f"✅ Áp dụng trường đã chọn cho {count} học sinh", command=self._confirm)
         ok_btn.pack(side=tk.RIGHT, padx=4)
         
-        skip_btn = ttk.Button(btn_frame, text="⏩ Bỏ qua (Giữ nguyên trống)", command=self._skip)
+        skip_btn = ttk.Button(btn_frame, text="⏩ Bỏ qua (Để trống)", command=self._skip)
         skip_btn.pack(side=tk.RIGHT, padx=4)
 
-    def _apply_suggestion(self):
-        self.school_var.set(self.default_suggestion)
+    def _pick_suggestion(self, opt_school):
+        self.school_var.set(opt_school)
         self._confirm()
 
     def _confirm(self):
         val = self.school_var.get().strip()
         if not val:
-            messagebox.showwarning("Cảnh báo", "Vui lòng chọn hoặc nhập tên trường!", parent=self)
+            messagebox.showwarning("Cảnh báo", "Vui lòng chọn Tên trường chuẩn từ danh mục!", parent=self)
             return
         self.result = val
         self.apply_to_all_similar = self.remember_var.get()
@@ -157,51 +174,63 @@ class SchoolBlockDialog(tk.Toplevel):
 
 class CohortBlockDialog(tk.Toplevel):
     """
-    Hộp thoại tương tác khi phát hiện Khối học sinh thiếu Niên khóa (Cột O).
-    Gợi ý thông minh tính từ Năm sinh của học sinh (Y_ra = Y_birth + 15, Y_vao = Y_ra - 4).
+    Hộp thoại tương tác khi phát hiện Khối học sinh cần xác định/chuẩn hóa Niên khóa (Cột O).
+    Hiển thị tối đa 15 học sinh thuộc nhóm này cùng Tên File, Tên Sheet và lý do đối chiếu.
+    Thống nhất 4 cột: Họ và tên, Ngày sinh, Niên khóa, Ngày tháng năm cấp bằng.
+    Người dùng nhập Y_ra (Năm ra trường), hệ thống tự động suy ra Y_vao = Y_ra - 4.
     """
-    def __init__(self, parent, block_info: dict, suggested_cohort: str = "", inferred_from_year: int | None = None):
+    def __init__(self, parent, block_info: dict, default_y_ra: int | str = "", reason: str = ""):
         super().__init__(parent)
         self.title("Xử lý Niên khóa (Cột O)")
         self.transient(parent)
         self.grab_set()
         
         self.block_info = block_info
-        self.suggested_cohort = suggested_cohort
-        self.inferred_from_year = inferred_from_year
+        self.default_y_ra = str(default_y_ra) if default_y_ra else ""
+        self.reason = reason or self.block_info.get("reason", "")
         self.result = None
         self.apply_to_all_similar = False
         
         self._build_ui()
-        center_window(self, parent, 850, 520)
+        center_window(self, parent, 880, 560)
 
     def _build_ui(self):
         hdr_frame = ttk.Frame(self, padding=(12, 10))
         hdr_frame.pack(fill=tk.X)
         
-        start_stt = self.block_info.get("start_stt", 1)
-        end_stt = self.block_info.get("end_stt", 1)
         count = self.block_info.get("count", 1)
         raw_val = self.block_info.get("raw_val", "(Trống)")
+        file_name = self.block_info.get("file_name", "")
+        sheet_name = self.block_info.get("sheet_name", "")
+        folder_name = self.block_info.get("folder_name", "")
         
         title_lbl = ttk.Label(
             hdr_frame, 
-            text=f"⚠️ PHÁT HIỆN KHỐI {count} HỌC SINH CẦN XÁC ĐỊNH NIÊN KHÓA (STT {start_stt} -> {end_stt})",
+            text=f"⚠️ XÁC ĐỊNH NIÊN KHÓA CHO NHÓM {count} HỌC SINH (Giá trị gốc: '{raw_val}')",
             font=("Segoe UI", 11, "bold"),
             foreground="#E65100"
         )
         title_lbl.pack(anchor=tk.W)
         
+        info_parts = []
+        if folder_name:
+            info_parts.append(f"📁 {folder_name}")
+        info_parts.append(f"📄 {file_name}")
+        info_parts.append(f"📑 {sheet_name}")
+        if self.reason:
+            info_parts.append(f"💡 {self.reason}")
+            
         sub_lbl = ttk.Label(
             hdr_frame,
-            text=f"Tệp: {self.block_info.get('file_name', '')} | Sheet: {self.block_info.get('sheet_name', '')} | Giá trị gốc: '{raw_val}'",
+            text=" | ".join(info_parts),
             font=("Segoe UI", 9)
         )
         sub_lbl.pack(anchor=tk.W, pady=(2, 0))
 
-        tbl_frame = ttk.LabelFrame(self, text="📋 Bảng đối chiếu học sinh tham chiếu (5 trước và 5 sau)", padding=6)
+        tbl_frame = ttk.LabelFrame(self, text="📋 Danh sách học sinh trong nhóm đối chiếu (Hiển thị tối đa 15 học sinh)", padding=6)
         tbl_frame.pack(fill=tk.BOTH, expand=True, padx=12, pady=4)
         
+        # Thống nhất 4 cột: Họ và tên, Ngày sinh, Niên khóa, Ngày cấp bằng
         columns = ("pos", "stt", "name", "dob", "cohort", "grad")
         self.tree = ttk.Treeview(tbl_frame, columns=columns, show="headings", height=8)
         
@@ -212,20 +241,22 @@ class CohortBlockDialog(tk.Toplevel):
         self.tree.heading("cohort", text="Niên khóa")
         self.tree.heading("grad", text="Ngày cấp bằng")
         
-        self.tree.column("pos", width=40, anchor=tk.CENTER)
-        self.tree.column("stt", width=60, anchor=tk.CENTER)
-        self.tree.column("name", width=200, anchor=tk.W)
+        self.tree.column("pos", width=36, anchor=tk.CENTER)
+        self.tree.column("stt", width=54, anchor=tk.CENTER)
+        self.tree.column("name", width=220, anchor=tk.W)
         self.tree.column("dob", width=120, anchor=tk.CENTER)
-        self.tree.column("cohort", width=140, anchor=tk.CENTER)
-        self.tree.column("grad", width=130, anchor=tk.CENTER)
+        self.tree.column("cohort", width=120, anchor=tk.CENTER)
+        self.tree.column("grad", width=140, anchor=tk.CENTER)
         
         scrollbar = ttk.Scrollbar(tbl_frame, orient=tk.VERTICAL, command=self.tree.yview)
         self.tree.configure(yscrollcommand=scrollbar.set)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
-        for r in self.block_info.get("context_rows", []):
-            is_curr = r.get("is_in_block", False)
+        # Hiển thị tối đa 15 học sinh
+        context_rows = self.block_info.get("context_rows", [])[:15]
+        for r in context_rows:
+            is_curr = r.get("is_in_block", True)
             pos_icon = "👉" if is_curr else ""
             item_id = self.tree.insert("", tk.END, values=(
                 pos_icon,
@@ -239,80 +270,79 @@ class CohortBlockDialog(tk.Toplevel):
                 self.tree.tag_configure("highlight", background="#FFF3E0", foreground="#BF360C")
                 self.tree.item(item_id, tags=("highlight",))
 
-        act_frame = ttk.LabelFrame(self, text="💡 Xác định Niên khóa (Dạng YYYY-YYYY, hiệu 2 năm = 4)", padding=10)
-        act_frame.pack(fill=tk.X, padx=12, pady=8)
+        act_frame = ttk.LabelFrame(self, text="💡 Nhập Năm ra trường (Y_ra) - Hệ thống tự động tính Y_vao = Y_ra - 4", padding=10)
+        act_frame.pack(fill=tk.X, padx=12, pady=6)
         
-        if self.suggested_cohort:
-            sugg_box = ttk.Frame(act_frame)
-            sugg_box.pack(fill=tk.X, pady=(0, 6))
-            source_txt = f"từ năm sinh phổ biến {self.inferred_from_year}" if self.inferred_from_year else "từ học sinh liền kề"
-            ttk.Label(sugg_box, text=f"Gợi ý tự động ({source_txt}): ", font=("Segoe UI", 9)).pack(side=tk.LEFT)
-            ttk.Label(sugg_box, text=f"'{self.suggested_cohort}'", font=("Segoe UI", 9, "bold"), foreground="#1B5E20").pack(side=tk.LEFT)
-            
-            sugg_btn = ttk.Button(sugg_box, text="👉 Áp dụng gợi ý", command=self._apply_suggestion)
-            sugg_btn.pack(side=tk.RIGHT)
-
         input_box = ttk.Frame(act_frame)
         input_box.pack(fill=tk.X, pady=4)
-        ttk.Label(input_box, text="Nhập Niên khóa (hoặc chỉ gõ Năm ra trường, ví dụ 2020): ", font=("Segoe UI", 9)).pack(side=tk.LEFT)
         
-        self.cohort_var = tk.StringVar(value=self.suggested_cohort)
-        self.cohort_entry = ttk.Entry(input_box, textvariable=self.cohort_var, width=20)
-        self.cohort_entry.pack(side=tk.LEFT, padx=6)
+        ttk.Label(input_box, text="Năm ra trường (Y_ra, ví dụ 2022): ", font=("Segoe UI", 9, "bold")).pack(side=tk.LEFT)
+        
+        self.y_ra_var = tk.StringVar(value=self.default_y_ra)
+        self.y_ra_entry = ttk.Entry(input_box, textvariable=self.y_ra_var, width=12, font=("Segoe UI", 10, "bold"))
+        self.y_ra_entry.pack(side=tk.LEFT, padx=6)
+        self.y_ra_entry.focus_set()
+        self.y_ra_entry.bind("<Return>", lambda event: self._confirm())
+        
+        self.preview_lbl = ttk.Label(input_box, text="", font=("Segoe UI", 10, "bold"), foreground="#1B5E20")
+        self.preview_lbl.pack(side=tk.LEFT, padx=12)
+        
+        self.y_ra_var.trace_add("write", lambda *args: self._update_preview())
+        self._update_preview()
         
         self.remember_var = tk.BooleanVar(value=True)
-        rem_chk = ttk.Checkbutton(act_frame, text="Tự động ghi nhớ cho các khối tương tự tiếp theo", variable=self.remember_var)
+        rem_chk = ttk.Checkbutton(act_frame, text="Tự động ghi nhớ cho các nhóm tương tự tiếp theo", variable=self.remember_var)
         rem_chk.pack(anchor=tk.W, pady=(4, 0))
 
         btn_frame = ttk.Frame(self, padding=(12, 8))
         btn_frame.pack(fill=tk.X)
         
         count = self.block_info.get("count", 1)
-        ok_btn = ttk.Button(btn_frame, text=f"✅ Áp dụng cho cả {count} học sinh", command=self._confirm)
+        ok_btn = ttk.Button(btn_frame, text=f"✅ Áp dụng Niên khóa cho {count} học sinh", command=self._confirm)
         ok_btn.pack(side=tk.RIGHT, padx=4)
         
-        skip_btn = ttk.Button(btn_frame, text="⏩ Bỏ qua (Giữ nguyên)", command=self._skip)
+        skip_btn = ttk.Button(btn_frame, text="⏩ Bỏ qua (Giữ nguyên gốc)", command=self._skip)
         skip_btn.pack(side=tk.RIGHT, padx=4)
 
-    def _apply_suggestion(self):
-        self.cohort_var.set(self.suggested_cohort)
-        self._confirm()
+    def _update_preview(self):
+        val = self.y_ra_var.get().strip()
+        m4 = re.match(r'^(19\d{2}|20\d{2})$', val)
+        if m4:
+            y_ra = int(m4.group(1))
+            self.preview_lbl.config(text=f"👉 Niên khóa tương ứng: {y_ra - 4}-{y_ra}")
+            return
+            
+        m_full = re.match(r'^(\d{4})\s*[-/–]\s*(\d{4})$', val)
+        if m_full:
+            self.preview_lbl.config(text=f"👉 Niên khóa: {m_full.group(1)}-{m_full.group(2)}")
+            return
+            
+        self.preview_lbl.config(text="(Vui lòng nhập 4 chữ số năm ra trường, vd: 2022)")
 
     def _confirm(self):
-        val = self.cohort_var.get().strip()
+        val = self.y_ra_var.get().strip()
         if not val:
-            messagebox.showwarning("Cảnh báo", "Vui lòng nhập Niên khóa hoặc Năm ra trường!", parent=self)
+            messagebox.showwarning("Cảnh báo", "Vui lòng nhập Năm ra trường (Y_ra) hoặc Niên khóa!", parent=self)
             return
         
         m4 = re.match(r'^(19\d{2}|20\d{2})$', val)
         if m4:
             y_ra = int(m4.group(1))
-            val = f"{y_ra - 4}-{y_ra}"
-        m2 = re.match(r'^(\d{2})$', val)
-        if m2:
-            v2 = int(m2.group(1))
-            y_ra = 2000 + v2 if v2 <= 50 else 1900 + v2
-            val = f"{y_ra - 4}-{y_ra}"
-
-        from src.normalizer import parse_nien_khoa
-        is_valid, y1, y2, fmt = parse_nien_khoa(val)
-        if is_valid:
-            self.result = fmt
-            self.apply_to_all_similar = self.remember_var.get()
-            self.destroy()
+            final_nk = f"{y_ra - 4}-{y_ra}"
         else:
-            if y1 and y2:
-                ans = messagebox.askyesno(
-                    "Xác nhận",
-                    f"Niên khóa '{val}' có hiệu số {y2} - {y1} = {y2 - y1} (khác 4 theo chuẩn THCS).\nBạn có chắc chắn muốn lưu giá trị này không?",
-                    parent=self
-                )
-                if ans:
-                    self.result = val
-                    self.apply_to_all_similar = self.remember_var.get()
-                    self.destroy()
+            from src.normalizer import parse_nien_khoa
+            is_valid, y1, y2, fmt = parse_nien_khoa(val)
+            if is_valid:
+                final_nk = fmt
+            elif y1 and y2:
+                final_nk = f"{y1}-{y2}"
             else:
-                messagebox.showerror("Lỗi", f"Niên khóa '{val}' không đúng định dạng YYYY-YYYY!", parent=self)
+                messagebox.showerror("Lỗi", "Vui lòng nhập năm hợp lệ (ví dụ: 2022 hoặc 2018-2022)!", parent=self)
+                return
+
+        self.result = final_nk
+        self.apply_to_all_similar = self.remember_var.get()
+        self.destroy()
 
     def _skip(self):
         self.result = self.block_info.get("raw_val", "")
@@ -364,25 +394,26 @@ class DateFixDialog(tk.Toplevel):
         )
         sub_lbl.pack(anchor=tk.W, pady=(2, 0))
 
-        tbl_frame = ttk.LabelFrame(self, text="📋 Bảng đối chiếu học sinh tham chiếu (5 trước và 5 sau)", padding=6)
+        tbl_frame = ttk.LabelFrame(self, text="📋 Bảng đối chiếu học sinh tham chiếu", padding=6)
         tbl_frame.pack(fill=tk.BOTH, expand=True, padx=12, pady=4)
         
-        columns = ("pos", "stt", "name", "cohort", "dob", "grad")
+        # Thống nhất 4 cột: Họ và tên, Ngày sinh, Niên khóa, Ngày cấp bằng
+        columns = ("pos", "stt", "name", "dob", "cohort", "grad")
         self.tree = ttk.Treeview(tbl_frame, columns=columns, show="headings", height=8)
         
         self.tree.heading("pos", text="")
         self.tree.heading("stt", text="STT")
         self.tree.heading("name", text="Họ và tên")
-        self.tree.heading("cohort", text="Niên khóa")
         self.tree.heading("dob", text="Ngày sinh")
+        self.tree.heading("cohort", text="Niên khóa")
         self.tree.heading("grad", text="Ngày cấp bằng")
         
-        self.tree.column("pos", width=40, anchor=tk.CENTER)
-        self.tree.column("stt", width=60, anchor=tk.CENTER)
-        self.tree.column("name", width=200, anchor=tk.W)
+        self.tree.column("pos", width=36, anchor=tk.CENTER)
+        self.tree.column("stt", width=54, anchor=tk.CENTER)
+        self.tree.column("name", width=220, anchor=tk.W)
+        self.tree.column("dob", width=120, anchor=tk.CENTER)
         self.tree.column("cohort", width=120, anchor=tk.CENTER)
-        self.tree.column("dob", width=130, anchor=tk.CENTER)
-        self.tree.column("grad", width=130, anchor=tk.CENTER)
+        self.tree.column("grad", width=140, anchor=tk.CENTER)
         
         scrollbar = ttk.Scrollbar(tbl_frame, orient=tk.VERTICAL, command=self.tree.yview)
         self.tree.configure(yscrollcommand=scrollbar.set)
@@ -396,8 +427,8 @@ class DateFixDialog(tk.Toplevel):
                 pos_icon,
                 r.get("stt", ""),
                 r.get("name", ""),
-                r.get("cohort", "") or "(Trống)",
                 r.get("dob", "") or "(Trống)",
+                r.get("cohort", "") or "(Trống)",
                 r.get("grad", "") or "(Trống)"
             ))
             if is_curr:

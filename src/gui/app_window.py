@@ -372,8 +372,10 @@ class MainWindow:
                     self.root.wait_window(dlg)
                     res_box["result"] = (dlg.result, dlg.apply_to_all_similar)
                 elif d_type == "cohort_block":
-                    block_info, sugg_nk, mode_yr = args
-                    dlg = CohortBlockDialog(self.root, block_info, sugg_nk, mode_yr)
+                    block_info = args[0]
+                    default_y_ra = args[1] if len(args) > 1 else ""
+                    reason = args[2] if len(args) > 2 else ""
+                    dlg = CohortBlockDialog(self.root, block_info, default_y_ra, reason)
                     self.root.wait_window(dlg)
                     res_box["result"] = (dlg.result, dlg.apply_to_all_similar)
                 elif d_type == "date_fix":

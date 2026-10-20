@@ -320,9 +320,8 @@ class ExcelProcessor:
                         raw_cohort = new_row[14]
                         raw_grad = new_row[18]
 
-                        # Áp dụng heuristic fallback nếu ô trống
-                        init_school = clean_whitespace(str(raw_school)) if not is_cell_empty(raw_school) else (effective_context_school or "")
-                        init_cohort = clean_whitespace(str(raw_cohort)) if not is_cell_empty(raw_cohort) else (effective_context_cohort or "")
+                        init_school = clean_whitespace(str(raw_school)) if not is_cell_empty(raw_school) else ""
+                        init_cohort = clean_whitespace(str(raw_cohort)) if not is_cell_empty(raw_cohort) else ""
 
                         student_dict = {
                             "file_name": file_path.name,
@@ -350,184 +349,7 @@ class ExcelProcessor:
                 log(f"  -> Trích xuất được {total_sheet} học sinh từ Sheet '{ws_in.title}'.", "info")
 
                 # ==============================================================
-                # GIAI ĐOẠN A: XỬ LÝ KHỐI THIẾU/SAI TÊN TRƯỜNG (CỘT N)
-                # ==============================================================
-                i = 0
-                while i < total_sheet:
-                    st_item = sheet_students[i]
-                    curr_sch = st_item["school"]
-                    is_valid_sch = any(curr_sch.lower() == s.lower() for s in allowed_schools) if allowed_schools else bool(curr_sch)
-
-                    if not is_valid_sch:
-                        start_k = i
-                        raw_val_key = clean_whitespace(str(st_item["raw_school"]))
-
-                        while i < total_sheet:
-                            nxt = sheet_students[i]
-                            nxt_sch = nxt["school"]
-                            nxt_is_valid = any(nxt_sch.lower() == s.lower() for s in allowed_schools) if allowed_schools else bool(nxt_sch)
-                            nxt_raw_key = clean_whitespace(str(nxt["raw_school"]))
-                            if (not nxt_is_valid) and (nxt_raw_key == raw_val_key or (is_cell_empty(raw_val_key) and is_cell_empty(nxt_raw_key))):
-                                i += 1
-                            else:
-                                break
-
-                        end_k = i - 1
-                        block_len = end_k - start_k + 1
-
-                        if raw_val_key and raw_val_key in school_cache:
-                            applied_sch = school_cache[raw_val_key]
-                            for idx_in_blk in range(start_k, end_k + 1):
-                                sheet_students[idx_in_blk]["school"] = applied_sch
-                            log(f"   ⚡ Tự động áp dụng Tên trường đã nhớ cho {block_len} học sinh (STT {sheet_students[start_k]['clean_stt']}->{sheet_students[end_k]['clean_stt']}): '{applied_sch}'", "info")
-                            continue
-
-                        # Ngữ cảnh +-5 học sinh
-                        ctx_start = max(0, start_k - 5)
-                        ctx_end = min(total_sheet, end_k + 6)
-                        context_rows = []
-                        for c_idx in range(ctx_start, ctx_end):
-                            item_c = sheet_students[c_idx]
-                            context_rows.append({
-                                "stt": item_c["clean_stt"],
-                                "name": item_c["name"],
-                                "school": item_c["school"],
-                                "cohort": item_c["cohort"],
-                                "grad": item_c["grad_date"],
-                                "is_in_block": (start_k <= c_idx <= end_k)
-                            })
-
-                        # Gợi ý thông minh: Lấy trường từ Context fallback -> liền trước -> fuzzy match
-                        sugg_school = effective_context_school
-                        if not sugg_school and start_k > 0:
-                            prev_sch = sheet_students[start_k - 1]["school"]
-                            if prev_sch and (not allowed_schools or any(prev_sch.lower() == s.lower() for s in allowed_schools)):
-                                sugg_school = prev_sch
-                        if not sugg_school and allowed_schools:
-                            if raw_val_key:
-                                close_matches = fuzzy_match_school(raw_val_key, allowed_schools, n=1)
-                                if close_matches:
-                                    sugg_school = close_matches[0]
-                            if not sugg_school:
-                                sugg_school = allowed_schools[0]
-
-                        chosen_school = sugg_school
-                        if dialog_callback:
-                            block_info = {
-                                "file_name": file_path.name,
-                                "sheet_name": ws_in.title,
-                                "start_stt": sheet_students[start_k]["clean_stt"],
-                                "end_stt": sheet_students[end_k]["clean_stt"],
-                                "count": block_len,
-                                "raw_val": raw_val_key if raw_val_key else "(Trống)",
-                                "context_rows": context_rows
-                            }
-                            res_sch, rem = dialog_callback("school_block", block_info, allowed_schools, sugg_school)
-                            if res_sch:
-                                chosen_school = res_sch
-                            if rem and raw_val_key:
-                                school_cache[raw_val_key] = chosen_school
-                        else:
-                            if sugg_school and raw_val_key:
-                                school_cache[raw_val_key] = sugg_school
-
-                        for idx_in_blk in range(start_k, end_k + 1):
-                            sheet_students[idx_in_blk]["school"] = chosen_school
-                    else:
-                        for s_std in allowed_schools:
-                            if s_std.lower() == curr_sch.lower():
-                                st_item["school"] = s_std
-                                break
-                        i += 1
-
-                # ==============================================================
-                # GIAI ĐOẠN B: XỬ LÝ KHỐI THIẾU NIÊN KHÓA (CỘT O)
-                # ==============================================================
-                i = 0
-                while i < total_sheet:
-                    st_item = sheet_students[i]
-                    is_valid_nk, y1, y2, fmt_nk = parse_nien_khoa(st_item["cohort"])
-
-                    if not is_valid_nk:
-                        start_k = i
-                        raw_nk_key = clean_whitespace(str(st_item["raw_cohort"]))
-
-                        while i < total_sheet:
-                            nxt = sheet_students[i]
-                            nxt_valid, _, _, _ = parse_nien_khoa(nxt["cohort"])
-                            nxt_nk_key = clean_whitespace(str(nxt["raw_cohort"]))
-                            if (not nxt_valid) and (nxt_nk_key == raw_nk_key or (is_cell_empty(raw_nk_key) and is_cell_empty(nxt_nk_key))):
-                                i += 1
-                            else:
-                                break
-
-                        end_k = i - 1
-                        block_len = end_k - start_k + 1
-
-                        if raw_nk_key and raw_nk_key in cohort_cache:
-                            applied_nk = cohort_cache[raw_nk_key]
-                            for idx_in_blk in range(start_k, end_k + 1):
-                                sheet_students[idx_in_blk]["cohort"] = applied_nk
-                            log(f"   ⚡ Tự động áp dụng Niên khóa đã nhớ cho {block_len} học sinh: '{applied_nk}'", "info")
-                            continue
-
-                        # Ngữ cảnh +-5 học sinh
-                        ctx_start = max(0, start_k - 5)
-                        ctx_end = min(total_sheet, end_k + 6)
-                        context_rows = []
-                        for c_idx in range(ctx_start, ctx_end):
-                            item_c = sheet_students[c_idx]
-                            context_rows.append({
-                                "stt": item_c["clean_stt"],
-                                "name": item_c["name"],
-                                "dob": item_c["dob"],
-                                "cohort": item_c["cohort"],
-                                "grad": item_c["grad_date"],
-                                "is_in_block": (start_k <= c_idx <= end_k)
-                            })
-
-                        # Gợi ý thông minh: Tính từ năm sinh phổ biến của khối hoặc context
-                        block_slice = sheet_students[start_k:end_k + 1]
-                        mode_yr = find_mode_birth_year(block_slice)
-                        if not mode_yr and start_k > 0:
-                            mode_yr = find_mode_birth_year(sheet_students[max(0, start_k - 5):start_k])
-
-                        sugg_nk = effective_context_cohort
-                        if not sugg_nk and mode_yr:
-                            _, _, sugg_nk = infer_cohort_from_birth_year(mode_yr)
-                        elif not sugg_nk and start_k > 0:
-                            prev_valid, _, _, prev_fmt = parse_nien_khoa(sheet_students[start_k - 1]["cohort"])
-                            if prev_valid:
-                                sugg_nk = prev_fmt
-
-                        chosen_nk = sugg_nk if sugg_nk else fmt_nk
-                        if dialog_callback:
-                            block_info = {
-                                "file_name": file_path.name,
-                                "sheet_name": ws_in.title,
-                                "start_stt": sheet_students[start_k]["clean_stt"],
-                                "end_stt": sheet_students[end_k]["clean_stt"],
-                                "count": block_len,
-                                "raw_val": raw_nk_key if raw_nk_key else "(Trống)",
-                                "context_rows": context_rows
-                            }
-                            res_nk, rem = dialog_callback("cohort_block", block_info, sugg_nk, mode_yr)
-                            if res_nk:
-                                chosen_nk = res_nk
-                            if rem and raw_nk_key:
-                                cohort_cache[raw_nk_key] = chosen_nk
-                        else:
-                            if sugg_nk and raw_nk_key:
-                                cohort_cache[raw_nk_key] = sugg_nk
-
-                        for idx_in_blk in range(start_k, end_k + 1):
-                            sheet_students[idx_in_blk]["cohort"] = chosen_nk
-                    else:
-                        st_item["cohort"] = fmt_nk
-                        i += 1
-
-                # ==============================================================
-                # GIAI ĐOẠN C: XỬ LÝ NGÀY SINH LỖI (CỘT I)
+                # BƯỚC 1: CHUẨN HÓA NGÀY SINH VÀ SỬA NGÀY SINH (CỘT I)
                 # ==============================================================
                 for idx_st, st_item in enumerate(sheet_students):
                     norm_dob = st_item["dob"]
@@ -537,8 +359,20 @@ class ExcelProcessor:
 
                     if not is_v_dob and not cache_state.get("skip_all_dob", False):
                         if not is_cell_empty(norm_dob):
-                            ctx_start = max(0, idx_st - 5)
-                            ctx_end = min(total_sheet, idx_st + 6)
+                            # Cửa sổ trượt động theo yêu cầu:
+                            # - Nếu HS ở đầu danh sách (< 5): hiển thị tối đa 10 HS liền sau
+                            # - Nếu HS ở cuối danh sách (>= N - 5): hiển thị tối đa 10 HS liền trước
+                            # - Nếu HS ở giữa: hiển thị tối đa 5 HS liền trước và 5 HS liền sau
+                            if idx_st < 5:
+                                ctx_start = 0
+                                ctx_end = min(total_sheet, idx_st + 11)
+                            elif idx_st >= total_sheet - 5:
+                                ctx_start = max(0, idx_st - 10)
+                                ctx_end = total_sheet
+                            else:
+                                ctx_start = max(0, idx_st - 5)
+                                ctx_end = min(total_sheet, idx_st + 6)
+
                             context_rows = []
                             for c_idx in range(ctx_start, ctx_end):
                                 item_c = sheet_students[c_idx]
@@ -552,9 +386,14 @@ class ExcelProcessor:
                                 })
 
                             sugg_dob = ""
-                            m_nk = re.search(r'(\d{4})$', str(st_item["cohort"]))
+                            cohort_text = str(st_item.get("cohort") or "") or effective_context_cohort or ""
+                            m_nk = re.search(r'(\d{4})$', cohort_text)
                             if m_nk:
                                 y_expected = int(m_nk.group(1)) - 15
+                            else:
+                                y_expected = find_mode_birth_year(sheet_students)
+
+                            if y_expected:
                                 m_dm = re.search(r'\b(\d{1,2})[/-](\d{1,2})\b', str(st_item["raw_dob"] or norm_dob))
                                 if m_dm:
                                     d_v, m_v = int(m_dm.group(1)), int(m_dm.group(2))
@@ -585,7 +424,228 @@ class ExcelProcessor:
                                     st_item["dob_err_desc"] = err_d_after
 
                 # ==============================================================
-                # GIAI ĐOẠN D: ĐIỀN NGÀY CẤP BẰNG THEO (TRƯỜNG, NIÊN KHÓA)
+                # BƯỚC 2: CHUẨN HÓA TÊN TRƯỜNG ĐANG HỌC (CỘT N)
+                # ==============================================================
+                def _norm_sch_key(s: str) -> str:
+                    return re.sub(r'\s+', ' ', str(s or "")).strip().lower()
+
+                allowed_schools_clean = [clean_whitespace(s) for s in (allowed_schools or []) if clean_whitespace(s)]
+                school_lookup = {_norm_sch_key(s): s for s in allowed_schools_clean}
+
+                # Gợi ý ngữ cảnh từ Thư mục -> Tên File -> Tên Sheet
+                sugg_from_folder = match_school_from_text(file_path.parent.name, allowed_schools_clean)
+                sugg_from_file = match_school_from_text(file_path.stem, allowed_schools_clean)
+                sugg_from_sheet = match_school_from_text(ws_in.title, allowed_schools_clean)
+                ctx_school_suggestions = []
+                for s_opt in [sugg_from_folder, sugg_from_file, sugg_from_sheet]:
+                    if s_opt and s_opt not in ctx_school_suggestions:
+                        ctx_school_suggestions.append(s_opt)
+
+                # Trích xuất danh sách tên trường khác nhau (kể cả rỗng)
+                distinct_schools: dict[str, list[dict]] = {}
+                for st in sheet_students:
+                    raw_sch = clean_whitespace(str(st.get("raw_school") or "")) if not is_cell_empty(st.get("raw_school")) else ""
+                    distinct_schools.setdefault(raw_sch, []).append(st)
+
+                for raw_sch, grp in distinct_schools.items():
+                    raw_sch_lower = _norm_sch_key(raw_sch)
+
+                    # 1. Trùng khớp với danh mục trường trực thuộc DS_Don_Vi
+                    if raw_sch_lower in school_lookup:
+                        canonical_sch = school_lookup[raw_sch_lower]
+                        for st in grp:
+                            st["school"] = canonical_sch
+                        log(f"   ✅ Tên trường '{raw_sch}' khớp chuẩn DS_Don_Vi: '{canonical_sch}' ({len(grp)} HS)", "info")
+                        continue
+
+                    # 2. Bị trống -> Hiển thị dialog kèm Thư mục, File, Sheet để người dùng tự chọn
+                    if not raw_sch:
+                        default_empty_sugg = sugg_from_folder or sugg_from_file or sugg_from_sheet or (allowed_schools_clean[0] if allowed_schools_clean else "")
+                        block_info = {
+                            "folder_name": file_path.parent.name,
+                            "file_name": file_path.name,
+                            "sheet_name": ws_in.title,
+                            "start_stt": grp[0]["clean_stt"],
+                            "end_stt": grp[-1]["clean_stt"],
+                            "count": len(grp),
+                            "raw_val": "(Trống)",
+                            "fuzzy_suggestions": ctx_school_suggestions,
+                            "context_rows": [{
+                                "stt": st["clean_stt"],
+                                "name": st["name"],
+                                "dob": st["dob"],
+                                "cohort": st["cohort"],
+                                "grad": st["grad_date"],
+                                "is_in_block": True
+                            } for st in grp[:15]]
+                        }
+                        if dialog_callback:
+                            res_sch, _ = dialog_callback("school_block", block_info, allowed_schools_clean, default_empty_sugg)
+                            applied_sch = res_sch if res_sch is not None else ""
+                        else:
+                            applied_sch = default_empty_sugg
+
+                        for st in grp:
+                            st["school"] = applied_sch
+                        if applied_sch:
+                            log(f"   📍 Đã áp dụng Tên trường '{applied_sch}' cho {len(grp)} HS bị trống trường", "info")
+                        continue
+
+                    # 3. Không trùng với danh mục -> Kiểm tra cache hoặc mở dialog gợi ý gần giống
+                    if raw_sch in school_cache:
+                        applied_sch = school_cache[raw_sch]
+                        for st in grp:
+                            st["school"] = applied_sch
+                        log(f"   ⚡ Tự động áp dụng Tên trường đã nhớ cho {len(grp)} HS: '{applied_sch}'", "info")
+                        continue
+
+                    fuzzy_suggs = fuzzy_match_school(raw_sch, allowed_schools_clean, n=3) if allowed_schools_clean else []
+                    default_sugg = fuzzy_suggs[0] if fuzzy_suggs else (default_empty_sugg if 'default_empty_sugg' in locals() else (allowed_schools_clean[0] if allowed_schools_clean else ""))
+                    block_info = {
+                        "folder_name": file_path.parent.name,
+                        "file_name": file_path.name,
+                        "sheet_name": ws_in.title,
+                        "start_stt": grp[0]["clean_stt"],
+                        "end_stt": grp[-1]["clean_stt"],
+                        "count": len(grp),
+                        "raw_val": raw_sch,
+                        "fuzzy_suggestions": fuzzy_suggs,
+                        "context_rows": [{
+                            "stt": st["clean_stt"],
+                            "name": st["name"],
+                            "dob": st["dob"],
+                            "cohort": st["cohort"],
+                            "grad": st["grad_date"],
+                            "is_in_block": True
+                        } for st in grp[:15]]
+                    }
+
+                    if dialog_callback:
+                        res_sch, rem = dialog_callback("school_block", block_info, allowed_schools_clean, default_sugg)
+                        applied_sch = res_sch if res_sch is not None else ""
+                        if rem and applied_sch:
+                            school_cache[raw_sch] = applied_sch
+                    else:
+                        applied_sch = default_sugg
+                        if applied_sch:
+                            school_cache[raw_sch] = applied_sch
+
+                    for st in grp:
+                        st["school"] = applied_sch
+
+                # ==============================================================
+                # BƯỚC 3: CHUẨN HÓA NIÊN KHÓA (CỘT O)
+                # ==============================================================
+                distinct_cohorts: dict[str, list[dict]] = {}
+                for st in sheet_students:
+                    raw_nk = clean_whitespace(str(st.get("raw_cohort") or "")) if not is_cell_empty(st.get("raw_cohort")) else ""
+                    distinct_cohorts.setdefault(raw_nk, []).append(st)
+
+                for raw_nk, grp in distinct_cohorts.items():
+                    mode_yr = find_mode_birth_year(grp)
+                    if not mode_yr:
+                        mode_yr = find_mode_birth_year(sheet_students)
+
+                    is_valid_diff_4, y1, y2, fmt_nk = parse_nien_khoa(raw_nk)
+                    m_range = re.search(r'(\d{4})\s*[-/–—._~]\s*(\d{2,4})', raw_nk)
+                    m_single = re.match(r'^\s*(19\d{2}|20\d{2})\s*$', raw_nk)
+                    is_empty_nk = is_cell_empty(raw_nk)
+
+                    # Trường hợp 1: Y_ra - Y_vao = 4
+                    if m_range and is_valid_diff_4:
+                        if (mode_yr is None) or (y2 == mode_yr + 15):
+                            # Khớp chuẩn với năm sinh đa số -> Tự động giữ nguyên, KHÔNG thông báo
+                            for st in grp:
+                                st["cohort"] = fmt_nk
+                            log(f"   ✅ Niên khóa '{fmt_nk}' ({y1}-{y2}) chuẩn 4 năm, khớp năm sinh {mode_yr or 'N/A'} ({len(grp)} HS)", "info")
+                            continue
+                        else:
+                            # Khác năm sinh đa số + 15 -> Báo đối chiếu
+                            default_y_ra = y2
+                            reason = f"Năm sinh đa số là {mode_yr} (dự kiến tốt nghiệp {mode_yr + 15}) nhưng niên khóa ghi {fmt_nk}"
+
+                    # Trường hợp 2: Có 2 năm nhưng Y_ra - Y_vao != 4
+                    elif m_range and (not is_valid_diff_4):
+                        default_y_ra = y2 if y2 else (mode_yr + 15 if mode_yr else "")
+                        reason = f"Hiệu số năm ({y1}-{y2}) khác 4 năm chuẩn THCS"
+
+                    # Trường hợp 3: Chỉ có năm ra trường Y_ra (ví dụ 2022)
+                    elif m_single:
+                        default_y_ra = int(m_single.group(1))
+                        reason = f"Dữ liệu gốc chỉ có năm ra trường ({default_y_ra}), cần xác nhận niên khóa"
+
+                    # Trường hợp 4: Niên khóa bị trống
+                    elif is_empty_nk:
+                        if mode_yr:
+                            default_y_ra = mode_yr + 15
+                            reason = f"Niên khóa bị trống (Gợi ý năm ra trường {default_y_ra} từ năm sinh đa số {mode_yr})"
+                        else:
+                            cohort_ctx = extract_cohort_from_text(file_path.stem) or extract_cohort_from_text(ws_in.title)
+                            if cohort_ctx:
+                                _, _, y_ctx_ra, _ = parse_nien_khoa(cohort_ctx)
+                                default_y_ra = y_ctx_ra or ""
+                            else:
+                                default_y_ra = ""
+                            reason = "Niên khóa bị trống"
+
+                    # Trường hợp 5: Dạng khác
+                    else:
+                        default_y_ra = mode_yr + 15 if mode_yr else ""
+                        reason = f"Định dạng niên khóa không hợp lệ: '{raw_nk}'"
+
+                    # Kiểm tra cache trước khi mở dialog
+                    if raw_nk and raw_nk in cohort_cache:
+                        applied_nk = cohort_cache[raw_nk]
+                        for st in grp:
+                            st["cohort"] = applied_nk
+                        log(f"   ⚡ Tự động áp dụng Niên khóa đã nhớ cho {len(grp)} HS: '{applied_nk}'", "info")
+                        continue
+
+                    # Mở dialog đối chiếu niên khóa (hiển thị tối đa 15 HS)
+                    block_info = {
+                        "folder_name": file_path.parent.name,
+                        "file_name": file_path.name,
+                        "sheet_name": ws_in.title,
+                        "start_stt": grp[0]["clean_stt"],
+                        "end_stt": grp[-1]["clean_stt"],
+                        "count": len(grp),
+                        "raw_val": raw_nk if raw_nk else "(Trống)",
+                        "reason": reason,
+                        "context_rows": [{
+                            "stt": st["clean_stt"],
+                            "name": st["name"],
+                            "dob": st["dob"],
+                            "cohort": st["cohort"],
+                            "grad": st["grad_date"],
+                            "is_in_block": True
+                        } for st in grp[:15]]
+                    }
+
+                    if dialog_callback:
+                        res_nk, rem = dialog_callback("cohort_block", block_info, default_y_ra, reason)
+                        if res_nk:
+                            chosen_nk = res_nk
+                        else:
+                            if default_y_ra and str(default_y_ra).isdigit():
+                                chosen_nk = f"{int(default_y_ra) - 4}-{default_y_ra}"
+                            else:
+                                chosen_nk = fmt_nk if fmt_nk else raw_nk
+
+                        if rem and raw_nk:
+                            cohort_cache[raw_nk] = chosen_nk
+                    else:
+                        if default_y_ra and str(default_y_ra).isdigit():
+                            chosen_nk = f"{int(default_y_ra) - 4}-{default_y_ra}"
+                        else:
+                            chosen_nk = fmt_nk if fmt_nk else raw_nk
+                        if raw_nk:
+                            cohort_cache[raw_nk] = chosen_nk
+
+                    for st in grp:
+                        st["cohort"] = chosen_nk
+
+                # ==============================================================
+                # BƯỚC 4: CHUẨN HÓA NGÀY CẤP BẰNG (CHẠY TỰ ĐỘNG THEO 2 BƯỚC)
                 # ==============================================================
                 auto_fill_graduation_dates_by_school_and_cohort(sheet_students)
 
