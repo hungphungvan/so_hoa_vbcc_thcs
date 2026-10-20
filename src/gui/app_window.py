@@ -25,6 +25,21 @@ from src.gui.theme import (
     IS_DARK,
     FONT_FAMILY,
     FONT_FAMILY_MONO,
+    FONT_TITLE,
+    FONT_SUBTITLE,
+    FONT_CARD_TITLE,
+    FONT_LABEL,
+    FONT_LABEL_BOLD,
+    FONT_DATA_BOLD,
+    FONT_MUTED,
+    FONT_BUTTON,
+    FONT_BUTTON_REG,
+    FONT_LOG,
+    FONT_TREE,
+    FONT_TREE_HEADING,
+    get_theme_palette,
+    configure_ttk_theme,
+    ThemePalette,
     CLR_PRIMARY,
     CLR_ACCENT,
     CLR_SUCCESS,
@@ -42,18 +57,23 @@ class MainWindow:
         self.root = root
         self.root.title(f"{APP_NAME} - v{APP_VERSION}")
         
-        # Đặt kích thước và vị trí cửa sổ tối ưu đa nền tảng
+        # Đặt kích thước và vị trí cửa sổ tối ưu đa nền tảng (rộng rãi, chữ to rõ)
         sw = self.root.winfo_screenwidth()
         sh = self.root.winfo_screenheight()
-        win_w = min(1120, max(960, sw - 60))
-        win_h = min(780, max(640, sh - 80))
+        win_w = min(1180, max(1020, sw - 60))
+        win_h = min(820, max(720, sh - 80))
         x = max(0, (sw - win_w) // 2)
         y = max(0, (sh - win_h) // 2)
         self.root.geometry(f"{win_w}x{win_h}+{x}+{y}")
-        self.root.minsize(920, 620)
-        self.root.configure(bg=CLR_WINDOW_BG)
+        self.root.minsize(980, 680)
+
+        # Quản lý giao diện Sáng / Tối (Dark Mode)
+        self.is_dark = IS_DARK
+        self.palette = get_theme_palette(self.is_dark)
+        self.root.configure(bg=self.palette.WINDOW_BG)
 
         # Cấu hình style
+        self.style = ttk.Style(self.root)
         self._setup_styles()
 
         # Biến trạng thái
@@ -94,51 +114,82 @@ class MainWindow:
             pass
 
     def _setup_styles(self):
-        style = ttk.Style(self.root)
-        # Chỉ áp dụng 'clam' trên Windows/Linux. Trên macOS giữ nguyên 'aqua' nguyên bản để Cocoa vẽ mượt mà.
-        if sys.platform != "darwin":
-            try:
-                style.theme_use('clam')
-            except Exception:
-                pass
+        configure_ttk_theme(self.style, self.palette)
 
-        style.configure("Card.TLabelframe", font=(FONT_FAMILY, 10, "bold"))
-        style.configure("Card.TLabelframe.Label", font=(FONT_FAMILY, 10, "bold"), foreground=CLR_PRIMARY)
+    def _toggle_theme(self):
+        """Chuyển đổi tức thì giữa Chế độ Sáng (Light) và Chế độ Tối (Dark)."""
+        self.is_dark = not self.is_dark
+        self.palette = get_theme_palette(self.is_dark)
+        self._apply_theme()
 
-        style.configure("Action.TButton", font=(FONT_FAMILY, 10, "bold"), padding=6)
-        style.configure("Inspect.TButton", font=(FONT_FAMILY, 10, "bold"), foreground=CLR_PRIMARY)
-        if sys.platform != "darwin":
-            style.configure("Success.TButton", font=(FONT_FAMILY, 10, "bold"), background="#2E7D32", foreground="#FFFFFF")
-            style.configure("Stop.TButton", font=(FONT_FAMILY, 10, "bold"), background="#C62828", foreground="#FFFFFF")
-        else:
-            style.configure("Success.TButton", font=(FONT_FAMILY, 10, "bold"))
-            style.configure("Stop.TButton", font=(FONT_FAMILY, 10, "bold"))
+    def _apply_theme(self):
+        """Áp dụng bảng màu mới cho toàn bộ widget của ứng dụng."""
+        p = self.palette
+        self.root.configure(bg=p.WINDOW_BG)
+        configure_ttk_theme(self.style, p)
+
+        # Header banner
+        if hasattr(self, 'hdr_frame'):
+            self.hdr_frame.configure(bg=p.HEADER_BANNER_BG)
+            self.hdr_title_lbl.configure(bg=p.HEADER_BANNER_BG, fg=p.HEADER_BANNER_FG)
+            self.hdr_sub_lbl.configure(bg=p.HEADER_BANNER_BG, fg=p.HEADER_SUB_FG)
+
+        # Labels với màu chuyên biệt
+        if hasattr(self, 'unit_code_lbl'):
+            self.unit_code_lbl.configure(foreground=p.PRIMARY)
+            self.unit_name_lbl.configure(foreground=p.PRIMARY)
+            self.unit_commune_lbl.configure(foreground=p.ACCENT)
+            self.school_count_lbl.configure(foreground=p.SUCCESS)
+            self.schools_display_lbl.configure(foreground=p.MUTED)
+            self.files_count_lbl.configure(foreground=p.MUTED)
+            self.status_lbl.configure(foreground=p.PRIMARY)
+            self.stat_da_so_hoa_lbl.configure(foreground=p.SUCCESS)
+            self.stat_chua_day_du_lbl.configure(foreground=p.WARNING)
+            self.stat_chua_so_hoa_lbl.configure(foreground=p.DANGER)
+
+        # Log console
+        if hasattr(self, 'log_text'):
+            self.log_text.configure(
+                bg=p.LOG_BG,
+                fg=p.LOG_FG,
+                insertbackground=p.LOG_FG
+            )
+            self.log_text.tag_config("info", foreground=p.LOG_FG)
+            self.log_text.tag_config("success", foreground=p.SUCCESS, font=FONT_LOG)
+            self.log_text.tag_config("warning", foreground=p.WARNING)
+            self.log_text.tag_config("error", foreground=p.DANGER, font=FONT_LOG)
+
+        # Nút theme
+        if hasattr(self, 'theme_btn'):
+            self.theme_btn.configure(text="🌙 Giao diện Tối" if not self.is_dark else "☀️ Giao diện Sáng")
 
     def _build_ui(self):
+        p = self.palette
+
         # 1. Header Banner
-        hdr_frame = tk.Frame(self.root, bg="#1565C0", padx=16, pady=12)
-        hdr_frame.pack(fill=tk.X)
+        self.hdr_frame = tk.Frame(self.root, bg=p.HEADER_BANNER_BG, padx=16, pady=12)
+        self.hdr_frame.pack(fill=tk.X)
 
-        title_lbl = tk.Label(
-            hdr_frame,
+        self.hdr_title_lbl = tk.Label(
+            self.hdr_frame,
             text=f"{APP_NAME} - SỐ HÓA VĂN BẰNG CHỨNG CHỈ THCS",
-            bg="#1565C0",
-            fg="#FFFFFF",
-            font=(FONT_FAMILY, 14, "bold")
+            bg=p.HEADER_BANNER_BG,
+            fg=p.HEADER_BANNER_FG,
+            font=FONT_TITLE
         )
-        title_lbl.pack(anchor=tk.W)
+        self.hdr_title_lbl.pack(anchor=tk.W)
 
-        sub_lbl = tk.Label(
-            hdr_frame,
+        self.hdr_sub_lbl = tk.Label(
+            self.hdr_frame,
             text="Chuẩn hóa dữ liệu cấp bằng và lập hồ sơ số hóa",
-            bg="#1565C0",
-            fg="#E3F2FD",
-            font=(FONT_FAMILY, 9)
+            bg=p.HEADER_BANNER_BG,
+            fg=p.HEADER_SUB_FG,
+            font=FONT_SUBTITLE
         )
-        sub_lbl.pack(anchor=tk.W, pady=(2, 0))
+        self.hdr_sub_lbl.pack(anchor=tk.W, pady=(2, 0))
 
         # Main Container
-        main_container = ttk.Frame(self.root, padding=12)
+        main_container = ttk.Frame(self.root, style="Window.TFrame", padding=12)
         main_container.pack(fill=tk.BOTH, expand=True)
 
         # 2. Card 1: Chọn Đơn vị
@@ -147,14 +198,14 @@ class MainWindow:
 
         row1 = ttk.Frame(unit_card)
         row1.pack(fill=tk.X, pady=2)
-        ttk.Label(row1, text="Tìm kiếm đơn vị: ", font=(FONT_FAMILY, 9, "bold")).pack(side=tk.LEFT)
+        ttk.Label(row1, text="Tìm kiếm đơn vị: ", font=FONT_LABEL_BOLD).pack(side=tk.LEFT)
 
         self.unit_search_var = tk.StringVar()
         self.unit_search_var.trace_add("write", self._on_search_unit)
         self.unit_search_entry = ttk.Entry(row1, textvariable=self.unit_search_var, width=22)
         self.unit_search_entry.pack(side=tk.LEFT, padx=(0, 10))
 
-        ttk.Label(row1, text="Chọn đơn vị: ", font=(FONT_FAMILY, 9, "bold")).pack(side=tk.LEFT)
+        ttk.Label(row1, text="Chọn đơn vị: ", font=FONT_LABEL_BOLD).pack(side=tk.LEFT)
         self.unit_combo_var = tk.StringVar()
         self.unit_combo = ttk.Combobox(row1, textvariable=self.unit_combo_var, state="readonly", width=50)
         self.unit_combo.pack(side=tk.LEFT, padx=6, fill=tk.X, expand=True)
@@ -163,26 +214,26 @@ class MainWindow:
         row2 = ttk.Frame(unit_card)
         row2.pack(fill=tk.X, pady=(6, 2))
 
-        ttk.Label(row2, text="Mã đơn vị: ", font=(FONT_FAMILY, 9)).pack(side=tk.LEFT)
-        self.unit_code_lbl = ttk.Label(row2, text="---", font=(FONT_FAMILY, 9, "bold"), foreground=CLR_PRIMARY)
-        self.unit_code_lbl.pack(side=tk.LEFT, padx=(0, 12))
+        ttk.Label(row2, text="Mã đơn vị: ", font=FONT_LABEL).pack(side=tk.LEFT)
+        self.unit_code_lbl = ttk.Label(row2, text="---", font=FONT_DATA_BOLD, foreground=p.PRIMARY)
+        self.unit_code_lbl.pack(side=tk.LEFT, padx=(0, 14))
 
-        ttk.Label(row2, text="Tên đơn vị: ", font=(FONT_FAMILY, 9)).pack(side=tk.LEFT)
-        self.unit_name_lbl = ttk.Label(row2, text="---", font=(FONT_FAMILY, 9, "bold"), foreground=CLR_PRIMARY)
-        self.unit_name_lbl.pack(side=tk.LEFT, padx=(0, 12))
+        ttk.Label(row2, text="Tên đơn vị: ", font=FONT_LABEL).pack(side=tk.LEFT)
+        self.unit_name_lbl = ttk.Label(row2, text="---", font=FONT_DATA_BOLD, foreground=p.PRIMARY)
+        self.unit_name_lbl.pack(side=tk.LEFT, padx=(0, 14))
 
-        ttk.Label(row2, text="Xã/phường: ", font=(FONT_FAMILY, 9)).pack(side=tk.LEFT)
-        self.unit_commune_lbl = ttk.Label(row2, text="---", font=(FONT_FAMILY, 9, "bold"), foreground=CLR_ACCENT)
-        self.unit_commune_lbl.pack(side=tk.LEFT, padx=(0, 12))
+        ttk.Label(row2, text="Xã/phường: ", font=FONT_LABEL).pack(side=tk.LEFT)
+        self.unit_commune_lbl = ttk.Label(row2, text="---", font=FONT_DATA_BOLD, foreground=p.ACCENT)
+        self.unit_commune_lbl.pack(side=tk.LEFT, padx=(0, 14))
 
-        ttk.Label(row2, text="Số trường trực thuộc: ", font=(FONT_FAMILY, 9)).pack(side=tk.LEFT)
-        self.school_count_lbl = ttk.Label(row2, text="0 trường", font=(FONT_FAMILY, 9, "bold"), foreground=CLR_SUCCESS)
+        ttk.Label(row2, text="Số trường trực thuộc: ", font=FONT_LABEL).pack(side=tk.LEFT)
+        self.school_count_lbl = ttk.Label(row2, text="0 trường", font=FONT_DATA_BOLD, foreground=p.SUCCESS)
         self.school_count_lbl.pack(side=tk.LEFT)
 
         row3 = ttk.Frame(unit_card)
         row3.pack(fill=tk.X, pady=(4, 0))
-        ttk.Label(row3, text="Danh sách trường: ", font=(FONT_FAMILY, 8, "italic")).pack(side=tk.LEFT)
-        self.schools_display_lbl = ttk.Label(row3, text="(Chưa chọn đơn vị)", font=(FONT_FAMILY, 8), foreground=CLR_MUTED)
+        ttk.Label(row3, text="Danh sách trường: ", font=FONT_LABEL_BOLD).pack(side=tk.LEFT)
+        self.schools_display_lbl = ttk.Label(row3, text="(Chưa chọn đơn vị)", font=FONT_MUTED, foreground=p.MUTED)
         self.schools_display_lbl.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         # 3. Card 2: Chọn Tệp hoặc Thư mục nguồn
@@ -205,8 +256,8 @@ class MainWindow:
         self.files_count_lbl = ttk.Label(
             file_card,
             text="Hệ thống tự động quét và nhận diện các trường, niên khóa từ thư mục, tên file hoặc sheet.",
-            font=(FONT_FAMILY, 8, "italic"),
-            foreground=CLR_MUTED
+            font=FONT_MUTED,
+            foreground=p.MUTED
         )
         self.files_count_lbl.pack(anchor=tk.W, pady=(4, 0))
 
@@ -273,7 +324,7 @@ class MainWindow:
         ctrl_row = ttk.Frame(prog_card)
         ctrl_row.pack(fill=tk.X)
 
-        self.status_lbl = ttk.Label(ctrl_row, text="Sẵn sàng thực hiện.", font=(FONT_FAMILY, 9, "bold"), foreground=CLR_PRIMARY)
+        self.status_lbl = ttk.Label(ctrl_row, text="Sẵn sàng thực hiện.", font=FONT_LABEL_BOLD, foreground=p.PRIMARY)
         self.status_lbl.pack(side=tk.LEFT)
 
         self.stop_btn = ttk.Button(ctrl_row, text="⏹ Dừng", state=tk.DISABLED, command=self._stop_processing)
@@ -289,37 +340,37 @@ class MainWindow:
         stat_row = ttk.Frame(log_card)
         stat_row.pack(fill=tk.X, pady=(0, 4))
 
-        self.stat_total_lbl = ttk.Label(stat_row, text="Tổng học sinh: 0", font=(FONT_FAMILY, 9, "bold"))
+        self.stat_total_lbl = ttk.Label(stat_row, text="Tổng học sinh: 0", font=FONT_LABEL_BOLD)
         self.stat_total_lbl.pack(side=tk.LEFT, padx=(0, 20))
 
-        self.stat_da_so_hoa_lbl = ttk.Label(stat_row, text="✅ Đã số hóa đầy đủ: 0", font=(FONT_FAMILY, 9, "bold"), foreground=CLR_SUCCESS)
+        self.stat_da_so_hoa_lbl = ttk.Label(stat_row, text="✅ Đã số hóa đầy đủ: 0", font=FONT_LABEL_BOLD, foreground=p.SUCCESS)
         self.stat_da_so_hoa_lbl.pack(side=tk.LEFT, padx=(0, 20))
 
-        self.stat_chua_day_du_lbl = ttk.Label(stat_row, text="⚠️ Số hoá chưa đầy đủ: 0", font=(FONT_FAMILY, 9, "bold"), foreground=CLR_WARNING)
+        self.stat_chua_day_du_lbl = ttk.Label(stat_row, text="⚠️ Số hoá chưa đầy đủ: 0", font=FONT_LABEL_BOLD, foreground=p.WARNING)
         self.stat_chua_day_du_lbl.pack(side=tk.LEFT, padx=(0, 20))
 
-        self.stat_chua_so_hoa_lbl = ttk.Label(stat_row, text="❌ Chưa số hoá: 0", font=(FONT_FAMILY, 9, "bold"), foreground=CLR_DANGER)
+        self.stat_chua_so_hoa_lbl = ttk.Label(stat_row, text="❌ Chưa số hoá: 0", font=FONT_LABEL_BOLD, foreground=p.DANGER)
         self.stat_chua_so_hoa_lbl.pack(side=tk.LEFT)
 
         # Log text console
         self.log_text = ScrolledText(
             log_card,
             height=8,
-            font=(FONT_FAMILY_MONO, 9),
+            font=FONT_LOG,
             wrap=tk.WORD,
-            bg=CLR_LOG_BG,
-            fg=CLR_LOG_FG,
-            insertbackground=CLR_LOG_FG
+            bg=p.LOG_BG,
+            fg=p.LOG_FG,
+            insertbackground=p.LOG_FG
         )
         self.log_text.pack(fill=tk.BOTH, expand=True)
 
-        self.log_text.tag_config("info", foreground=CLR_LOG_FG)
-        self.log_text.tag_config("success", foreground=CLR_SUCCESS, font=(FONT_FAMILY_MONO, 9, "bold"))
-        self.log_text.tag_config("warning", foreground=CLR_WARNING)
-        self.log_text.tag_config("error", foreground=CLR_DANGER, font=(FONT_FAMILY_MONO, 9, "bold"))
+        self.log_text.tag_config("info", foreground=p.LOG_FG)
+        self.log_text.tag_config("success", foreground=p.SUCCESS, font=FONT_LOG)
+        self.log_text.tag_config("warning", foreground=p.WARNING)
+        self.log_text.tag_config("error", foreground=p.DANGER, font=FONT_LOG)
 
         # 7. Bottom Bar
-        bottom_frame = ttk.Frame(self.root, padding=(12, 6))
+        bottom_frame = ttk.Frame(self.root, style="Window.TFrame", padding=(12, 6))
         bottom_frame.pack(fill=tk.X)
 
         self.open_output_btn = ttk.Button(bottom_frame, text="📂 Mở thư mục kết quả", command=self._open_output_dir)
@@ -332,6 +383,13 @@ class MainWindow:
             state=tk.DISABLED
         )
         self.inspect_btn.pack(side=tk.LEFT, padx=6)
+
+        self.theme_btn = ttk.Button(
+            bottom_frame,
+            text="🌙 Giao diện Tối" if not self.is_dark else "☀️ Giao diện Sáng",
+            command=self._toggle_theme
+        )
+        self.theme_btn.pack(side=tk.LEFT, padx=6)
 
         self.update_btn = ttk.Button(
             bottom_frame,

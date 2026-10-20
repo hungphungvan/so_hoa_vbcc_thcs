@@ -182,5 +182,10 @@ Có 3 cách chạy phần mềm trên macOS:
    - Kịch bản GitHub Actions (`.github/workflows/release.yml`) đã thiết lập sẵn luồng build cho macOS runner (`macos-latest`). Khi workflow chạy xong trên GitHub, bạn chỉ cần tải file `SohoaTHCS_macOS.dmg` hoặc `SohoaTHCS_macOS.zip` từ mục **Releases**, mở file `.dmg` và kéo vào `Applications` để chạy trực tiếp mà không cần cài đặt bất kỳ công cụ dòng lệnh nào.
    - *Mẹo Gatekeeper của Apple:* Nếu macOS hiển thị thông báo *"Ứng dụng chưa được xác minh nhà phát triển"*, bạn chỉ cần giữ phím `Control` + Click chuột vào ứng dụng $\rightarrow$ chọn **Open** $\rightarrow$ chọn tiếp **Open** là ứng dụng sẽ khởi chạy bình thường.
 
+5. **Giao diện tương phản cao & Hỗ trợ Dark Mode:**
+   - Ứng dụng tự động phát hiện chế độ giao diện Sáng / Tối của hệ thống và chuyển đổi màu sắc tương ứng.
+   - Bổ sung nút chuyển đổi nhanh `☀️/🌙` trên thanh công cụ phía dưới cùng để người dùng chủ động chọn chế độ Sáng hoặc Tối mà không cần thay đổi cài đặt của cả hệ điều hành.
+   - Phông chữ được chuẩn hóa tối thiểu $\ge 10\text{pt}$ to rõ, tương phản cao, chống mỏi mắt khi đối soát hồ sơ liên tục.
+
 ---
 *Tài liệu được cập nhật tự động đồng bộ với phiên bản mã nguồn mới nhất của dự án.*

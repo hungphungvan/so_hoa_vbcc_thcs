@@ -164,6 +164,19 @@ Sau khi chuẩn hóa, toàn bộ tệp kết quả được lưu tại thư mụ
 
 ---
 
+## 🎨 GIAO DIỆN TƯƠNG PHẢN CAO, CHỮ TO RÕ & HỖ TRỢ DARK MODE
+
+Giao diện ứng dụng được thiết kế tỉ mỉ, tối ưu hóa công thái học (**Ergonomic & High-Contrast Design**) cho người dùng làm việc liên tục nhiều giờ với bảng tính:
+
+- **Hệ thống phông chữ to rõ**: Xóa bỏ hoàn toàn cỡ chữ 8pt siêu nhỏ, nâng chuẩn toàn bộ nội dung lên $\ge 10\text{pt}$ (nhãn thông tin, danh sách trường, checkbox, console log), tiêu đề khối $11.5\text{pt}$ in đậm.
+- **Bảng màu tương phản cao (High-Contrast Palette)**:
+  - **☀️ Chế độ Sáng (Light Mode)**: Nền cửa sổ `#F0F2F5`, khối chức năng trắng tinh khôi `#FFFFFF` viền nổi rõ nét, chữ đen than đậm `#111827`, chữ chú thích `#374151` (không còn xám mờ).
+  - **🌙 Chế độ Tối (Dark Mode)**: Nền than chì `#18181B`, thẻ Card `#27272A` viền `#3F3F46`, chữ trắng sáng `#F9FAFB`, chữ phụ `#D1D5DB`, màu trạng thái dạ quang sắc nét và dịu mắt.
+- **Nút chuyển đổi nhanh `☀️/🌙`**: Tích hợp nút chuyển đổi giao diện tức thì tại thanh công cụ dưới cùng, hoặc tự động kích hoạt theo cài đặt Dark Mode của hệ điều hành Windows / macOS.
+- **Hỗ trợ Windows Per-Monitor High-DPI Awareness**: Tự động nhận diện và khử nhòe mờ do cơ chế bitmap scaling của Windows trên các màn hình Full HD, 2K, 4K (tỉ lệ phóng 125% - 150%).
+
+---
+
 ## 📁 TÙY BIẾN DANH MỤC TRA CỨU & DANH SÁCH TRƯỜNG (`Danh_Muc_Tra_Cuu.xlsx`)
 
 Phần mềm tích hợp cơ chế nhận diện động ưu tiên tải tài nguyên:

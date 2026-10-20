@@ -23,6 +23,18 @@ ROOT_DIR = Path(__file__).resolve().parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+# Kích hoạt nhận diện High-DPI trên Windows giúp phông chữ và giao diện sắc nét tuyệt đối
+if sys.platform == "win32":
+    try:
+        import ctypes
+        # 1: PROCESS_SYSTEM_DPI_AWARE, 2: PROCESS_PER_MONITOR_DPI_AWARE
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)
+    except Exception:
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
+
 def main():
     """Khởi chạy giao diện đồ họa (GUI) cho Mô-đun CHUẨN HOÁ DỮ LIỆU."""
     import tkinter as tk
