@@ -9,7 +9,9 @@ echo "    CÔNG CỤ XỬ LÝ & SỐ HÓA VĂN BẰNG CHỨNG CHỈ THCS    "
 echo "========================================================================"
 echo ""
 
-if command -v uv >/dev/null 2>&1; then
+if [ -d ".venv" ] && [ -f ".venv/bin/python" ]; then
+    .venv/bin/python main.py
+elif command -v uv >/dev/null 2>&1; then
     uv run main.py
 else
     python3 -c "import openpyxl" 2>/dev/null || python3 -m pip install openpyxl -q 2>/dev/null
