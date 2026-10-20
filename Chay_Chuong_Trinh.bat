@@ -8,6 +8,11 @@ echo     CÔNG CỤ XỬ LÝ & SỐ HÓA VĂN BẰNG CHỨNG CHỈ THCS
 echo ========================================================================
 echo.
 
+if exist .venv\Scripts\python.exe (
+    .venv\Scripts\python.exe main.py
+    goto end
+)
+
 where uv >nul 2>nul
 if %errorlevel% equ 0 (
     uv run main.py

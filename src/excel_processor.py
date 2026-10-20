@@ -20,6 +20,7 @@ from src.normalizer import (
     normalize_ethnic,
     normalize_nationality,
     format_date_to_text,
+    format_grad_date_to_text,
     check_dob_validity,
     parse_nien_khoa,
     infer_cohort_from_birth_year,
@@ -106,7 +107,7 @@ def get_file_format_info(ws):
                 non_empty_cols = sum(1 for c in headers if c)
                 if non_empty_cols >= 30:
                     return "AE", headers, r_idx
-                elif non_empty_cols >= 26:
+                elif non_empty_cols >= 15:
                     return "AB", headers, r_idx
                 return "INVALID", headers, r_idx
             else:
@@ -189,7 +190,8 @@ class ExcelProcessor:
         dialog_callback=None,
         log_callback=None,
         cache_state=None,
-        save_individual_file: bool = False
+        save_individual_file: bool = False,
+        check_cancel=None
     ) -> tuple[list[dict], dict]:
         """
         Trích xuất và chuẩn hóa học sinh từ 1 tệp Excel:
@@ -243,6 +245,10 @@ class ExcelProcessor:
 
         try:
             for ws_in in wb_in.worksheets:
+                if check_cancel and check_cancel():
+                    log(f"  ⏹ Dừng xử lý các sheet còn lại trong {file_path.name} theo yêu cầu.", "warning")
+                    break
+
                 if ws_in.sheet_state != 'visible':
                     continue
 
@@ -337,7 +343,7 @@ class ExcelProcessor:
                             "raw_cohort": raw_cohort,
                             "cohort": init_cohort,
                             "raw_grad": raw_grad,
-                            "grad_date": clean_whitespace(str(raw_grad)) if raw_grad is not None else "",
+                            "grad_date": format_grad_date_to_text(raw_grad) if not is_cell_empty(raw_grad) else "",
                             "row_values": new_row
                         }
                         sheet_students.append(student_dict)
@@ -440,6 +446,7 @@ class ExcelProcessor:
                 for s_opt in [sugg_from_folder, sugg_from_file, sugg_from_sheet]:
                     if s_opt and s_opt not in ctx_school_suggestions:
                         ctx_school_suggestions.append(s_opt)
+                default_ctx_school = sugg_from_folder or sugg_from_file or sugg_from_sheet or (allowed_schools_clean[0] if allowed_schools_clean else "")
 
                 # Trích xuất danh sách tên trường khác nhau (kể cả rỗng)
                 distinct_schools: dict[str, list[dict]] = {}
@@ -460,7 +467,6 @@ class ExcelProcessor:
 
                     # 2. Bị trống -> Hiển thị dialog kèm Thư mục, File, Sheet để người dùng tự chọn
                     if not raw_sch:
-                        default_empty_sugg = sugg_from_folder or sugg_from_file or sugg_from_sheet or (allowed_schools_clean[0] if allowed_schools_clean else "")
                         block_info = {
                             "folder_name": file_path.parent.name,
                             "file_name": file_path.name,
@@ -480,10 +486,10 @@ class ExcelProcessor:
                             } for st in grp[:15]]
                         }
                         if dialog_callback:
-                            res_sch, _ = dialog_callback("school_block", block_info, allowed_schools_clean, default_empty_sugg)
+                            res_sch, _ = dialog_callback("school_block", block_info, allowed_schools_clean, default_ctx_school)
                             applied_sch = res_sch if res_sch is not None else ""
                         else:
-                            applied_sch = default_empty_sugg
+                            applied_sch = default_ctx_school
 
                         for st in grp:
                             st["school"] = applied_sch
@@ -500,7 +506,7 @@ class ExcelProcessor:
                         continue
 
                     fuzzy_suggs = fuzzy_match_school(raw_sch, allowed_schools_clean, n=3) if allowed_schools_clean else []
-                    default_sugg = fuzzy_suggs[0] if fuzzy_suggs else (default_empty_sugg if 'default_empty_sugg' in locals() else (allowed_schools_clean[0] if allowed_schools_clean else ""))
+                    default_sugg = fuzzy_suggs[0] if fuzzy_suggs else default_ctx_school
                     block_info = {
                         "folder_name": file_path.parent.name,
                         "file_name": file_path.name,
@@ -547,12 +553,12 @@ class ExcelProcessor:
                         mode_yr = find_mode_birth_year(sheet_students)
 
                     is_valid_diff_4, y1, y2, fmt_nk = parse_nien_khoa(raw_nk)
-                    m_range = re.search(r'(\d{4})\s*[-/–—._~]\s*(\d{2,4})', raw_nk)
+                    has_range_sep = bool(re.search(r'\d+\s*[-/–—._~]\s*\d+', raw_nk))
                     m_single = re.match(r'^\s*(19\d{2}|20\d{2})\s*$', raw_nk)
                     is_empty_nk = is_cell_empty(raw_nk)
 
                     # Trường hợp 1: Y_ra - Y_vao = 4
-                    if m_range and is_valid_diff_4:
+                    if has_range_sep and is_valid_diff_4:
                         if (mode_yr is None) or (y2 == mode_yr + 15):
                             # Khớp chuẩn với năm sinh đa số -> Tự động giữ nguyên, KHÔNG thông báo
                             for st in grp:
@@ -565,7 +571,7 @@ class ExcelProcessor:
                             reason = f"Năm sinh đa số là {mode_yr} (dự kiến tốt nghiệp {mode_yr + 15}) nhưng niên khóa ghi {fmt_nk}"
 
                     # Trường hợp 2: Có 2 năm nhưng Y_ra - Y_vao != 4
-                    elif m_range and (not is_valid_diff_4):
+                    elif has_range_sep and (not is_valid_diff_4):
                         default_y_ra = y2 if y2 else (mode_yr + 15 if mode_yr else "")
                         reason = f"Hiệu số năm ({y1}-{y2}) khác 4 năm chuẩn THCS"
 
@@ -676,12 +682,15 @@ class ExcelProcessor:
                     # Cột S (Index 18): Ngày tháng năm cấp bằng
                     row_vals[18] = st_item["grad_date"]
                     # Cột V (Index 21): Người ký bằng Title Case
-                    if row_vals[21]:
+                    if not is_cell_empty(row_vals[21]):
                         row_vals[21] = vietnamese_title_case(str(row_vals[21]))
+                    else:
+                        row_vals[21] = None
 
                     # Cột X (Index 23): Ghi chú -> ĐÍNH KÈM TỌA ĐỘ NGUỒN GỐC
                     source_tag = f"[Nguồn: {file_path.name} | Sheet: {ws_in.title} | Dòng {st_item['row_idx']}]"
-                    orig_note = str(row_vals[23]).strip() if row_vals[23] is not None else ""
+                    raw_note_val = row_vals[23]
+                    orig_note = clean_whitespace(str(raw_note_val)) if not is_cell_empty(raw_note_val) else ""
                     if orig_note:
                         row_vals[23] = f"{orig_note} | {source_tag}"
                     else:
@@ -722,21 +731,8 @@ class ExcelProcessor:
         # Lưu file riêng lẻ nếu được yêu cầu (ví dụ khi người dùng chọn xử lý 1 file duy nhất)
         if save_individual_file and output_dir and all_file_students:
             output_dir.mkdir(parents=True, exist_ok=True)
-            out_wb = openpyxl.load_workbook(io.BytesIO(self.template_bytes))
-            out_ws = out_wb.active
-            out_ws.title = "Data"
-            if out_ws.max_row > 2:
-                out_ws.delete_rows(3, out_ws.max_row - 2)
-
-            for r_idx, st_item in enumerate(all_file_students, start=1):
-                row_vals = list(st_item["final_row"])
-                row_vals[0] = r_idx
-                out_ws.append(row_vals)
-                curr_row = out_ws.max_row
-                apply_cached_fonts(out_ws, curr_row, self.cached_fonts)
-                for col in range(1, 28):
-                    if is_cell_empty(row_vals[col]):
-                        out_ws.cell(row=curr_row, column=col + 1).fill = self.yellow_fill
+            out_wb, out_ws = self.exporter._create_base_workbook("Data")
+            self.exporter._write_student_rows(out_ws, all_file_students, renumber=True)
 
             out_file_path = output_dir / file_path.name
             try:
@@ -825,7 +821,8 @@ class ExcelProcessor:
                 dialog_callback=dialog_callback,
                 log_callback=log_callback,
                 cache_state=cache_state,
-                save_individual_file=is_single_file
+                save_individual_file=is_single_file,
+                check_cancel=check_cancel
             )
 
             all_unit_students.extend(file_students)

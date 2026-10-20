@@ -147,7 +147,7 @@ class DataExporter:
                         cell.value = str(cell.value)
                     
             # Tô vàng các ô bị thiếu từ cột B (2) đến AB (28)
-            for col in range(1, 28):
+            for col in range(1, min(28, len(row_vals))):
                 if is_cell_empty(row_vals[col]):
                     ws.cell(row=curr_row, column=col + 1).fill = self.yellow_fill
                     yellow_count += 1
@@ -274,7 +274,10 @@ class DataExporter:
         # ----------------------------------------------------------------------
         # 4. XUẤT 1 FILE DS_LOI DUY NHẤT: {Ten_Don_Vi}_DS_Loi.xlsx
         # ----------------------------------------------------------------------
-        error_students = [st for st in students_by_school if st.get("final_row", [])[24] != "Đã số hóa đầy đủ, chính xác"]
+        error_students = [
+            st for st in students_by_school
+            if len(st.get("final_row", [])) > 24 and st["final_row"][24] != "Đã số hóa đầy đủ, chính xác"
+        ]
         if error_students:
             try:
                 err_wb, err_ws = self._create_base_workbook("DS_Loi")
@@ -310,7 +313,7 @@ class DataExporter:
                                 cell_c.data_type = 's'
                                 cell_c.value = str(cell_c.value)
 
-                    for col in range(1, 28):
+                    for col in range(1, min(28, len(row_vals))):
                         if is_cell_empty(row_vals[col]):
                             err_ws.cell(row=c_row, column=col + 1).fill = self.yellow_fill
 

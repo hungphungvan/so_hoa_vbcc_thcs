@@ -193,6 +193,8 @@ def format_date_to_text(value):
         return ""
 
     val_clean = re.sub(r'\.0+$', '', val_str)
+    # Cắt bỏ phần giờ nếu có (ví dụ ISO datetime: "2022-06-25 00:00:00" -> "2022-06-25")
+    val_clean = re.sub(r'\s+\d{1,2}:\d{2}(:\d{2})?(\.\d+)?$', '', val_clean)
 
     # 3. Xử lý dạng số liền 7-8 chữ số (ví dụ: 19061998 hoặc 1061998)
     if val_clean.isdigit() and len(val_clean) in (7, 8):
@@ -276,6 +278,8 @@ def format_grad_date_to_text(value):
         return ""
 
     val_clean = re.sub(r'\.0+$', '', val_str)
+    # Cắt bỏ phần giờ nếu có (ví dụ ISO datetime: "2022-06-25 00:00:00" -> "2022-06-25")
+    val_clean = re.sub(r'\s+\d{1,2}:\d{2}(:\d{2})?(\.\d+)?$', '', val_clean)
 
     # Nếu là số serial Excel
     if isinstance(value, (int, float)) and 10000 <= value <= 80000:
@@ -366,6 +370,15 @@ def parse_nien_khoa(val_nien_khoa):
             y2 = int(y2_str)
 
         return (y2 - y1 == 4), y1, y2, f"{y1}-{y2}"
+
+    # Dạng 2 số - 2 số (ví dụ: 18-22 hoặc 18_22)
+    m2 = re.search(r'\b(\d{2})\s*[-/–—._~]\s*(\d{2})\b', s_clean)
+    if m2:
+        y1_2d, y2_2d = int(m2.group(1)), int(m2.group(2))
+        full_y1 = (1900 + y1_2d) if y1_2d >= 80 else (2000 + y1_2d)
+        full_y2 = (1900 + y2_2d) if y2_2d >= 80 else (2000 + y2_2d)
+        if full_y2 > full_y1:
+            return (full_y2 - full_y1 == 4), full_y1, full_y2, f"{full_y1}-{full_y2}"
 
     # Nếu chỉ có 1 năm lẻ
     m_single = re.search(r'\b(19\d{2}|20\d{2})\b', s_clean)
