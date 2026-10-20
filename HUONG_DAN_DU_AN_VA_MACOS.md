@@ -34,7 +34,7 @@ so_hoa_vbcc_thcs/
 ├── main.py                               # Điểm khởi chạy chương trình (Entry Point)
 ├── Chay_Chuong_Trinh.bat                 # File click đúp chạy nhanh trên Windows
 ├── Chay_Chuong_Trinh.command             # File click đúp chạy nhanh trên macOS
-└── .github/workflows/build.yml           # CI/CD tự động đóng gói ứng dụng cho Windows (.exe) và macOS (.app/zip)
+├── .github/workflows/release.yml         # CI/CD tự động đóng gói ứng dụng cho Windows (.exe) và macOS (.app/zip/dmg)
 ```
 
 ---
@@ -171,7 +171,7 @@ Có 3 cách chạy phần mềm trên macOS:
    - Nút *"📂 Mở thư mục Kết quả số hóa"* trên giao diện đã được lập trình nhận diện hệ điều hành: Trên macOS sẽ tự động kích hoạt lệnh `open {output_dir}` để mở trực tiếp trong ứng dụng **Finder**.
 
 4. **Bản đóng gói nhị phân độc lập (.dmg, .app hoặc .zip):**
-   - Kịch bản GitHub Actions (`.github/workflows/build.yml`) đã thiết lập sẵn luồng build cho macOS runner (`macos-latest`). Khi workflow chạy xong trên GitHub, bạn chỉ cần tải file `SohoaTHCS_macOS.dmg` hoặc `SohoaTHCS_macOS.zip` từ mục **Releases**, mở file `.dmg` và kéo vào `Applications` để chạy trực tiếp mà không cần cài đặt bất kỳ công cụ dòng lệnh nào.
+   - Kịch bản GitHub Actions (`.github/workflows/release.yml`) đã thiết lập sẵn luồng build cho macOS runner (`macos-latest`). Khi workflow chạy xong trên GitHub, bạn chỉ cần tải file `SohoaTHCS_macOS.dmg` hoặc `SohoaTHCS_macOS.zip` từ mục **Releases**, mở file `.dmg` và kéo vào `Applications` để chạy trực tiếp mà không cần cài đặt bất kỳ công cụ dòng lệnh nào.
    - *Mẹo Gatekeeper của Apple:* Nếu macOS hiển thị thông báo *"Ứng dụng chưa được xác minh nhà phát triển"*, bạn chỉ cần giữ phím `Control` + Click chuột vào ứng dụng $\rightarrow$ chọn **Open** $\rightarrow$ chọn tiếp **Open** là ứng dụng sẽ khởi chạy bình thường.
 
 ---

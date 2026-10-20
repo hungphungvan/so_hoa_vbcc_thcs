@@ -162,7 +162,7 @@ Phần mềm tích hợp cơ chế nhận diện động ưu tiên tải tài ng
 
 ## ⚙️ HƯỚNG DẪN ĐÓNG GÓI BẰNG GITHUB ACTIONS
 
-Dự án đã được tích hợp sẵn quy trình CI/CD hoàn toàn tự động tại [`.github/workflows/build.yml`](.github/workflows/build.yml):
+Dự án đã được tích hợp sẵn quy trình CI/CD hoàn toàn tự động tại [`.github/workflows/release.yml`](.github/workflows/release.yml):
 
 - **Kích hoạt tự động**: Mỗi khi có commit mới được `push` lên nhánh `main` (hoặc `master`).
 - **Máy chủ ảo Windows (`windows-latest`)**: Tự động cài đặt Python 3.11, OpenPyXL, PyInstaller và biên dịch thành tệp thực thi duy nhất `SohoaTHCS.exe` (`--onefile --windowed`).

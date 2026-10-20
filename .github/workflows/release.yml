@@ -1,4 +1,4 @@
-name: Build & Release Multi-Platform (Windows & macOS)
+name: Build & Release SohoaTHCS (Windows & macOS)
 
 on:
   workflow_dispatch:
@@ -24,7 +24,7 @@ jobs:
     - name: Inject Version
       shell: bash
       run: |
-        echo "APP_VERSION = '1.2.${{ github.run_number }}'" > src/version.py
+        echo "APP_VERSION = '1.0.${{ github.run_number }}'" > src/version.py
         echo "APP_NAME = 'SohoaTHCS'" >> src/version.py
         echo "GITHUB_REPO = 'hungphungvan/so_hoa_vbcc_thcs'" >> src/version.py
 
@@ -58,7 +58,7 @@ jobs:
     - name: Inject Version
       shell: bash
       run: |
-        echo "APP_VERSION = '1.2.${{ github.run_number }}'" > src/version.py
+        echo "APP_VERSION = '1.0.${{ github.run_number }}'" > src/version.py
         echo "APP_NAME = 'SohoaTHCS'" >> src/version.py
         echo "GITHUB_REPO = 'hungphungvan/so_hoa_vbcc_thcs'" >> src/version.py
 
@@ -114,11 +114,11 @@ jobs:
     - name: Publish to GitHub Release
       uses: softprops/action-gh-release@v2
       with:
-        tag_name: v1.2.${{ github.run_number }}
-        name: "SohoaTHCS v1.2.${{ github.run_number }} - Bản phát hành Windows & macOS"
+        tag_name: v1.0.${{ github.run_number }}
+        name: "SohoaTHCS v1.0.${{ github.run_number }} - Bản phát hành Windows & macOS"
         make_latest: true
         body: |
-          ### 🚀 Tải về ứng dụng chạy trực tiếp (Không cần cài đặt Python) - Phiên bản v1.2.${{ github.run_number }}
+          ### 🚀 Tải về ứng dụng chạy trực tiếp (Không cần cài đặt Python) - Phiên bản v1.0.${{ github.run_number }}
 
           | Hệ điều hành | Tệp tải về | Hướng dẫn sử dụng |
           | :--- | :--- | :--- |
