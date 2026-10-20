@@ -18,6 +18,15 @@ from src.normalizer import (
     extract_birth_year_from_dob
 )
 
+# Danh sách các cột KHÔNG tô màu vàng cảnh báo khi bị thiếu dữ liệu:
+# - Cột 1 (A: STT), Cột 4 (D: Tên văn bằng - cố định)
+# - Cột 2 (B: Số hiệu bằng), Cột 3 (C: Số vào sổ gốc cấp văn bằng)
+# - Cột 6 (F: Mã người học), Cột 7 (G: Số định danh cá nhân / CCCD), Cột 8 (H: Hộ chiếu)
+# - Cột 16 (P: Điểm các môn thi)
+# - Cột 23 (W: Tình trạng văn bằng), Cột 24 (X: Ghi chú)
+# - Cột 25 (Y: Trạng thái số hóa), Cột 26 (Z: Lý do lỗi), Cột 27 (AA: Mã đơn vị), Cột 28 (AB: Tên đơn vị)
+EXCLUDE_YELLOW_COLS = {1, 2, 3, 4, 6, 7, 8, 16, 23, 24, 25, 26, 27, 28}
+
 def sanitize_filename(name: str) -> str:
     r"""Loại bỏ các ký tự cấm của Windows/macOS (\ / : * ? " < > |) khỏi tên file/thư mục. Giữ nguyên tiếng Việt có dấu và ký tự & hoàn toàn hợp lệ."""
     if not name:
@@ -146,10 +155,11 @@ class DataExporter:
                         cell.data_type = 's'
                         cell.value = str(cell.value)
                     
-            # Tô vàng các ô bị thiếu từ cột B (2) đến AB (28)
+            # Tô vàng các ô thông tin cốt lõi bị thiếu (bỏ qua các cột không yêu cầu tô vàng)
             for col in range(1, min(28, len(row_vals))):
-                if is_cell_empty(row_vals[col]):
-                    ws.cell(row=curr_row, column=col + 1).fill = self.yellow_fill
+                col_num = col + 1  # 1-based index (1..28)
+                if col_num not in EXCLUDE_YELLOW_COLS and is_cell_empty(row_vals[col]):
+                    ws.cell(row=curr_row, column=col_num).fill = self.yellow_fill
                     yellow_count += 1
                     
         return yellow_count
@@ -314,8 +324,9 @@ class DataExporter:
                                 cell_c.value = str(cell_c.value)
 
                     for col in range(1, min(28, len(row_vals))):
-                        if is_cell_empty(row_vals[col]):
-                            err_ws.cell(row=c_row, column=col + 1).fill = self.yellow_fill
+                        col_num = col + 1
+                        if col_num not in EXCLUDE_YELLOW_COLS and is_cell_empty(row_vals[col]):
+                            err_ws.cell(row=c_row, column=col_num).fill = self.yellow_fill
 
                 err_file_path = output_dir / f"{unit_safe}_DS_Loi.xlsx"
                 err_wb.save(err_file_path)
