@@ -53,7 +53,8 @@ def is_valid_stt(val):
 def is_summary_or_footer_row(row_cells):
     """Kiểm tra xem dòng có phải là dòng tổng kết, chân trang ký tên hay không."""
     for cell in row_cells[:15]:
-        val = str(cell.value or '').strip().lower()
+        val_raw = cell.value if hasattr(cell, 'value') else cell
+        val = str(val_raw or '').strip().lower()
         if any(kw in val for kw in SUMMARY_KEYWORDS):
             return True
     return False
@@ -447,6 +448,13 @@ class ExcelProcessor:
             "export_results": {}
         }
 
+        def update_progress(curr, total, stage_msg=None):
+            if progress_callback:
+                try:
+                    progress_callback(curr, total, overall_stats, stage_msg)
+                except TypeError:
+                    progress_callback(curr, total, overall_stats)
+
         # ==============================================================
         # GIAI ĐOẠN 0: QUÉT & TRÍCH XUẤT THÔ TỪ TẤT CẢ CÁC TỆP EXCEL
         # ==============================================================
@@ -459,8 +467,8 @@ class ExcelProcessor:
 
         for idx, f_path in enumerate(files, start=1):
             if check_cancel and check_cancel():
-                log("⏹ Quá trình xử lý đã bị hủy theo yêu cầu của người dùng.", "warning")
-                break
+                log("⏹ Quá trình xử lý đã bị dừng theo yêu cầu của người dùng.", "warning")
+                return [], overall_stats
 
             log(f"\n[{idx}/{len(files)}] ĐANG TRÍCH XUẤT: {f_path.name}...", "info")
             f_students = self.extract_students_from_file(
@@ -476,8 +484,7 @@ class ExcelProcessor:
             all_unit_students.extend(f_students)
             overall_stats["total_students"] = len(all_unit_students)
 
-            if progress_callback:
-                progress_callback(idx, len(files), overall_stats)
+            update_progress(idx, len(files), f"Giai đoạn 0: Đang đọc tệp [{idx}/{len(files)}] {f_path.name}...")
 
         if not all_unit_students:
             log("⚠️ Không có học sinh nào được trích xuất từ các file nguồn.", "warning")
@@ -486,17 +493,22 @@ class ExcelProcessor:
         total_extracted = len(all_unit_students)
         log(f"\n🎉 Hoàn thành Giai đoạn 0: Đã trích xuất tổng cộng {total_extracted} học sinh từ {len(files)} tệp.", "success")
 
+        if check_cancel and check_cancel():
+            log("⏹ Quá trình xử lý đã bị dừng theo yêu cầu của người dùng.", "warning")
+            return all_unit_students, overall_stats
+
         # ==============================================================
         # GIAI ĐOẠN 1/4: CHUẨN HÓA TOÀN BỘ NGÀY SINH (CỘT I)
         # ==============================================================
         log("\n" + "=" * 80, "info")
         log("📅 [GIAI ĐOẠN 1/4] BẮT ĐẦU CHUẨN HÓA TOÀN BỘ NGÀY SINH (CỘT I)...", "info")
         log("=" * 80, "info")
+        update_progress(1, 4, f"Giai đoạn 1/4: Đang chuẩn hóa Ngày sinh toàn cục ({total_extracted} học sinh)...")
 
         for idx_st, st_item in enumerate(all_unit_students):
             if check_cancel and check_cancel():
                 log("⏹ Đã dừng chuẩn hóa ngày sinh theo yêu cầu.", "warning")
-                break
+                return all_unit_students, overall_stats
 
             norm_dob = st_item["dob"]
             is_v_dob, err_t, err_d = check_dob_validity(norm_dob)
@@ -573,12 +585,17 @@ class ExcelProcessor:
 
         log(f"✅ Hoàn thành Giai đoạn 1: Chuẩn hóa Ngày sinh cho toàn bộ {total_extracted} học sinh.", "success")
 
+        if check_cancel and check_cancel():
+            log("⏹ Quá trình xử lý đã bị dừng theo yêu cầu của người dùng.", "warning")
+            return all_unit_students, overall_stats
+
         # ==============================================================
         # GIAI ĐOẠN 2/4: CHUẨN HÓA TOÀN BỘ TÊN TRƯỜNG (CỘT N)
         # ==============================================================
         log("\n" + "=" * 80, "info")
         log("🏫 [GIAI ĐOẠN 2/4] BẮT ĐẦU CHUẨN HÓA TOÀN BỘ TÊN TRƯỜNG (CỘT N)...", "info")
         log("=" * 80, "info")
+        update_progress(2, 4, f"Giai đoạn 2/4: Đang chuẩn hóa Tên trường toàn cục...")
 
         def _norm_sch_key(s: str) -> str:
             return re.sub(r'\s+', ' ', str(s or "")).strip().lower()
@@ -596,7 +613,7 @@ class ExcelProcessor:
         for (f_path, s_name, raw_sch), grp in distinct_school_blocks.items():
             if check_cancel and check_cancel():
                 log("⏹ Đã dừng chuẩn hóa tên trường theo yêu cầu.", "warning")
-                break
+                return all_unit_students, overall_stats
 
             raw_sch_lower = _norm_sch_key(raw_sch)
 
@@ -620,6 +637,14 @@ class ExcelProcessor:
 
             # 2. Bị trống -> Hiển thị dialog kèm Thư mục, File, Sheet để người dùng tự chọn
             if not raw_sch:
+                empty_file_key = f"__EMPTY_SCH__{f_path}"
+                if empty_file_key in school_cache:
+                    applied_sch = school_cache[empty_file_key]
+                    for st in grp:
+                        st["school"] = applied_sch
+                    log(f"   ⚡ Tự động áp dụng Tên trường đã nhớ cho {len(grp)} HS bị trống trường ({f_path.name} | {s_name}): '{applied_sch}'", "info")
+                    continue
+
                 block_info = {
                     "folder_name": f_path.parent.name,
                     "file_name": f_path.name,
@@ -639,10 +664,14 @@ class ExcelProcessor:
                     } for st in grp[:15]]
                 }
                 if dialog_callback:
-                    res_sch, _ = dialog_callback("school_block", block_info, allowed_schools_clean, default_ctx_school)
+                    res_sch, rem = dialog_callback("school_block", block_info, allowed_schools_clean, default_ctx_school)
                     applied_sch = res_sch if res_sch is not None else ""
+                    if rem and applied_sch:
+                        school_cache[empty_file_key] = applied_sch
                 else:
                     applied_sch = default_ctx_school
+                    if applied_sch:
+                        school_cache[empty_file_key] = applied_sch
 
                 for st in grp:
                     st["school"] = applied_sch
@@ -694,12 +723,17 @@ class ExcelProcessor:
 
         log(f"✅ Hoàn thành Giai đoạn 2: Chuẩn hóa Tên trường cho toàn bộ {total_extracted} học sinh.", "success")
 
+        if check_cancel and check_cancel():
+            log("⏹ Quá trình xử lý đã bị dừng theo yêu cầu của người dùng.", "warning")
+            return all_unit_students, overall_stats
+
         # ==============================================================
         # GIAI ĐOẠN 3/4: CHUẨN HÓA TOÀN BỘ NIÊN KHÓA (CỘT O)
         # ==============================================================
         log("\n" + "=" * 80, "info")
         log("🎓 [GIAI ĐOẠN 3/4] BẮT ĐẦU CHUẨN HÓA TOÀN BỘ NIÊN KHÓA (CỘT O)...", "info")
         log("=" * 80, "info")
+        update_progress(3, 4, f"Giai đoạn 3/4: Đang chuẩn hóa Niên khóa toàn cục...")
 
         distinct_cohort_blocks: dict[tuple, list[dict]] = {}
         for st in all_unit_students:
@@ -710,7 +744,7 @@ class ExcelProcessor:
         for (f_path, s_name, raw_nk), grp in distinct_cohort_blocks.items():
             if check_cancel and check_cancel():
                 log("⏹ Đã dừng chuẩn hóa niên khóa theo yêu cầu.", "warning")
-                break
+                return all_unit_students, overall_stats
 
             # Năm sinh đa số: tìm từ chính nhóm này (ngày sinh đã được chuẩn hóa sạch ở Giai đoạn 1)
             mode_yr = find_mode_birth_year(grp)
@@ -764,8 +798,9 @@ class ExcelProcessor:
                 reason = f"Định dạng niên khóa không hợp lệ: '{raw_nk}'"
 
             # Kiểm tra cache trước khi mở dialog (kèm cơ chế bảo vệ an toàn 2 lớp theo năm sinh)
-            if raw_nk and raw_nk in cohort_cache:
-                applied_nk = cohort_cache[raw_nk]
+            cohort_cache_key = raw_nk if raw_nk else "__EMPTY_COHORT__"
+            if cohort_cache_key in cohort_cache:
+                applied_nk = cohort_cache[cohort_cache_key]
                 _, _, y_applied_ra, _ = parse_nien_khoa(applied_nk)
 
                 # Chỉ tự động áp dụng khi Năm ra trường đã nhớ khớp với Năm sinh đa số + 15 của nhóm này
@@ -776,11 +811,11 @@ class ExcelProcessor:
                     continue
                 elif mode_yr and y_applied_ra:
                     default_y_ra = mode_yr + 15
-                    reason = f"Đã nhớ '{applied_nk}' cho chuỗi gốc '{raw_nk}', nhưng nhóm này có năm sinh đa số là {mode_yr} (dự kiến tốt nghiệp {mode_yr + 15} != {y_applied_ra})"
-                    log(f"   ⚠️ Phát hiện lệch tuổi: Nhóm '{raw_nk}' có năm sinh {mode_yr} (dự kiến {mode_yr + 15}), khác niên khóa đã nhớ '{applied_nk}'. Mở dialog xác nhận thủ công.", "warning")
+                    reason = f"Đã nhớ '{applied_nk}' cho nhóm tương tự, nhưng nhóm này có năm sinh đa số là {mode_yr} (dự kiến tốt nghiệp {mode_yr + 15} != {y_applied_ra})"
+                    log(f"   ⚠️ Phát hiện lệch tuổi: Nhóm '{raw_nk or '(Trống)'}' có năm sinh {mode_yr} (dự kiến {mode_yr + 15}), khác niên khóa đã nhớ '{applied_nk}'. Mở dialog xác nhận thủ công.", "warning")
                 elif not mode_yr:
-                    reason = f"Đã nhớ '{applied_nk}' cho chuỗi gốc '{raw_nk}', nhưng nhóm này không có thông tin năm sinh để đối chiếu an toàn"
-                    log(f"   ⚠️ Nhóm '{raw_nk}' không có thông tin năm sinh để đối chiếu an toàn với niên khóa đã nhớ '{applied_nk}'. Mở dialog xác nhận thủ công.", "warning")
+                    reason = f"Đã nhớ '{applied_nk}' cho nhóm tương tự, nhưng nhóm này không có thông tin năm sinh để đối chiếu an toàn"
+                    log(f"   ⚠️ Nhóm '{raw_nk or '(Trống)'}' không có thông tin năm sinh để đối chiếu an toàn với niên khóa đã nhớ '{applied_nk}'. Mở dialog xác nhận thủ công.", "warning")
 
             # Mở dialog đối chiếu niên khóa (hiển thị tối đa 15 HS)
             block_info = {
@@ -812,20 +847,23 @@ class ExcelProcessor:
                     else:
                         chosen_nk = fmt_nk if fmt_nk else raw_nk
 
-                if rem and raw_nk:
-                    cohort_cache[raw_nk] = chosen_nk
+                if rem:
+                    cohort_cache[cohort_cache_key] = chosen_nk
             else:
                 if default_y_ra and str(default_y_ra).isdigit():
                     chosen_nk = f"{int(default_y_ra) - 4}-{default_y_ra}"
                 else:
                     chosen_nk = fmt_nk if fmt_nk else raw_nk
-                if raw_nk:
-                    cohort_cache[raw_nk] = chosen_nk
+                cohort_cache[cohort_cache_key] = chosen_nk
 
             for st in grp:
                 st["cohort"] = chosen_nk
 
         log(f"✅ Hoàn thành Giai đoạn 3: Chuẩn hóa Niên khóa cho toàn bộ {total_extracted} học sinh.", "success")
+
+        if check_cancel and check_cancel():
+            log("⏹ Quá trình xử lý đã bị dừng theo yêu cầu của người dùng.", "warning")
+            return all_unit_students, overall_stats
 
         # ==============================================================
         # GIAI ĐOẠN 4/4: CHUẨN HÓA TOÀN BỘ NGÀY CẤP BẰNG (CỘT S)
@@ -833,8 +871,13 @@ class ExcelProcessor:
         log("\n" + "=" * 80, "info")
         log("📜 [GIAI ĐOẠN 4/4] BẮT ĐẦU CHUẨN HÓA NGÀY CẤP BẰNG TOÀN CỤC (CỘT S)...", "info")
         log("=" * 80, "info")
+        update_progress(4, 4, f"Giai đoạn 4/4: Đang chuẩn hóa Ngày cấp bằng toàn cục...")
         auto_fill_graduation_dates_by_school_and_cohort(all_unit_students)
         log(f"✅ Hoàn thành Giai đoạn 4: Đã tự động đối khớp và chuẩn hóa Ngày cấp bằng cho toàn bộ {total_extracted} học sinh.", "success")
+
+        if check_cancel and check_cancel():
+            log("⏹ Quá trình xử lý đã bị dừng theo yêu cầu của người dùng.", "warning")
+            return all_unit_students, overall_stats
 
         # ==============================================================
         # GIAI ĐOẠN 5: HOÀN TẤT DỮ LIỆU & XUẤT CÁC TỆP KẾT QUẢ
@@ -842,6 +885,7 @@ class ExcelProcessor:
         log("\n" + "=" * 80, "info")
         log("📋 [GIAI ĐOẠN 5] HOÀN TẤT DỮ LIỆU & BẮT ĐẦU XUẤT CÁC TỆP KẾT QUẢ...", "info")
         log("=" * 80, "info")
+        update_progress(4, 4, "Giai đoạn 5: Đang hoàn tất dữ liệu & xuất các tệp kết quả...")
 
         overall_stats["total_students"] = len(all_unit_students)
 
@@ -920,17 +964,17 @@ class ExcelProcessor:
                 out_wb.close()
 
         # Xuất các file gộp, tách, file DS_Loi duy nhất, file Dữ liệu gốc và Tài liệu số hóa
-        log("\n📦 BẮT ĐẦU XUẤT CÁC TỆP DỮ LIỆU THEO TÙY CHỌN...", "info")
-        export_res = self.exporter.export_all(
-            all_students=all_unit_students,
-            unit_info=eff_unit_info,
-            output_dir=output_dir,
-            options=export_options or {},
-            log_callback=log_callback
-        )
-        overall_stats["export_results"] = export_res
+        if output_dir:
+            log("\n📦 BẮT ĐẦU XUẤT CÁC TỆP DỮ LIỆU THEO TÙY CHỌN...", "info")
+            export_res = self.exporter.export_all(
+                all_students=all_unit_students,
+                unit_info=eff_unit_info,
+                output_dir=output_dir,
+                options=export_options or {},
+                log_callback=log_callback
+            )
+            overall_stats["export_results"] = export_res
 
-        if progress_callback:
-            progress_callback(len(files), len(files), overall_stats)
+        update_progress(len(files), len(files), "Hoàn tất chuẩn hóa & xuất tệp thành công!")
 
         return all_unit_students, overall_stats

@@ -566,8 +566,8 @@ class MainWindow:
         self._log(f"🏫 Số trường trực thuộc đơn vị: {len(allowed_schools)} trường.", "info")
         self._log("=" * 80, "info")
 
-        def progress_cb(curr_idx, total_cnt, current_stats):
-            self.root.after(0, lambda: self._update_progress_ui(curr_idx, total_cnt, current_stats))
+        def progress_cb(curr_idx, total_cnt, current_stats, stage_msg=None):
+            self.root.after(0, lambda: self._update_progress_ui(curr_idx, total_cnt, current_stats, stage_msg))
 
         def check_cancel_cb():
             return self.cancel_requested
@@ -601,13 +601,17 @@ class MainWindow:
 
         self.root.after(0, self._on_processing_finished, total_st, da_so_hoa, chua_day_du, chua_so_hoa, output_dir)
 
-    def _update_progress_ui(self, curr_idx, total_cnt, stats):
+    def _update_progress_ui(self, curr_idx, total_cnt, stats, stage_msg=None):
+        self.progress_bar["maximum"] = total_cnt
         self.progress_bar["value"] = curr_idx
-        self.status_lbl.config(text=f"Đang xử lý [{curr_idx}/{total_cnt}] tệp...")
-        self.stat_total_lbl.config(text=f"Tổng học sinh: {stats['total_students']}")
-        self.stat_da_so_hoa_lbl.config(text=f"✅ Đã số hóa đầy đủ: {stats['da_so_hoa']}")
-        self.stat_chua_day_du_lbl.config(text=f"⚠️ Số hoá chưa đầy đủ: {stats['chua_day_du']}")
-        self.stat_chua_so_hoa_lbl.config(text=f"❌ Chưa số hoá: {stats['chua_so_hoa']}")
+        if stage_msg:
+            self.status_lbl.config(text=stage_msg)
+        else:
+            self.status_lbl.config(text=f"Đang xử lý [{curr_idx}/{total_cnt}] tệp...")
+        self.stat_total_lbl.config(text=f"Tổng học sinh: {stats.get('total_students', 0)}")
+        self.stat_da_so_hoa_lbl.config(text=f"✅ Đã số hóa đầy đủ: {stats.get('da_so_hoa', 0)}")
+        self.stat_chua_day_du_lbl.config(text=f"⚠️ Số hoá chưa đầy đủ: {stats.get('chua_day_du', 0)}")
+        self.stat_chua_so_hoa_lbl.config(text=f"❌ Chưa số hoá: {stats.get('chua_so_hoa', 0)}")
 
     def _on_processing_finished(self, total_st, da_so_hoa, chua_day_du, chua_so_hoa, output_dir):
         self.status_lbl.config(text="Hoàn thành chuẩn hóa dữ liệu & xuất danh sách tài liệu số hóa!")
