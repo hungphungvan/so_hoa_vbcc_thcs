@@ -599,13 +599,26 @@ class ExcelProcessor:
                         default_y_ra = mode_yr + 15 if mode_yr else ""
                         reason = f"Định dạng niên khóa không hợp lệ: '{raw_nk}'"
 
-                    # Kiểm tra cache trước khi mở dialog
+                    # Kiểm tra cache trước khi mở dialog (kèm cơ chế bảo vệ an toàn 2 lớp theo năm sinh)
                     if raw_nk and raw_nk in cohort_cache:
                         applied_nk = cohort_cache[raw_nk]
-                        for st in grp:
-                            st["cohort"] = applied_nk
-                        log(f"   ⚡ Tự động áp dụng Niên khóa đã nhớ cho {len(grp)} HS: '{applied_nk}'", "info")
-                        continue
+                        _, _, y_applied_ra, _ = parse_nien_khoa(applied_nk)
+
+                        # Chỉ tự động áp dụng khi Năm ra trường đã nhớ khớp với Năm sinh đa số + 15 của nhóm này
+                        if mode_yr and y_applied_ra and (y_applied_ra == mode_yr + 15):
+                            for st in grp:
+                                st["cohort"] = applied_nk
+                            log(f"   ⚡ Tự động áp dụng Niên khóa đã nhớ cho {len(grp)} HS: '{applied_nk}' (khớp năm sinh đa số {mode_yr} + 15)", "info")
+                            continue
+                        elif mode_yr and y_applied_ra:
+                            # Khác năm sinh đa số -> Cảnh báo lệch tuổi và đưa vào dialog để người dùng xác nhận
+                            default_y_ra = mode_yr + 15
+                            reason = f"Đã nhớ '{applied_nk}' cho chuỗi gốc '{raw_nk}', nhưng nhóm này có năm sinh đa số là {mode_yr} (dự kiến tốt nghiệp {mode_yr + 15} != {y_applied_ra})"
+                            log(f"   ⚠️ Phát hiện lệch tuổi: Nhóm '{raw_nk}' có năm sinh {mode_yr} (dự kiến {mode_yr + 15}), khác niên khóa đã nhớ '{applied_nk}'. Mở dialog xác nhận thủ công.", "warning")
+                        elif not mode_yr:
+                            # Không xác định được năm sinh -> Không tự động áp dụng để tránh sai sót
+                            reason = f"Đã nhớ '{applied_nk}' cho chuỗi gốc '{raw_nk}', nhưng nhóm này không có thông tin năm sinh để đối chiếu an toàn"
+                            log(f"   ⚠️ Nhóm '{raw_nk}' không có thông tin năm sinh để đối chiếu an toàn với niên khóa đã nhớ '{applied_nk}'. Mở dialog xác nhận thủ công.", "warning")
 
                     # Mở dialog đối chiếu niên khóa (hiển thị tối đa 15 HS)
                     block_info = {
