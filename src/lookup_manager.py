@@ -98,84 +98,84 @@ class LookupManager:
             raise FileNotFoundError(f"Không tìm thấy tệp danh mục tra cứu: {self.excel_path}")
 
         wb = openpyxl.load_workbook(self.excel_path, data_only=True)
-        
-        # 1. Sheet DS_Don_Vi
-        if "DS_Don_Vi" in wb.sheetnames:
-            ws = wb["DS_Don_Vi"]
-            # Cột: 1: Mã trường, 2: Tên trường đã học, 3: Mã đơn vị, 4: Tên đơn vị, 5: Xã/phường
-            for r in range(2, ws.max_row + 1):
-                sch_code = str(ws.cell(r, 1).value or '').strip()
-                sch_name = str(ws.cell(r, 2).value or '').strip()
-                u_code = str(ws.cell(r, 3).value or '').strip()
-                u_name = str(ws.cell(r, 4).value or '').strip()
-                commune = str(ws.cell(r, 5).value or '').strip()
-                
-                if u_name:
-                    # Tạo khóa định danh duy nhất hiển thị cả Tên đơn vị, Xã/phường và Mã đơn vị
-                    if commune:
-                        unit_key = f"{u_name} - {commune} [Mã: {u_code}]"
-                    else:
-                        unit_key = f"{u_name} [Mã: {u_code}]"
+        try:
+            # 1. Sheet DS_Don_Vi
+            if "DS_Don_Vi" in wb.sheetnames:
+                ws = wb["DS_Don_Vi"]
+                # Cột: 1: Mã trường, 2: Tên trường đã học, 3: Mã đơn vị, 4: Tên đơn vị, 5: Xã/phường
+                for r in range(2, ws.max_row + 1):
+                    sch_code = str(ws.cell(r, 1).value or '').strip()
+                    sch_name = str(ws.cell(r, 2).value or '').strip()
+                    u_code = str(ws.cell(r, 3).value or '').strip()
+                    u_name = str(ws.cell(r, 4).value or '').strip()
+                    commune = str(ws.cell(r, 5).value or '').strip()
+                    
+                    if u_name:
+                        # Tạo khóa định danh duy nhất hiển thị cả Tên đơn vị, Xã/phường và Mã đơn vị
+                        if commune:
+                            unit_key = f"{u_name} - {commune} [Mã: {u_code}]"
+                        else:
+                            unit_key = f"{u_name} [Mã: {u_code}]"
 
-                    if unit_key not in self.units:
-                        self.units[unit_key] = {
-                            "key": unit_key,
-                            "code": u_code,
-                            "name": u_name,
-                            "commune": commune,
-                            "schools": [],
-                            "school_map": {}
-                        }
+                        if unit_key not in self.units:
+                            self.units[unit_key] = {
+                                "key": unit_key,
+                                "code": u_code,
+                                "name": u_name,
+                                "commune": commune,
+                                "schools": [],
+                                "school_map": {}
+                            }
 
-                    u_dict = self.units[unit_key]
-                    if sch_name and sch_name not in u_dict["schools"]:
-                        u_dict["schools"].append(sch_name)
-                    if sch_name and sch_code:
-                        u_dict["school_map"][sch_name.lower()] = sch_code
-                        
-            self.unit_names_list = sorted(list(self.units.keys()))
+                        u_dict = self.units[unit_key]
+                        if sch_name and sch_name not in u_dict["schools"]:
+                            u_dict["schools"].append(sch_name)
+                        if sch_name and sch_code:
+                            u_dict["school_map"][sch_name.lower()] = sch_code
+                            
+                self.unit_names_list = sorted(list(self.units.keys()))
 
-        # 2. Sheet Gioi_Tinh
-        if "Gioi_Tinh" in wb.sheetnames:
-            ws = wb["Gioi_Tinh"]
-            for r in range(2, ws.max_row + 1):
-                code = str(ws.cell(r, 1).value or '').strip()
-                name = str(ws.cell(r, 2).value or '').strip()
-                if code and name:
-                    code_clean = re.sub(r'\.0+$', '', code)
-                    self.gender_map[code_clean] = name
+            # 2. Sheet Gioi_Tinh
+            if "Gioi_Tinh" in wb.sheetnames:
+                ws = wb["Gioi_Tinh"]
+                for r in range(2, ws.max_row + 1):
+                    code = str(ws.cell(r, 1).value or '').strip()
+                    name = str(ws.cell(r, 2).value or '').strip()
+                    if code and name:
+                        code_clean = re.sub(r'\.0+$', '', code)
+                        self.gender_map[code_clean] = name
 
-        # 3. Sheet Dan_Toc
-        if "Dan_Toc" in wb.sheetnames:
-            ws = wb["Dan_Toc"]
-            for r in range(2, ws.max_row + 1):
-                code = str(ws.cell(r, 1).value or '').strip()
-                name = str(ws.cell(r, 2).value or '').strip()
-                if code and name:
-                    code_clean = re.sub(r'\.0+$', '', code)
-                    self.ethnic_map[code_clean] = name
+            # 3. Sheet Dan_Toc
+            if "Dan_Toc" in wb.sheetnames:
+                ws = wb["Dan_Toc"]
+                for r in range(2, ws.max_row + 1):
+                    code = str(ws.cell(r, 1).value or '').strip()
+                    name = str(ws.cell(r, 2).value or '').strip()
+                    if code and name:
+                        code_clean = re.sub(r'\.0+$', '', code)
+                        self.ethnic_map[code_clean] = name
 
-        # 4. Sheet Quoc_Tich
-        if "Quoc_Tich" in wb.sheetnames:
-            ws = wb["Quoc_Tich"]
-            for r in range(2, ws.max_row + 1):
-                code = str(ws.cell(r, 1).value or '').strip()
-                name = str(ws.cell(r, 2).value or '').strip()
-                if code and name:
-                    code_clean = re.sub(r'\.0+$', '', code)
-                    self.nationality_map[code_clean] = name
+            # 4. Sheet Quoc_Tich
+            if "Quoc_Tich" in wb.sheetnames:
+                ws = wb["Quoc_Tich"]
+                for r in range(2, ws.max_row + 1):
+                    code = str(ws.cell(r, 1).value or '').strip()
+                    name = str(ws.cell(r, 2).value or '').strip()
+                    if code and name:
+                        code_clean = re.sub(r'\.0+$', '', code)
+                        self.nationality_map[code_clean] = name
 
-        # 5. Sheet Noi_Sinh
-        if "Noi_Sinh" in wb.sheetnames:
-            ws = wb["Noi_Sinh"]
-            for r in range(2, ws.max_row + 1):
-                code = str(ws.cell(r, 1).value or '').strip()
-                name = str(ws.cell(r, 2).value or '').strip()
-                if code and name:
-                    code_clean = re.sub(r'\.0+$', '', code)
-                    self.birthplace_map[code_clean] = name
-
-        wb.close()
+            # 5. Sheet Noi_Sinh
+            if "Noi_Sinh" in wb.sheetnames:
+                ws = wb["Noi_Sinh"]
+                for r in range(2, ws.max_row + 1):
+                    code = str(ws.cell(r, 1).value or '').strip()
+                    name = str(ws.cell(r, 2).value or '').strip()
+                    if code and name:
+                        code_clean = re.sub(r'\.0+$', '', code)
+                        self.birthplace_map[code_clean] = name
+        finally:
+            wb.close()
 
     def get_unit_info(self, unit_identifier: str) -> dict | None:
         """Lấy thông tin đơn vị từ unit_key, tên đơn vị hoặc mã đơn vị."""

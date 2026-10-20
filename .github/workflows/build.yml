@@ -74,6 +74,13 @@ jobs:
         if [ -d "SoHoa_VBCC_macOS.app" ]; then
           chmod -R +x SoHoa_VBCC_macOS.app/Contents/MacOS || true
           zip -r -y SoHoa_VBCC_macOS.zip SoHoa_VBCC_macOS.app
+
+          # Tạo file cài đặt đĩa ảo DMG kéo thả vào Applications chuẩn macOS
+          mkdir -p dmg_root
+          cp -R SoHoa_VBCC_macOS.app dmg_root/
+          ln -s /Applications dmg_root/Applications
+          hdiutil create -volname "SoHoa_VBCC" -srcfolder dmg_root -ov -format UDZO SoHoa_VBCC_macOS.dmg
+          rm -rf dmg_root
         else
           chmod +x SoHoa_VBCC_macOS || true
           zip -r SoHoa_VBCC_macOS.zip SoHoa_VBCC_macOS
@@ -84,7 +91,9 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: SoHoa_VBCC_macOS
-        path: dist/SoHoa_VBCC_macOS.zip
+        path: |
+          dist/SoHoa_VBCC_macOS.zip
+          dist/SoHoa_VBCC_macOS.dmg
 
   publish-release:
     name: Publish Multi-Platform Release
@@ -99,6 +108,7 @@ jobs:
         mkdir release_files
         cp SoHoa_VBCC_Windows/SoHoa_VBCC.exe release_files/
         cp SoHoa_VBCC_macOS/SoHoa_VBCC_macOS.zip release_files/
+        cp SoHoa_VBCC_macOS/SoHoa_VBCC_macOS.dmg release_files/ || true
         ls -la release_files/
 
     - name: Publish to GitHub Release
@@ -113,7 +123,8 @@ jobs:
           | Hệ điều hành | Tệp tải về | Hướng dẫn sử dụng |
           | :--- | :--- | :--- |
           | **Windows (x64)** | **`SoHoa_VBCC.exe`** | Tải về và click đúp để chạy trực tiếp trên Windows 10/11. |
-          | **macOS** | **`SoHoa_VBCC_macOS.zip`** | Giải nén, click đúp file `SoHoa_VBCC_macOS.app` (hoặc nhị phân) để chạy. |
+          | **macOS (Khuyên dùng)** | **`SoHoa_VBCC_macOS.dmg`** | Tệp đĩa cài đặt chuẩn macOS: Mở tệp DMG và kéo ứng dụng vào thư mục Applications. |
+          | **macOS (Bản Zip)** | **`SoHoa_VBCC_macOS.zip`** | Giải nén, click đúp file `SoHoa_VBCC_macOS.app` (hoặc nhị phân) để chạy. |
 
           ---
           > [!NOTE]
@@ -122,6 +133,7 @@ jobs:
           > 👉 Bạn chỉ cần **Click chuột phải** (hoặc giữ phím `Control` + Click) vào ứng dụng $\rightarrow$ chọn **Open (Mở)** $\rightarrow$ chọn tiếp **Open** là ứng dụng sẽ chạy bình thường (chỉ cần làm 1 lần đầu).
         files: |
           release_files/SoHoa_VBCC.exe
+          release_files/SoHoa_VBCC_macOS.dmg
           release_files/SoHoa_VBCC_macOS.zip
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

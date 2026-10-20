@@ -16,19 +16,18 @@ Hệ thống được đóng gói tự động qua **GitHub Actions** thành cá
 | Hệ điều hành | Tệp tải về | Hướng dẫn sử dụng |
 | :--- | :--- | :--- |
 | 🪟 **Windows (x64)** | [**`SoHoa_VBCC.exe`**](https://github.com/hungphungvan/so_hoa_vbcc_thcs/releases/latest) | Tải về và click đúp để chạy trực tiếp trên Windows 10/11. |
-| 🍏 **macOS (Apple Silicon & Intel)** | [**`SoHoa_VBCC_macOS.zip`**](https://github.com/hungphungvan/so_hoa_vbcc_thcs/releases/latest) | Giải nén, click đúp file `SoHoa_VBCC_macOS.app` (hoặc nhị phân) để chạy. |
+| 🍏 **macOS (Khuyên dùng)** | [**`SoHoa_VBCC_macOS.dmg`**](https://github.com/hungphungvan/so_hoa_vbcc_thcs/releases/latest) | **Tệp đĩa cài đặt chuẩn macOS:** Mở tệp `.dmg`, kéo biểu tượng ứng dụng vào thư mục `Applications` là xong! |
+| 🍏 **macOS (Bản nén Zip)** | [**`SoHoa_VBCC_macOS.zip`**](https://github.com/hungphungvan/so_hoa_vbcc_thcs/releases/latest) | Giải nén, click đúp file `SoHoa_VBCC_macOS.app` để chạy. |
 
 > [!NOTE]
 > **Hướng dẫn khởi chạy trên macOS:**
 > 
-> **Cách 1: Chạy từ thư mục mã nguồn (Khuyên dùng)**
-> 👉 Click đúp vào tệp **`Chay_Chuong_Trinh.command`** trong thư mục dự án để khởi động ngay giao diện đồ họa.
+> **Cách 1: Chạy từ thư mục mã nguồn (Nhanh nhất & Tự động cập nhật)**
+> 👉 Click đúp vào tệp **`Chay_Chuong_Trinh.command`** trong thư mục dự án để khởi động ngay giao diện đồ họa. Script sẽ tự động cập nhật bản mới nhất từ GitHub trong 1 giây mỗi khi chạy!
 > 
-> **Cách 2: Chạy tệp đóng gói tải từ GitHub Releases**
-> Nếu tải tệp `SoHoa_VBCC_macOS.zip` về và macOS báo *"Không thể mở ứng dụng"* do cơ chế kiểm soát bảo mật Gatekeeper:
-> 1. Mở ứng dụng **Terminal**.
-> 2. Gõ lệnh: `xattr -cr ` (có dấu cách ở cuối), sau đó kéo thả file `SoHoa_VBCC_macOS.app` vào Terminal rồi nhấn **Enter**.
-> 3. Hoặc **Click chuột phải** (hoặc giữ phím `Control` + Click) vào ứng dụng $\rightarrow$ chọn **Open (Mở)** $\rightarrow$ chọn tiếp **Open**.
+> **Cách 2: Chạy từ tệp cài đặt `.dmg` tải từ GitHub Releases**
+> 👉 Tải file `SoHoa_VBCC_macOS.dmg`, mở tệp và kéo ứng dụng vào `Applications`.
+> Nếu macOS hiển thị cảnh báo Gatekeeper lần đầu mở: **Click chuột phải** (hoặc `Control` + Click) vào ứng dụng $\rightarrow$ chọn **Open (Mở)** $\rightarrow$ chọn tiếp **Open**.
 
 ---
 
