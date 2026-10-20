@@ -118,7 +118,7 @@ Mô-đun 2 tự động tổng hợp hồ sơ số hóa từ kết quả của M
 
 ## 📦 HỆ THỐNG XUẤT TỆP ĐA DẠNG CỦA CHƯƠNG TRÌNH
 
-Sau khi chuẩn hóa, toàn bộ tệp kết quả được lưu tại thư mục `Da_Chuan_Hoa/` với đầy đủ các tùy chọn:
+Sau khi chuẩn hóa, toàn bộ tệp kết quả được lưu tại thư mục `Ket_Qua_So_Hoa/` với đầy đủ các tùy chọn:
 
 1. **Tệp Gộp tổng thể**:
    - `{Ten_Don_Vi}_Đa_Gop_Theo_Truong.xlsx` (sắp xếp: Tên trường $\rightarrow$ Năm tốt nghiệp $\rightarrow$ STT gốc).

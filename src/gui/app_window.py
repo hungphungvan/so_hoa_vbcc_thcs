@@ -309,7 +309,7 @@ class MainWindow:
         bottom_frame = ttk.Frame(self.root, padding=(12, 6))
         bottom_frame.pack(fill=tk.X)
 
-        self.open_output_btn = ttk.Button(bottom_frame, text="📂 Mở thư mục kết quả (Da_Chuan_Hoa)", command=self._open_output_dir)
+        self.open_output_btn = ttk.Button(bottom_frame, text="📂 Mở thư mục Kết quả số hóa", command=self._open_output_dir)
         self.open_output_btn.pack(side=tk.LEFT, padx=(0, 6))
 
         self.inspect_btn = ttk.Button(
@@ -397,7 +397,7 @@ class MainWindow:
                 if not f.name.startswith("~$")
                 and not f.name.startswith("._")
                 and not any(tag in f.name for tag in ["_Đa_Gop_", "_DS_Loi", "_Du_Lieu_Goc", "_DS_Lỗi", "_TongHop", "_DS_Tai_Lieu_So_Hoa"])
-                and "da_chuan_hoa" not in [part.lower() for part in f.parts]
+                and not any(tag in part.lower() for tag in ["da_chuan_hoa", "ket_qua_so_hoa"] for part in f.parts)
             ]
             self.files_count_lbl.config(
                 text=f"Tìm thấy {len(files)} tệp Excel trong thư mục {p.name} (bao gồm cả các thư mục trường con)"
@@ -486,7 +486,7 @@ class MainWindow:
         target_path = Path(raw_path)
         if target_path.is_file():
             files_to_process = [target_path]
-            output_dir = target_path.parent / "Da_Chuan_Hoa"
+            output_dir = target_path.parent / "Ket_Qua_So_Hoa"
         else:
             files_to_process = sorted(
                 [
@@ -494,11 +494,11 @@ class MainWindow:
                     if not f.name.startswith("~$")
                     and not f.name.startswith("._")
                     and not any(tag in f.name for tag in ["_Đa_Gop_", "_DS_Loi", "_Du_Lieu_Goc", "_DS_Lỗi", "_TongHop", "_DS_Tai_Lieu_So_Hoa"])
-                    and "da_chuan_hoa" not in [part.lower() for part in f.parts]
+                    and not any(tag in part.lower() for tag in ["da_chuan_hoa", "ket_qua_so_hoa"] for part in f.parts)
                 ],
                 key=lambda x: str(x).lower()
             )
-            output_dir = target_path / "Da_Chuan_Hoa"
+            output_dir = target_path / "Ket_Qua_So_Hoa"
 
         if not files_to_process:
             messagebox.showwarning("Cảnh báo", "Không tìm thấy file Excel (*.xlsx) nào để xử lý!", parent=self.root)
@@ -642,12 +642,14 @@ class MainWindow:
             raw_path = self.path_var.get().strip().strip("'\"")
             if raw_path:
                 p = Path(raw_path)
-                cand = (p.parent if p.is_file() else p) / "Da_Chuan_Hoa"
+                cand = (p.parent if p.is_file() else p) / "Ket_Qua_So_Hoa"
+                if not cand.exists():
+                    cand = (p.parent if p.is_file() else p) / "Da_Chuan_Hoa"
                 if cand.exists():
                     out_path = cand
 
         if not out_path or not out_path.exists():
-            messagebox.showinfo("Thông báo", "Chưa có thư mục kết quả Da_Chuan_Hoa nào được tạo.", parent=self.root)
+            messagebox.showinfo("Thông báo", "Chưa có thư mục kết quả Ket_Qua_So_Hoa nào được tạo.", parent=self.root)
             return
 
         try:

@@ -23,6 +23,7 @@ dist/
 ~$*.xls
 
 # Thư mục và file dữ liệu xuất ra của chương trình
+Ket_Qua_So_Hoa/
 Da_Chuan_Hoa/
 Tach_Theo_Truong/
 *_TongHop.xlsx

@@ -168,7 +168,7 @@ Có 3 cách chạy phần mềm trên macOS:
    - Hệ thống quét đệ quy của chương trình (`excel_processor.py`) **đã được tích hợp bộ lọc tự động bỏ qua toàn bộ các tệp bắt đầu bằng `._` hoặc `.DS_Store`**, đảm bảo không bao giờ bị lỗi đọc nhầm file rác của macOS.
 
 3. **Mở thư mục kết quả trên macOS:**
-   - Nút *"📂 Mở thư mục kết quả (Da_Chuan_Hoa)"* trên giao diện đã được lập trình nhận diện hệ điều hành: Trên macOS sẽ tự động kích hoạt lệnh `open {output_dir}` để mở trực tiếp trong ứng dụng **Finder**.
+   - Nút *"📂 Mở thư mục Kết quả số hóa"* trên giao diện đã được lập trình nhận diện hệ điều hành: Trên macOS sẽ tự động kích hoạt lệnh `open {output_dir}` để mở trực tiếp trong ứng dụng **Finder**.
 
 4. **Bản đóng gói nhị phân độc lập (.app hoặc binary):**
    - Kịch bản GitHub Actions (`.github/workflows/build.yml`) đã thiết lập sẵn luồng build cho macOS runner (`macos-latest`). Khi workflow chạy xong trên GitHub, bạn chỉ cần tải file `SoHoa_VBCC_macOS.zip` từ mục **Releases**, giải nén và click chạy trực tiếp mà không cần cài đặt bất kỳ công cụ dòng lệnh nào.

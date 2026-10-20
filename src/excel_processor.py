@@ -738,7 +738,7 @@ class ExcelProcessor:
             try:
                 out_wb.save(out_file_path)
                 stats["output_file"] = out_file_path
-                log(f"  ✅ Đã lưu file chuẩn hóa: Da_Chuan_Hoa/{out_file_path.name}", "success")
+                log(f"  ✅ Đã lưu file chuẩn hóa: Ket_Qua_So_Hoa/{out_file_path.name}", "success")
             except PermissionError:
                 log(f"❌ Không thể ghi file '{out_file_path.name}' do đang mở trong Excel.", "error")
             finally:
