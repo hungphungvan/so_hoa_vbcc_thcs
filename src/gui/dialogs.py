@@ -11,6 +11,10 @@ FONT_FAMILY_MONO = "Menlo" if sys.platform == "darwin" else "Consolas"
 
 def center_window(window, parent=None, width=None, height=None):
     """Căn giữa cửa sổ dialog trên cửa sổ cha hoặc màn hình."""
+    try:
+        window.configure(bg="#F5F5F7")
+    except Exception:
+        pass
     window.update_idletasks()
     w = width or window.winfo_width()
     h = height or window.winfo_height()

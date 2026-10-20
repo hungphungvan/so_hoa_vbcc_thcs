@@ -38,6 +38,7 @@ class MainWindow:
         y = max(0, (sh - win_h) // 2)
         self.root.geometry(f"{win_w}x{win_h}+{x}+{y}")
         self.root.minsize(920, 620)
+        self.root.configure(bg="#F5F5F7")
 
         # Cấu hình style
         self._setup_styles()
