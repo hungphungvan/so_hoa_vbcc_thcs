@@ -1,13 +1,15 @@
 """
 Mô-đun kiểm tra và hỗ trợ cập nhật tự động từ GitHub Releases.
-Sử dụng thư viện tiêu chuẩn urllib, không phụ thuộc vào gói ngoài.
+Sử dụng thư viện tiêu chuẩn urllib, tích hợp cơ chế tự động xử lý chứng chỉ SSL trên macOS.
 """
 from __future__ import annotations
 
 import json
 import re
+import ssl
 import threading
 import urllib.request
+import urllib.error
 import webbrowser
 from src.version import APP_VERSION, GITHUB_REPO
 
@@ -20,6 +22,40 @@ def parse_version_tuple(v_str: str) -> tuple[int, ...]:
     if not numbers:
         return (0, 0, 0)
     return tuple(int(x) for x in numbers)
+
+def _open_url_with_ssl_fallback(req: urllib.request.Request, timeout: int = 5):
+    """
+    Thực hiện gửi yêu cầu HTTPS với cơ chế tự động xử lý lỗi SSL chứng chỉ:
+    1. Ưu tiên kiểm tra chứng chỉ bằng CA bundle chuẩn từ gói certifi (nếu có).
+    2. Thử SSL Context mặc định của hệ thống.
+    3. Nếu gặp lỗi thiếu chứng chỉ cục bộ (rất phổ biến trên macOS do chưa chạy Install Certificates
+       hoặc trong file đóng gói PyInstaller), sẽ tự động fallback sang context unverified để đọc
+       dữ liệu công khai từ GitHub API mà không bị lỗi CERTIFICATE_VERIFY_FAILED.
+    """
+    ssl_context = None
+
+    # Thử nạp chứng chỉ CA qua certifi nếu môi trường có cài đặt
+    try:
+        import certifi
+        ssl_context = ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        try:
+            ssl_context = ssl.create_default_context()
+        except Exception:
+            pass
+
+    try:
+        if ssl_context:
+            return urllib.request.urlopen(req, timeout=timeout, context=ssl_context)
+        return urllib.request.urlopen(req, timeout=timeout)
+    except Exception as exc:
+        err_str = str(exc)
+        # Bắt lỗi CERTIFICATE_VERIFY_FAILED đặc trưng trên macOS hoặc môi trường PyInstaller
+        if "CERTIFICATE_VERIFY_FAILED" in err_str or "certificate verify failed" in err_str:
+            unverified_ctx = getattr(ssl, "_create_unverified_context", None)
+            if unverified_ctx:
+                return urllib.request.urlopen(req, timeout=timeout, context=unverified_ctx())
+        raise
 
 def check_for_updates(
     current_version: str = APP_VERSION,
@@ -58,11 +94,11 @@ def check_for_updates(
         req = urllib.request.Request(
             api_url,
             headers={
-                "User-Agent": "SoHoaVBCC-Updater",
+                "User-Agent": "SohoaTHCS-Updater",
                 "Accept": "application/vnd.github.v3+json"
             }
         )
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with _open_url_with_ssl_fallback(req, timeout=timeout) as resp:
             if resp.status != 200:
                 result["error"] = f"HTTP Error {resp.status}"
                 return result

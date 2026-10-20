@@ -30,13 +30,13 @@ if command -v uv >/dev/null 2>&1; then
     if [ ! -d ".venv" ] || [ ! -f ".venv/bin/python" ]; then
         echo "--> Đang tự động cấu hình môi trường Python 3.12 (Tkinter 9.0 hiện đại)..."
         uv venv --python 3.12 .venv >/dev/null 2>&1
-        uv pip install openpyxl --python .venv/bin/python >/dev/null 2>&1
+        uv pip install openpyxl certifi --python .venv/bin/python >/dev/null 2>&1
     fi
     .venv/bin/python main.py
 elif [ -d ".venv" ] && [ -f ".venv/bin/python" ]; then
     .venv/bin/python main.py
 else
-    python3 -c "import openpyxl" 2>/dev/null || python3 -m pip install openpyxl -q 2>/dev/null
+    python3 -c "import openpyxl, certifi" 2>/dev/null || python3 -m pip install openpyxl certifi -q 2>/dev/null
     python3 main.py
 fi
 
