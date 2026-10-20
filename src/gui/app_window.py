@@ -19,10 +19,21 @@ from src.gui.dialogs import (
     GradDateBlockDialog,
     DataInspectorDialog
 )
-
-# Phông chữ đa nền tảng tối ưu cho cả macOS và Windows
-FONT_FAMILY = "Helvetica Neue" if sys.platform == "darwin" else "Segoe UI"
-FONT_FAMILY_MONO = "Menlo" if sys.platform == "darwin" else "Consolas"
+from src.gui.theme import (
+    IS_DARK,
+    FONT_FAMILY,
+    FONT_FAMILY_MONO,
+    CLR_PRIMARY,
+    CLR_ACCENT,
+    CLR_SUCCESS,
+    CLR_WARNING,
+    CLR_DANGER,
+    CLR_MUTED,
+    CLR_TEXT,
+    CLR_WINDOW_BG,
+    CLR_LOG_BG,
+    CLR_LOG_FG,
+)
 
 class MainWindow:
     def __init__(self, root: tk.Tk):
@@ -38,7 +49,7 @@ class MainWindow:
         y = max(0, (sh - win_h) // 2)
         self.root.geometry(f"{win_w}x{win_h}+{x}+{y}")
         self.root.minsize(920, 620)
-        self.root.configure(bg="#F5F5F7")
+        self.root.configure(bg=CLR_WINDOW_BG)
 
         # Cấu hình style
         self._setup_styles()
@@ -89,10 +100,10 @@ class MainWindow:
                 pass
 
         style.configure("Card.TLabelframe", font=(FONT_FAMILY, 10, "bold"))
-        style.configure("Card.TLabelframe.Label", font=(FONT_FAMILY, 10, "bold"), foreground="#0D47A1")
+        style.configure("Card.TLabelframe.Label", font=(FONT_FAMILY, 10, "bold"), foreground=CLR_PRIMARY)
 
         style.configure("Action.TButton", font=(FONT_FAMILY, 10, "bold"), padding=6)
-        style.configure("Inspect.TButton", font=(FONT_FAMILY, 10, "bold"), foreground="#0D47A1")
+        style.configure("Inspect.TButton", font=(FONT_FAMILY, 10, "bold"), foreground=CLR_PRIMARY)
         if sys.platform != "darwin":
             style.configure("Success.TButton", font=(FONT_FAMILY, 10, "bold"), background="#2E7D32", foreground="#FFFFFF")
             style.configure("Stop.TButton", font=(FONT_FAMILY, 10, "bold"), background="#C62828", foreground="#FFFFFF")
@@ -150,25 +161,25 @@ class MainWindow:
         row2.pack(fill=tk.X, pady=(6, 2))
 
         ttk.Label(row2, text="Mã đơn vị (AA): ", font=(FONT_FAMILY, 9)).pack(side=tk.LEFT)
-        self.unit_code_lbl = ttk.Label(row2, text="---", font=(FONT_FAMILY, 9, "bold"), foreground="#0D47A1")
+        self.unit_code_lbl = ttk.Label(row2, text="---", font=(FONT_FAMILY, 9, "bold"), foreground=CLR_PRIMARY)
         self.unit_code_lbl.pack(side=tk.LEFT, padx=(0, 12))
 
         ttk.Label(row2, text="Tên đơn vị (AB): ", font=(FONT_FAMILY, 9)).pack(side=tk.LEFT)
-        self.unit_name_lbl = ttk.Label(row2, text="---", font=(FONT_FAMILY, 9, "bold"), foreground="#0D47A1")
+        self.unit_name_lbl = ttk.Label(row2, text="---", font=(FONT_FAMILY, 9, "bold"), foreground=CLR_PRIMARY)
         self.unit_name_lbl.pack(side=tk.LEFT, padx=(0, 12))
 
         ttk.Label(row2, text="Xã/phường: ", font=(FONT_FAMILY, 9)).pack(side=tk.LEFT)
-        self.unit_commune_lbl = ttk.Label(row2, text="---", font=(FONT_FAMILY, 9, "bold"), foreground="#7B1FA2")
+        self.unit_commune_lbl = ttk.Label(row2, text="---", font=(FONT_FAMILY, 9, "bold"), foreground=CLR_ACCENT)
         self.unit_commune_lbl.pack(side=tk.LEFT, padx=(0, 12))
 
         ttk.Label(row2, text="Số trường: ", font=(FONT_FAMILY, 9)).pack(side=tk.LEFT)
-        self.school_count_lbl = ttk.Label(row2, text="0 trường", font=(FONT_FAMILY, 9, "bold"), foreground="#2E7D32")
+        self.school_count_lbl = ttk.Label(row2, text="0 trường", font=(FONT_FAMILY, 9, "bold"), foreground=CLR_SUCCESS)
         self.school_count_lbl.pack(side=tk.LEFT)
 
         row3 = ttk.Frame(unit_card)
         row3.pack(fill=tk.X, pady=(4, 0))
         ttk.Label(row3, text="Danh sách trường: ", font=(FONT_FAMILY, 8, "italic")).pack(side=tk.LEFT)
-        self.schools_display_lbl = ttk.Label(row3, text="(Chưa chọn đơn vị)", font=(FONT_FAMILY, 8), foreground="#555555")
+        self.schools_display_lbl = ttk.Label(row3, text="(Chưa chọn đơn vị)", font=(FONT_FAMILY, 8), foreground=CLR_MUTED)
         self.schools_display_lbl.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         # 3. Card 2: Chọn Tệp hoặc Thư mục nguồn
@@ -192,7 +203,7 @@ class MainWindow:
             file_card,
             text="Hệ thống tự động quét đệ quy các thư mục con và nhận diện trường/niên khóa từ Thư mục, Tên file hoặc Sheet.",
             font=(FONT_FAMILY, 8, "italic"),
-            foreground="#555555"
+            foreground=CLR_MUTED
         )
         self.files_count_lbl.pack(anchor=tk.W, pady=(4, 0))
 
@@ -208,47 +219,36 @@ class MainWindow:
         gop_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 4))
 
         self.opt_gop_truong = tk.BooleanVar(value=True)
-        ttk.Checkbutton(gop_frame, text="Gộp theo Trường\n({Ten_Đon_Vi}_Đa_Gop_Theo_Truong.xlsx)", variable=self.opt_gop_truong).pack(anchor=tk.W, pady=2)
+        ttk.Checkbutton(gop_frame, text="Gộp theo Trường", variable=self.opt_gop_truong).pack(anchor=tk.W, pady=3)
 
         self.opt_gop_nam = tk.BooleanVar(value=False)
-        ttk.Checkbutton(gop_frame, text="Gộp theo Năm\n({Ten_Đon_Vi}_Đa_Gop_Theo_Nam.xlsx)", variable=self.opt_gop_nam).pack(anchor=tk.W, pady=2)
+        ttk.Checkbutton(gop_frame, text="Gộp theo Năm", variable=self.opt_gop_nam).pack(anchor=tk.W, pady=3)
 
         # Cột 2: Tùy chọn Tách
         tach_frame = ttk.LabelFrame(opt_grid, text="2. Tách Dữ Liệu", padding=6)
         tach_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=4)
 
         self.opt_tach_truong = tk.BooleanVar(value=True)
-        ttk.Checkbutton(tach_frame, text="Tách theo Trường\n(Thư mục Da_Tach_Theo_Truong/)", variable=self.opt_tach_truong).pack(anchor=tk.W, pady=1)
+        ttk.Checkbutton(tach_frame, text="Tách theo Trường", variable=self.opt_tach_truong).pack(anchor=tk.W, pady=2)
 
-        self.opt_tach_nam = tk.BooleanVar(value=True)
-        ttk.Checkbutton(tach_frame, text="Tách theo Năm\n(Thư mục Da_Tach_Theo_Nam/)", variable=self.opt_tach_nam).pack(anchor=tk.W, pady=1)
+        self.opt_tach_nam = tk.BooleanVar(value=False)
+        ttk.Checkbutton(tach_frame, text="Tách theo Năm", variable=self.opt_tach_nam).pack(anchor=tk.W, pady=2)
 
         self.opt_tach_truong_nam = tk.BooleanVar(value=False)
-        ttk.Checkbutton(tach_frame, text="Tách theo Trường & Năm\n(Thư mục Tach_Theo_Truong_Va_Nam/)", variable=self.opt_tach_truong_nam).pack(anchor=tk.W, pady=1)
+        ttk.Checkbutton(tach_frame, text="Tách theo Trường & Năm", variable=self.opt_tach_truong_nam).pack(anchor=tk.W, pady=2)
 
         # Cột 3: Mô-đun 2: Danh sách tài liệu số hóa
-        doc_frame = ttk.LabelFrame(opt_grid, text="3. Danh Sách Tài Liệu Số Hóa (Mô-đun 2)", padding=6)
+        doc_frame = ttk.LabelFrame(opt_grid, text="3. Danh Sách Tài Liệu Số Hóa", padding=6)
         doc_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(4, 0))
 
         self.opt_doc_truong = tk.BooleanVar(value=True)
-        ttk.Checkbutton(doc_frame, text="Tài liệu số hóa theo Trường\n({Ten_Đon_Vi}_DS_Tai_Lieu_So_Hoa_Theo_Truong.xlsx)", variable=self.opt_doc_truong).pack(anchor=tk.W, pady=1)
+        ttk.Checkbutton(doc_frame, text="Tài liệu số hóa theo Trường", variable=self.opt_doc_truong).pack(anchor=tk.W, pady=2)
 
         self.opt_doc_nam = tk.BooleanVar(value=False)
-        ttk.Checkbutton(doc_frame, text="Tài liệu số hóa theo Năm\n({Ten_Đon_Vi}_DS_Tai_Lieu_So_Hoa_Theo_Nam.xlsx)", variable=self.opt_doc_nam).pack(anchor=tk.W, pady=1)
+        ttk.Checkbutton(doc_frame, text="Tài liệu số hóa theo Năm", variable=self.opt_doc_nam).pack(anchor=tk.W, pady=2)
 
         self.opt_doc_truong_nam = tk.BooleanVar(value=False)
-        ttk.Checkbutton(doc_frame, text="Tài liệu số hóa theo Trường & Năm\n({Ten_Đon_Vi}_DS_Tai_Lieu_So_Hoa_Theo_Truong_Va_Nam.xlsx)", variable=self.opt_doc_truong_nam).pack(anchor=tk.W, pady=1)
-
-        # Ghi chú định danh
-        note_row = ttk.Frame(opt_card)
-        note_row.pack(fill=tk.X, pady=(6, 2))
-        ttk.Label(
-            note_row,
-            text="⭐ Mặc định: Luôn tự động xuất 1 file Danh sách lỗi duy nhất ({Ten_Đon_Vi}_DS_Loi.xlsx) kèm 4 cột truy vết nguồn (AC..AF), "
-                 "1 file Dữ liệu gốc ({Ten_Đon_Vi}_Du_Lieu_Goc.xlsx) và ép định dạng TEXT (@) cho toàn bộ cột ngày tháng.",
-            font=(FONT_FAMILY, 8, "italic"),
-            foreground="#0D47A1"
-        ).pack(anchor=tk.W)
+        ttk.Checkbutton(doc_frame, text="Tài liệu số hóa theo Trường & Năm", variable=self.opt_doc_truong_nam).pack(anchor=tk.W, pady=2)
 
         # 5. Card 4: Tiến trình & Điều khiển
         prog_card = ttk.LabelFrame(main_container, text="🚀 4. TIẾN TRÌNH & ĐIỀU KHIỂN", style="Card.TLabelframe", padding=8)
@@ -260,7 +260,7 @@ class MainWindow:
         ctrl_row = ttk.Frame(prog_card)
         ctrl_row.pack(fill=tk.X)
 
-        self.status_lbl = ttk.Label(ctrl_row, text="Sẵn sàng thực hiện.", font=(FONT_FAMILY, 9, "bold"), foreground="#0D47A1")
+        self.status_lbl = ttk.Label(ctrl_row, text="Sẵn sàng thực hiện.", font=(FONT_FAMILY, 9, "bold"), foreground=CLR_PRIMARY)
         self.status_lbl.pack(side=tk.LEFT)
 
         self.stop_btn = ttk.Button(ctrl_row, text="⏹ Hủy dừng", state=tk.DISABLED, command=self._stop_processing)
@@ -279,23 +279,31 @@ class MainWindow:
         self.stat_total_lbl = ttk.Label(stat_row, text="Tổng học sinh: 0", font=(FONT_FAMILY, 9, "bold"))
         self.stat_total_lbl.pack(side=tk.LEFT, padx=(0, 20))
 
-        self.stat_da_so_hoa_lbl = ttk.Label(stat_row, text="✅ Đã số hóa đầy đủ: 0", font=(FONT_FAMILY, 9, "bold"), foreground="#2E7D32")
+        self.stat_da_so_hoa_lbl = ttk.Label(stat_row, text="✅ Đã số hóa đầy đủ: 0", font=(FONT_FAMILY, 9, "bold"), foreground=CLR_SUCCESS)
         self.stat_da_so_hoa_lbl.pack(side=tk.LEFT, padx=(0, 20))
 
-        self.stat_chua_day_du_lbl = ttk.Label(stat_row, text="⚠️ Số hoá chưa đầy đủ: 0", font=(FONT_FAMILY, 9, "bold"), foreground="#EF6C00")
+        self.stat_chua_day_du_lbl = ttk.Label(stat_row, text="⚠️ Số hoá chưa đầy đủ: 0", font=(FONT_FAMILY, 9, "bold"), foreground=CLR_WARNING)
         self.stat_chua_day_du_lbl.pack(side=tk.LEFT, padx=(0, 20))
 
-        self.stat_chua_so_hoa_lbl = ttk.Label(stat_row, text="❌ Chưa số hoá: 0", font=(FONT_FAMILY, 9, "bold"), foreground="#C62828")
+        self.stat_chua_so_hoa_lbl = ttk.Label(stat_row, text="❌ Chưa số hoá: 0", font=(FONT_FAMILY, 9, "bold"), foreground=CLR_DANGER)
         self.stat_chua_so_hoa_lbl.pack(side=tk.LEFT)
 
         # Log text console
-        self.log_text = ScrolledText(log_card, height=8, font=(FONT_FAMILY_MONO, 9), wrap=tk.WORD)
+        self.log_text = ScrolledText(
+            log_card,
+            height=8,
+            font=(FONT_FAMILY_MONO, 9),
+            wrap=tk.WORD,
+            bg=CLR_LOG_BG,
+            fg=CLR_LOG_FG,
+            insertbackground=CLR_LOG_FG
+        )
         self.log_text.pack(fill=tk.BOTH, expand=True)
 
-        self.log_text.tag_config("info", foreground="#000000")
-        self.log_text.tag_config("success", foreground="#2E7D32", font=(FONT_FAMILY_MONO, 9, "bold"))
-        self.log_text.tag_config("warning", foreground="#E65100")
-        self.log_text.tag_config("error", foreground="#C62828", font=(FONT_FAMILY_MONO, 9, "bold"))
+        self.log_text.tag_config("info", foreground=CLR_LOG_FG)
+        self.log_text.tag_config("success", foreground=CLR_SUCCESS, font=(FONT_FAMILY_MONO, 9, "bold"))
+        self.log_text.tag_config("warning", foreground=CLR_WARNING)
+        self.log_text.tag_config("error", foreground=CLR_DANGER, font=(FONT_FAMILY_MONO, 9, "bold"))
 
         # 7. Bottom Bar
         bottom_frame = ttk.Frame(self.root, padding=(12, 6))

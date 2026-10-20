@@ -6,13 +6,26 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from tkinter.scrolledtext import ScrolledText
 
-FONT_FAMILY = "Helvetica Neue" if sys.platform == "darwin" else "Segoe UI"
-FONT_FAMILY_MONO = "Menlo" if sys.platform == "darwin" else "Consolas"
+from src.gui.theme import (
+    IS_DARK,
+    FONT_FAMILY,
+    FONT_FAMILY_MONO,
+    CLR_PRIMARY,
+    CLR_ACCENT,
+    CLR_SUCCESS,
+    CLR_WARNING,
+    CLR_DANGER,
+    CLR_MUTED,
+    CLR_TEXT,
+    CLR_WINDOW_BG,
+    CLR_HIGHLIGHT_BG,
+    CLR_HIGHLIGHT_FG,
+)
 
 def center_window(window, parent=None, width=None, height=None):
     """Căn giữa cửa sổ dialog trên cửa sổ cha hoặc màn hình."""
     try:
-        window.configure(bg="#F5F5F7")
+        window.configure(bg=CLR_WINDOW_BG)
     except Exception:
         pass
     window.update_idletasks()
@@ -64,7 +77,7 @@ class SchoolBlockDialog(tk.Toplevel):
             hdr_frame, 
             text=f"⚠️ XÁC ĐỊNH TÊN TRƯỜNG CHO {count} HỌC SINH (STT {start_stt} -> {end_stt})",
             font=(FONT_FAMILY, 11, "bold"),
-            foreground="#B71C1C"
+            foreground=CLR_DANGER
         )
         title_lbl.pack(anchor=tk.W)
         
@@ -121,7 +134,7 @@ class SchoolBlockDialog(tk.Toplevel):
                 r.get("grad", "") or "(Trống)"
             ))
             if is_curr:
-                self.tree.tag_configure("highlight", background="#FFF3E0", foreground="#BF360C")
+                self.tree.tag_configure("highlight", background=CLR_HIGHLIGHT_BG, foreground=CLR_HIGHLIGHT_FG)
                 self.tree.item(item_id, tags=("highlight",))
 
         act_frame = ttk.LabelFrame(self, text="💡 Chọn Tên trường chuẩn từ danh mục DS_Don_Vi áp dụng cho nhóm này", padding=10)
@@ -217,7 +230,7 @@ class CohortBlockDialog(tk.Toplevel):
             hdr_frame, 
             text=f"⚠️ XÁC ĐỊNH NIÊN KHÓA CHO NHÓM {count} HỌC SINH (Giá trị gốc: '{raw_val}')",
             font=(FONT_FAMILY, 11, "bold"),
-            foreground="#E65100"
+            foreground=CLR_WARNING
         )
         title_lbl.pack(anchor=tk.W)
         
@@ -276,7 +289,7 @@ class CohortBlockDialog(tk.Toplevel):
                 r.get("grad", "") or "(Trống)"
             ))
             if is_curr:
-                self.tree.tag_configure("highlight", background="#FFF3E0", foreground="#BF360C")
+                self.tree.tag_configure("highlight", background=CLR_HIGHLIGHT_BG, foreground=CLR_HIGHLIGHT_FG)
                 self.tree.item(item_id, tags=("highlight",))
 
         act_frame = ttk.LabelFrame(self, text="💡 Nhập Năm ra trường (Y_ra) - Hệ thống tự động tính Y_vao = Y_ra - 4", padding=10)
@@ -293,7 +306,7 @@ class CohortBlockDialog(tk.Toplevel):
         self.y_ra_entry.focus_set()
         self.y_ra_entry.bind("<Return>", lambda event: self._confirm())
         
-        self.preview_lbl = ttk.Label(input_box, text="", font=(FONT_FAMILY, 10, "bold"), foreground="#1B5E20")
+        self.preview_lbl = ttk.Label(input_box, text="", font=(FONT_FAMILY, 10, "bold"), foreground=CLR_SUCCESS)
         self.preview_lbl.pack(side=tk.LEFT, padx=12)
         
         self.y_ra_var.trace_add("write", lambda *args: self._update_preview())
@@ -387,7 +400,7 @@ class DateFixDialog(tk.Toplevel):
             hdr_frame, 
             text=f"⚠️ PHÁT HIỆN {self.field_name.upper()} CHƯA HỢP LỆ: {err_desc}",
             font=(FONT_FAMILY, 11, "bold"),
-            foreground="#C62828"
+            foreground=CLR_DANGER
         )
         title_lbl.pack(anchor=tk.W)
         
@@ -441,7 +454,7 @@ class DateFixDialog(tk.Toplevel):
                 r.get("grad", "") or "(Trống)"
             ))
             if is_curr:
-                self.tree.tag_configure("highlight", background="#FFEBEE", foreground="#C62828")
+                self.tree.tag_configure("highlight", background=CLR_HIGHLIGHT_BG, foreground=CLR_HIGHLIGHT_FG)
                 self.tree.item(item_id, tags=("highlight",))
 
         act_frame = ttk.LabelFrame(self, text=f"💡 Điều chỉnh {self.field_name}", padding=10)
@@ -558,7 +571,7 @@ class GradDateBlockDialog(tk.Toplevel):
             hdr_frame,
             text=f"⚠️ XÁC ĐỊNH NGÀY CẤP BẰNG CHO NHÓM: {sch} (Niên khóa: {nk})",
             font=(FONT_FAMILY, 11, "bold"),
-            foreground="#1565C0"
+            foreground=CLR_PRIMARY
         )
         title_lbl.pack(anchor=tk.W)
 
@@ -679,7 +692,7 @@ class DataInspectorDialog(tk.Toplevel):
         ttk.Radiobutton(top_frame, text="Tất cả", variable=self.filter_var, value="all", command=self._on_search).pack(side=tk.LEFT, padx=4)
         ttk.Radiobutton(top_frame, text="Chỉ xem học sinh lỗi (Cột Y != Đã số hóa)", variable=self.filter_var, value="errors", command=self._on_search).pack(side=tk.LEFT, padx=4)
 
-        self.count_lbl = ttk.Label(top_frame, text=f"Tổng: {len(self.all_students)} học sinh", font=(FONT_FAMILY, 9, "bold"), foreground="#0D47A1")
+        self.count_lbl = ttk.Label(top_frame, text=f"Tổng: {len(self.all_students)} học sinh", font=(FONT_FAMILY, 9, "bold"), foreground=CLR_PRIMARY)
         self.count_lbl.pack(side=tk.RIGHT)
 
         # Split Pane
@@ -767,10 +780,10 @@ class DataInspectorDialog(tk.Toplevel):
             ))
 
             if status == "Chưa số hoá":
-                self.tree.tag_configure("red", foreground="#C62828", font=(FONT_FAMILY, 9, "bold"))
+                self.tree.tag_configure("red", foreground=CLR_DANGER, font=(FONT_FAMILY, 9, "bold"))
                 self.tree.item(item_id, tags=("red",))
             elif status == "Số hoá chưa đầy đủ, chính xác":
-                self.tree.tag_configure("orange", foreground="#E65100")
+                self.tree.tag_configure("orange", foreground=CLR_WARNING)
                 self.tree.item(item_id, tags=("orange",))
 
         self.count_lbl.config(text=f"Hiển thị: {len(self.filtered_students)}/{len(self.all_students)} học sinh")
