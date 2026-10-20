@@ -579,6 +579,7 @@ class ExcelProcessor:
                             cache_state["skip_all_dob"] = True
                         if res_dob:
                             st_item["dob"] = res_dob
+                            st_item["dob_change_reason"] = "Người dùng chỉnh sửa qua hộp thoại DateFix"
                             is_v_after, _, err_d_after = check_dob_validity(res_dob)
                             st_item["is_valid_dob"] = is_v_after
                             st_item["dob_err_desc"] = err_d_after
@@ -622,6 +623,7 @@ class ExcelProcessor:
                 canonical_sch = school_lookup[raw_sch_lower]
                 for st in grp:
                     st["school"] = canonical_sch
+                    st["school_change_reason"] = f"Khớp tự động danh mục đơn vị chính thức ('{canonical_sch}')"
                 log(f"   ✅ Tên trường '{raw_sch}' khớp chuẩn DS_Don_Vi: '{canonical_sch}' ({len(grp)} HS - {s_name})", "info")
                 continue
 
@@ -642,6 +644,7 @@ class ExcelProcessor:
                     applied_sch = school_cache[empty_file_key]
                     for st in grp:
                         st["school"] = applied_sch
+                        st["school_change_reason"] = f"Tự động áp dụng từ bộ nhớ trường cùng tệp Excel ('{applied_sch}')"
                     log(f"   ⚡ Tự động áp dụng Tên trường đã nhớ cho {len(grp)} HS bị trống trường ({f_path.name} | {s_name}): '{applied_sch}'", "info")
                     continue
 
@@ -675,6 +678,7 @@ class ExcelProcessor:
 
                 for st in grp:
                     st["school"] = applied_sch
+                    st["school_change_reason"] = f"Người dùng chuẩn hóa qua hộp thoại SchoolBlockDialog ('{applied_sch}')"
                 if applied_sch:
                     log(f"   📍 Đã áp dụng Tên trường '{applied_sch}' cho {len(grp)} HS bị trống trường ({f_path.name} | {s_name})", "info")
                 continue
@@ -684,6 +688,7 @@ class ExcelProcessor:
                 applied_sch = school_cache[raw_sch]
                 for st in grp:
                     st["school"] = applied_sch
+                    st["school_change_reason"] = f"Tự động áp dụng từ trường đã nhớ trước đó ('{applied_sch}')"
                 log(f"   ⚡ Tự động áp dụng Tên trường đã nhớ cho {len(grp)} HS: '{applied_sch}' ({f_path.name} | {s_name})", "info")
                 continue
 
@@ -720,6 +725,7 @@ class ExcelProcessor:
 
             for st in grp:
                 st["school"] = applied_sch
+                st["school_change_reason"] = f"Người dùng chuẩn hóa qua hộp thoại SchoolBlockDialog ('{applied_sch}')"
 
         log(f"✅ Hoàn thành Giai đoạn 2: Chuẩn hóa Tên trường cho toàn bộ {total_extracted} học sinh.", "success")
 
@@ -762,6 +768,7 @@ class ExcelProcessor:
                 if (mode_yr is None) or (y2 == mode_yr + 15):
                     for st in grp:
                         st["cohort"] = fmt_nk
+                        st["cohort_change_reason"] = f"Chuẩn hóa niên khóa chuẩn 4 năm ({fmt_nk})"
                     log(f"   ✅ Niên khóa '{fmt_nk}' ({y1}-{y2}) chuẩn 4 năm, khớp năm sinh {mode_yr or 'N/A'} ({len(grp)} HS - {s_name})", "info")
                     continue
                 else:
@@ -807,6 +814,7 @@ class ExcelProcessor:
                 if mode_yr and y_applied_ra and (y_applied_ra == mode_yr + 15):
                     for st in grp:
                         st["cohort"] = applied_nk
+                        st["cohort_change_reason"] = f"Tự động áp dụng từ niên khóa đã nhớ trước đó ('{applied_nk}')"
                     log(f"   ⚡ Tự động áp dụng Niên khóa đã nhớ cho {len(grp)} HS: '{applied_nk}' (khớp năm sinh đa số {mode_yr} + 15) ({f_path.name} | {s_name})", "info")
                     continue
                 elif mode_yr and y_applied_ra:
@@ -858,6 +866,7 @@ class ExcelProcessor:
 
             for st in grp:
                 st["cohort"] = chosen_nk
+                st["cohort_change_reason"] = f"Chuẩn hóa qua hộp thoại CohortBlockDialog ('{chosen_nk}')"
 
         log(f"✅ Hoàn thành Giai đoạn 3: Chuẩn hóa Niên khóa cho toàn bộ {total_extracted} học sinh.", "success")
 
@@ -963,7 +972,74 @@ class ExcelProcessor:
             finally:
                 out_wb.close()
 
-        # Xuất các file gộp, tách, file DS_Loi duy nhất, file Dữ liệu gốc và Tài liệu số hóa
+        # Thu thập toàn bộ các thay đổi chuẩn hóa vào audit_changes
+        audit_changes: list[dict] = []
+        for st in all_unit_students:
+            # 1. Ngày sinh
+            raw_d = str(st.get("raw_dob", "")).strip() if st.get("raw_dob") is not None else ""
+            norm_d = str(st.get("dob", "")).strip()
+            if norm_d and norm_d != raw_d:
+                audit_changes.append({
+                    "file_name": st.get("file_name", ""),
+                    "sheet_name": st.get("sheet_name", ""),
+                    "row_idx": st.get("row_idx", ""),
+                    "stt": st.get("clean_stt", ""),
+                    "name": st.get("name", ""),
+                    "field": "Ngày sinh",
+                    "old_val": raw_d if raw_d else "[Trống]",
+                    "new_val": norm_d,
+                    "reason": st.get("dob_change_reason") or "Chuẩn hóa định dạng dd/mm/yyyy"
+                })
+
+            # 2. Tên trường
+            raw_s = str(st.get("raw_school", "")).strip() if st.get("raw_school") is not None else ""
+            norm_s = str(st.get("school", "")).strip()
+            if norm_s and norm_s != raw_s:
+                audit_changes.append({
+                    "file_name": st.get("file_name", ""),
+                    "sheet_name": st.get("sheet_name", ""),
+                    "row_idx": st.get("row_idx", ""),
+                    "stt": st.get("clean_stt", ""),
+                    "name": st.get("name", ""),
+                    "field": "Tên trường",
+                    "old_val": raw_s if raw_s else "[Trống]",
+                    "new_val": norm_s,
+                    "reason": st.get("school_change_reason") or "Chuẩn hóa tên trường theo danh mục"
+                })
+
+            # 3. Niên khóa
+            raw_c = str(st.get("raw_cohort", "")).strip() if st.get("raw_cohort") is not None else ""
+            norm_c = str(st.get("cohort", "")).strip()
+            if norm_c and norm_c != raw_c:
+                audit_changes.append({
+                    "file_name": st.get("file_name", ""),
+                    "sheet_name": st.get("sheet_name", ""),
+                    "row_idx": st.get("row_idx", ""),
+                    "stt": st.get("clean_stt", ""),
+                    "name": st.get("name", ""),
+                    "field": "Niên khóa",
+                    "old_val": raw_c if raw_c else "[Trống]",
+                    "new_val": norm_c,
+                    "reason": st.get("cohort_change_reason") or "Chuẩn hóa niên khóa 4 năm"
+                })
+
+            # 4. Ngày cấp bằng
+            raw_g = str(st.get("raw_grad", "")).strip() if st.get("raw_grad") is not None else ""
+            norm_g = str(st.get("grad_date", "")).strip()
+            if norm_g and norm_g != raw_g:
+                audit_changes.append({
+                    "file_name": st.get("file_name", ""),
+                    "sheet_name": st.get("sheet_name", ""),
+                    "row_idx": st.get("row_idx", ""),
+                    "stt": st.get("clean_stt", ""),
+                    "name": st.get("name", ""),
+                    "field": "Ngày cấp bằng",
+                    "old_val": raw_g if raw_g else "[Trống]",
+                    "new_val": norm_g,
+                    "reason": st.get("grad_change_reason") or f"Tự động điền theo nhóm (Trường: {st.get('school', '')}, Niên khóa: {st.get('cohort', '')})"
+                })
+
+        # Xuất các file gộp, tách, file DS_Loi duy nhất và Nhật ký thay đổi
         if output_dir:
             log("\n📦 BẮT ĐẦU XUẤT CÁC TỆP DỮ LIỆU THEO TÙY CHỌN...", "info")
             export_res = self.exporter.export_all(
@@ -971,7 +1047,8 @@ class ExcelProcessor:
                 unit_info=eff_unit_info,
                 output_dir=output_dir,
                 options=export_options or {},
-                log_callback=log_callback
+                log_callback=log_callback,
+                audit_changes=audit_changes
             )
             overall_stats["export_results"] = export_res
 

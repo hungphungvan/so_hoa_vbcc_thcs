@@ -189,5 +189,75 @@ class TestGlobalPipeline(unittest.TestCase):
         self.assertEqual(all_st[1]["cohort"], "2016-2020")
         print("--> Test Empty Cache Optimization PASSED successfully!")
 
+    def test_export_options_and_audit_log(self):
+        """Kiểm tra:
+        1. Bỏ hoàn toàn file Du_Lieu_Goc.
+        2. Tùy chọn ds_loi: chỉ xuất DS_Loi khi được chọn.
+        3. Tùy chọn nhat_ky: xuất Nhat_Ky_Thay_Doi.xlsx ghi nhận đầy đủ thay đổi chuẩn hóa.
+        """
+        test_file = Path("/tmp/test_audit_log.xlsx")
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Lop 9"
+        header_row = ["STT", "Số hiệu", "Số vào sổ", "Tên văn bằng", "Họ và tên", "Mã", "CCCD", "Hộ chiếu",
+                      "Ngày sinh", "Giới tính", "Dân tộc", "Quốc tịch", "Nơi sinh", "Tên trường", "Niên khóa",
+                      "Xếp loại", "Hình thức", "Năm TN", "Ngày cấp", "Số QĐ", "Ngày QĐ", "Người ký", "CQ cấp",
+                      "Ghi chú", "Trạng thái", "Lý do", "Mã ĐV", "Tên ĐV"]
+        ws.append(["Tiêu đề"])
+        ws.append(header_row)
+        # Học sinh 1: Ngày sinh 15/05/2005, trường hợp lệ
+        ws.append([1, "", "", "", "Nguyễn Văn Một", "", "", "", "15/05/2005", "Nam", "Kinh", "Việt Nam", "Hà Nội", "THCS Test", "2016-2020", "Giỏi", "Chính quy", 2020, "15/06/2020"] + [""] * 9)
+        # Học sinh 2: Bị thiếu ngày sinh, thiếu tên trường -> Gây lỗi
+        ws.append([2, "", "", "", "Trần Thị Hai", "", "", "", "", "Nữ", "Kinh", "Việt Nam", "Hà Nội", "", "", "Khá", "Chính quy", 2020, ""] + [""] * 9)
+        wb.save(test_file)
+        wb.close()
+
+        out_dir = Path("/tmp/test_out_audit")
+        if out_dir.exists():
+            for f in out_dir.glob("*.xlsx"):
+                f.unlink()
+
+        unit_info = {"code": "TEST", "name": "Phòng GD Test", "schools": ["THCS Test"]}
+
+        # 1. Chạy với ds_loi=True, nhat_ky=True
+        all_st, stats = self.processor.process_all_files(
+            files=[test_file],
+            unit_info=unit_info,
+            output_dir=out_dir,
+            export_options={"ds_loi": True, "nhat_ky": True}
+        )
+
+        # File Du_Lieu_Goc KHÔNG được phép tồn tại
+        raw_file = out_dir / "Phòng GD Test_Du_Lieu_Goc.xlsx"
+        self.assertFalse(raw_file.exists(), "Không được sinh ra file Du_Lieu_Goc.xlsx!")
+
+        # File DS_Loi ĐƯỢC sinh ra vì có lỗi và ds_loi=True
+        err_file = out_dir / "Phòng GD Test_DS_Loi.xlsx"
+        self.assertTrue(err_file.exists(), "Phải sinh ra file DS_Loi.xlsx khi có học sinh lỗi!")
+
+        # File Nhat_Ky_Thay_Doi ĐƯỢC sinh ra và kiểm tra nội dung
+        log_file = out_dir / "Phòng GD Test_Nhat_Ky_Thay_Doi.xlsx"
+        self.assertTrue(log_file.exists(), "Phải sinh ra file Nhat_Ky_Thay_Doi.xlsx!")
+        log_wb = openpyxl.load_workbook(log_file)
+        self.assertIn("Nhat_Ky_Thay_Doi", log_wb.sheetnames)
+        log_ws = log_wb["Nhat_Ky_Thay_Doi"]
+        self.assertGreaterEqual(log_ws.max_row, 3, "Nhật ký thay đổi phải có ít nhất 1 dòng ghi nhận!")
+        log_wb.close()
+
+        # 2. Xóa các file và chạy lại với ds_loi=False, nhat_ky=False
+        for f in out_dir.glob("*.xlsx"):
+            f.unlink()
+
+        all_st2, stats2 = self.processor.process_all_files(
+            files=[test_file],
+            unit_info=unit_info,
+            output_dir=out_dir,
+            export_options={"ds_loi": False, "nhat_ky": False}
+        )
+        self.assertFalse((out_dir / "Phòng GD Test_Du_Lieu_Goc.xlsx").exists())
+        self.assertFalse((out_dir / "Phòng GD Test_DS_Loi.xlsx").exists(), "Khi ds_loi=False, không được xuất file lỗi!")
+        self.assertFalse((out_dir / "Phòng GD Test_Nhat_Ky_Thay_Doi.xlsx").exists(), "Khi nhat_ky=False, không được xuất file nhật ký!")
+        print("--> Test Export Options & Audit Log PASSED successfully!")
+
 if __name__ == "__main__":
     unittest.main()

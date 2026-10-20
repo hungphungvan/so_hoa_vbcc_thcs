@@ -7,7 +7,7 @@ import unicodedata
 from datetime import datetime
 from pathlib import Path
 import openpyxl
-from openpyxl.styles import Font, PatternFill
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
 from src.lookup_manager import get_data_dir, find_data_file
@@ -211,13 +211,132 @@ class DataExporter:
         err_wb.close()
         return len(error_students)
 
+    def _write_audit_change_log(
+        self,
+        out_file_path: Path,
+        unit_name: str,
+        audit_changes: list[dict]
+    ) -> int:
+        """Xuất file Excel Nhật ký thay đổi & chuẩn hóa dữ liệu với bảng biểu trang trọng, có Auto-Filter."""
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Nhat_Ky_Thay_Doi"
+        ws.views.sheetView[0].showGridLines = True
+
+        # 1. Header Banner
+        ws.merge_cells("A1:J1")
+        title_cell = ws["A1"]
+        title_cell.value = f"NHẬT KÝ THAY ĐỔI & CHUẨN HÓA DỮ LIỆU - {unit_name.upper()}"
+        title_cell.font = Font(name="Times New Roman", size=13, bold=True, color="1565C0")
+        title_cell.alignment = Alignment(horizontal="center", vertical="center")
+        ws.row_dimensions[1].height = 32
+
+        # 2. Cột tiêu đề
+        headers = [
+            "STT",
+            "Tệp nguồn gốc",
+            "Sheet nguồn",
+            "Dòng gốc",
+            "STT học sinh",
+            "Họ và tên",
+            "Hạng mục chuẩn hóa",
+            "Dữ liệu ban đầu (Trước)",
+            "Dữ liệu chuẩn hóa (Sau)",
+            "Căn cứ / Phương thức chuẩn hóa"
+        ]
+        
+        ws.append(headers)
+        header_row = ws.max_row
+        ws.row_dimensions[header_row].height = 26
+
+        header_fill = PatternFill(start_color="1565C0", end_color="1565C0", fill_type="solid")
+        header_font = Font(name="Times New Roman", size=11, bold=True, color="FFFFFF")
+        center_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        left_align = Alignment(horizontal="left", vertical="center")
+
+        thin_side = Side(border_style="thin", color="D0D7DE")
+        border = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
+
+        for col_idx in range(1, len(headers) + 1):
+            cell = ws.cell(row=header_row, column=col_idx)
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = center_align
+            cell.border = border
+
+        # 3. Ghi các dòng thay đổi
+        font_data = Font(name="Times New Roman", size=11)
+        font_new = Font(name="Times New Roman", size=11, bold=True, color="00701A")
+        font_old = Font(name="Times New Roman", size=11, color="555555")
+
+        for idx, rec in enumerate(audit_changes, start=1):
+            old_display = str(rec.get("old_val", "")) if rec.get("old_val") is not None and str(rec.get("old_val")).strip() != "" else "[Trống]"
+            new_display = str(rec.get("new_val", "")) if rec.get("new_val") is not None and str(rec.get("new_val")).strip() != "" else ""
+
+            row_data = [
+                idx,
+                rec.get("file_name", ""),
+                rec.get("sheet_name", ""),
+                f"Dòng {rec.get('row_idx', '')}",
+                rec.get("stt", ""),
+                rec.get("name", ""),
+                rec.get("field", ""),
+                old_display,
+                new_display,
+                rec.get("reason", "")
+            ]
+            ws.append(row_data)
+            c_row = ws.max_row
+            ws.row_dimensions[c_row].height = 20
+
+            for col_idx in range(1, len(headers) + 1):
+                c_cell = ws.cell(row=c_row, column=col_idx)
+                c_cell.font = font_data
+                c_cell.border = border
+                c_cell.number_format = '@'
+
+                if col_idx in (1, 4, 5, 7):
+                    c_cell.alignment = center_align
+                else:
+                    c_cell.alignment = left_align
+
+                if col_idx == 8:
+                    c_cell.font = font_old
+                elif col_idx == 9:
+                    c_cell.font = font_new
+
+        # Auto-filter cho bảng
+        ws.auto_filter.ref = f"A2:J{max(2, ws.max_row)}"
+
+        # Tự động điều chỉnh độ rộng cột
+        col_widths = {
+            1: 6,    # STT
+            2: 26,   # Tệp nguồn
+            3: 16,   # Sheet nguồn
+            4: 12,   # Dòng gốc
+            5: 12,   # STT học sinh
+            6: 24,   # Họ và tên
+            7: 18,   # Hạng mục
+            8: 24,   # Giá trị cũ
+            9: 26,   # Giá trị mới
+            10: 42   # Phương thức / Lý do
+        }
+        for col_idx, width in col_widths.items():
+            ws.column_dimensions[get_column_letter(col_idx)].width = width
+
+        out_file_path.parent.mkdir(parents=True, exist_ok=True)
+        wb.save(out_file_path)
+        wb.close()
+        return len(audit_changes)
+
     def export_all(
         self,
         all_students: list[dict],
         unit_info: dict,
         output_dir: Path,
         options: dict,
-        log_callback=None
+        log_callback=None,
+        audit_changes: list[dict] | None = None
     ) -> dict:
         """
         Thực hiện toàn bộ các tùy chọn xuất file của Mô-đun 1 và Mô-đun 2:
@@ -251,7 +370,7 @@ class DataExporter:
             "split_school_year_files": [],
             "split_school_year_error_files": [],
             "error_file": None,
-            "raw_file": None,
+            "audit_log_file": None,
             "doc_school_file": None,
             "doc_year_file": None,
             "doc_school_year_file": None
@@ -266,44 +385,10 @@ class DataExporter:
         output_dir.mkdir(parents=True, exist_ok=True)
 
         # ----------------------------------------------------------------------
-        # 1. XUẤT FILE DỮ LIỆU GỐC TỔNG HỢP: {Ten_Don_Vi}_Du_Lieu_Goc.xlsx
-        # ----------------------------------------------------------------------
-        try:
-            raw_wb, raw_ws = self._create_base_workbook("Du_Lieu_Goc")
-            raw_ws.cell(row=2, column=29, value="Tệp nguồn")
-            raw_ws.cell(row=2, column=30, value="Sheet nguồn")
-            raw_ws.cell(row=2, column=31, value="Dòng gốc")
-            
-            for idx, st in enumerate(all_students, start=1):
-                raw_row = list(st["row_values"])
-                raw_row[0] = idx
-                raw_row.extend([st.get("file_name", ""), st.get("sheet_name", ""), st.get("row_idx", "")])
-                raw_ws.append(raw_row)
-                c_row = raw_ws.max_row
-                for col_idx, font in enumerate(self.cached_fonts, start=1):
-                    if font:
-                        raw_ws.cell(row=c_row, column=col_idx).font = font
-                # Định dạng TEXT cho các cột ngày tháng
-                for c_t in (9, 19):
-                    c_cell = raw_ws.cell(row=c_row, column=c_t)
-                    c_cell.number_format = '@'
-                    if c_cell.value is not None:
-                        c_cell.data_type = 's'
-                        c_cell.value = str(c_cell.value)
-
-            raw_file_path = output_dir / f"{unit_safe}_Du_Lieu_Goc.xlsx"
-            raw_wb.save(raw_file_path)
-            raw_wb.close()
-            results["raw_file"] = raw_file_path
-            log(f"  📄 Đã lưu file Dữ liệu gốc tổng hợp: {raw_file_path.name}", "info")
-        except Exception as e:
-            log(f"⚠️ Lỗi khi xuất file Dữ liệu gốc tổng hợp: {e}", "warning")
-
-        # ----------------------------------------------------------------------
-        # 2. XUẤT FILE GỘP THEO TRƯỜNG: {Ten_Don_Vi}_Đa_Gop_Theo_Truong.xlsx
+        # 1. XUẤT FILE GỘP THEO TRƯỜNG: {Ten_Don_Vi}_Đa_Gop_Theo_Truong.xlsx
         # ----------------------------------------------------------------------
         students_by_school = sorted(all_students, key=sort_key_by_school)
-        if options.get("gop_theo_truong", True):
+        if options.get("gop_theo_truong", False):
             try:
                 m_wb, m_ws = self._create_base_workbook("Data")
                 self._write_student_rows(m_ws, students_by_school, renumber=True)
@@ -316,7 +401,7 @@ class DataExporter:
                 log(f"❌ Lỗi khi xuất file Gộp theo trường: {e}", "error")
 
         # ----------------------------------------------------------------------
-        # 3. XUẤT FILE GỘP THEO NĂM: {Ten_Don_Vi}_Đa_Gop_Theo_Nam.xlsx
+        # 2. XUẤT FILE GỘP THEO NĂM: {Ten_Don_Vi}_Đa_Gop_Theo_Nam.xlsx
         # ----------------------------------------------------------------------
         students_by_year = sorted(all_students, key=sort_key_by_year)
         if options.get("gop_theo_nam", False):
@@ -332,20 +417,35 @@ class DataExporter:
                 log(f"❌ Lỗi khi xuất file Gộp theo năm: {e}", "error")
 
         # ----------------------------------------------------------------------
-        # 4. XUẤT 1 FILE DS_LOI DUY NHẤT: {Ten_Don_Vi}_DS_Loi.xlsx
+        # 3. XUẤT FILE DANH SÁCH LỖI TỔNG HỢP (NẾU ĐƯỢC CHỌN): {Ten_Don_Vi}_DS_Loi.xlsx
         # ----------------------------------------------------------------------
         error_students = [
             st for st in students_by_school
             if len(st.get("final_row", [])) > 24 and st["final_row"][24] != "Đã số hóa đầy đủ, chính xác"
         ]
-        if error_students:
+        if options.get("ds_loi", False):
+            if error_students:
+                try:
+                    err_file_path = output_dir / f"{unit_safe}_DS_Loi.xlsx"
+                    self._write_error_workbook(err_file_path, error_students)
+                    results["error_file"] = err_file_path
+                    log(f"  ⚠️ Đã xuất file Danh sách lỗi tổng hợp: {err_file_path.name} ({len(error_students)} học sinh lỗi kèm 4 cột truy vết nguồn)", "warning")
+                except Exception as e:
+                    log(f"⚠️ Lỗi khi xuất file Danh sách lỗi tổng hợp: {e}", "warning")
+            else:
+                log("  ✅ Dữ liệu hoàn toàn chính xác, không có học sinh nào bị lỗi.", "success")
+
+        # ----------------------------------------------------------------------
+        # 4. XUẤT FILE NHẬT KÝ THAY ĐỔI: {Ten_Don_Vi}_Nhat_Ky_Thay_Doi.xlsx
+        # ----------------------------------------------------------------------
+        if options.get("nhat_ky", False):
             try:
-                err_file_path = output_dir / f"{unit_safe}_DS_Loi.xlsx"
-                self._write_error_workbook(err_file_path, error_students)
-                results["error_file"] = err_file_path
-                log(f"  ⚠️ Đã xuất 1 file Danh sách lỗi duy nhất: {err_file_path.name} ({len(error_students)} học sinh lỗi kèm 4 cột truy vết nguồn)", "warning")
+                log_file_path = output_dir / f"{unit_safe}_Nhat_Ky_Thay_Doi.xlsx"
+                self._write_audit_change_log(log_file_path, unit_name, audit_changes or [])
+                results["audit_log_file"] = log_file_path
+                log(f"  📋 Đã xuất file Nhật ký thay đổi chuẩn hóa: {log_file_path.name} ({len(audit_changes or [])} lượt thay đổi)", "success")
             except Exception as e:
-                log(f"⚠️ Lỗi khi xuất file Danh sách lỗi duy nhất: {e}", "warning")
+                log(f"⚠️ Lỗi khi xuất file Nhật ký thay đổi: {e}", "warning")
 
         # ----------------------------------------------------------------------
         # 5. TÁCH THEO TRƯỜNG: Da_Tach_Theo_Truong/{Ten_Truong}_Tu_{Min}_Den_{Max}.xlsx
@@ -546,7 +646,7 @@ class DataExporter:
         # ----------------------------------------------------------------------
         # TÙY CHỌN 1: Xuất theo Trường ({Ten_Don_Vi}_DS_Tai_Lieu_So_Hoa_Theo_Truong.xlsx)
         # ----------------------------------------------------------------------
-        if options.get("doc_theo_truong", True):
+        if options.get("doc_theo_truong", False):
             try:
                 school_groups = {}
                 for st in all_students:

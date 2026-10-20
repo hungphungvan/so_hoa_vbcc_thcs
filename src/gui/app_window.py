@@ -242,7 +242,7 @@ class MainWindow:
 
         # Cột 3: Mô-đun 2: Danh sách tài liệu số hóa
         doc_frame = ttk.LabelFrame(opt_grid, text="Danh mục hồ sơ số hóa", padding=6)
-        doc_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(4, 0))
+        doc_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=4)
 
         self.opt_doc_truong = tk.BooleanVar(value=False)
         ttk.Checkbutton(doc_frame, text="Tài liệu số hóa theo Trường", variable=self.opt_doc_truong).pack(anchor=tk.W, pady=2)
@@ -252,6 +252,16 @@ class MainWindow:
 
         self.opt_doc_truong_nam = tk.BooleanVar(value=False)
         ttk.Checkbutton(doc_frame, text="Tài liệu số hóa theo Trường & Năm", variable=self.opt_doc_truong_nam).pack(anchor=tk.W, pady=2)
+
+        # Cột 4: Báo cáo & Kiểm soát
+        control_frame = ttk.LabelFrame(opt_grid, text="Báo cáo & Kiểm soát", padding=6)
+        control_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(4, 0))
+
+        self.opt_ds_loi = tk.BooleanVar(value=True)
+        ttk.Checkbutton(control_frame, text="Danh sách lỗi tổng hợp", variable=self.opt_ds_loi).pack(anchor=tk.W, pady=3)
+
+        self.opt_nhat_ky = tk.BooleanVar(value=True)
+        ttk.Checkbutton(control_frame, text="Nhật ký thay đổi (.xlsx)", variable=self.opt_nhat_ky).pack(anchor=tk.W, pady=3)
 
         # 5. Card 4: Tiến trình & Điều khiển
         prog_card = ttk.LabelFrame(main_container, text="4. Tiến trình xử lý", style="Card.TLabelframe", padding=8)
@@ -443,7 +453,7 @@ class MainWindow:
                 f for f in p.rglob("*.xlsx")
                 if not f.name.startswith("~$")
                 and not f.name.startswith("._")
-                and not any(tag in f.name for tag in ["_Đa_Gop_", "_DS_Loi", "_Du_Lieu_Goc", "_DS_Lỗi", "_TongHop", "_DS_Tai_Lieu_So_Hoa"])
+                and not any(tag in f.name for tag in ["_Đa_Gop_", "_DS_Loi", "_Du_Lieu_Goc", "_DS_Lỗi", "_TongHop", "_DS_Tai_Lieu_So_Hoa", "_Nhat_Ky_Thay_Doi"])
                 and not any(tag in part.lower() for tag in ["da_chuan_hoa", "ket_qua_so_hoa"] for part in f.parts)
             ]
             self.files_count_lbl.config(
@@ -540,7 +550,7 @@ class MainWindow:
                     f for f in target_path.rglob("*.xlsx")
                     if not f.name.startswith("~$")
                     and not f.name.startswith("._")
-                    and not any(tag in f.name for tag in ["_Đa_Gop_", "_DS_Loi", "_Du_Lieu_Goc", "_DS_Lỗi", "_TongHop", "_DS_Tai_Lieu_So_Hoa"])
+                    and not any(tag in f.name for tag in ["_Đa_Gop_", "_DS_Loi", "_Du_Lieu_Goc", "_DS_Lỗi", "_TongHop", "_DS_Tai_Lieu_So_Hoa", "_Nhat_Ky_Thay_Doi"])
                     and not any(tag in part.lower() for tag in ["da_chuan_hoa", "ket_qua_so_hoa"] for part in f.parts)
                 ],
                 key=lambda x: str(x).lower()
@@ -559,8 +569,19 @@ class MainWindow:
             "tach_theo_truong_va_nam": self.opt_tach_truong_nam.get(),
             "doc_theo_truong": self.opt_doc_truong.get(),
             "doc_theo_nam": self.opt_doc_nam.get(),
-            "doc_theo_truong_va_nam": self.opt_doc_truong_nam.get()
+            "doc_theo_truong_va_nam": self.opt_doc_truong_nam.get(),
+            "ds_loi": self.opt_ds_loi.get(),
+            "nhat_ky": self.opt_nhat_ky.get(),
         }
+
+        # Ràng buộc kiểm tra: Phải chọn ít nhất 01 tùy chọn xuất kết quả
+        if not any(export_options.values()):
+            messagebox.showwarning(
+                "Chưa chọn tùy chọn xuất",
+                "Vui lòng chọn ít nhất 01 tùy chọn xuất kết quả trước khi bắt đầu xử lý!",
+                parent=self.root
+            )
+            return
 
         self.is_processing = True
         self.cancel_requested = False
