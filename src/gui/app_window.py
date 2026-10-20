@@ -38,7 +38,7 @@ from src.gui.theme import (
 class MainWindow:
     def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title("Công cụ Xử lý & Số hóa Văn bằng Chứng chỉ THCS - Chuẩn hóa dữ liệu & Danh sách tài liệu số hóa")
+        self.root.title("Số hóa Văn bằng Chứng chỉ THCS")
         
         # Đặt kích thước và vị trí cửa sổ tối ưu đa nền tảng
         sw = self.root.winfo_screenwidth()
@@ -112,13 +112,13 @@ class MainWindow:
             style.configure("Stop.TButton", font=(FONT_FAMILY, 10, "bold"))
 
     def _build_ui(self):
-        # 1. Header Banner (dùng tk.Frame và tk.Label thuần để đảm bảo hiển thị nền xanh đậm chữ trắng sắc nét trên cả macOS Aqua và Windows)
+        # 1. Header Banner
         hdr_frame = tk.Frame(self.root, bg="#1565C0", padx=16, pady=12)
         hdr_frame.pack(fill=tk.X)
 
         title_lbl = tk.Label(
             hdr_frame,
-            text="CÔNG CỤ XỬ LÝ & SỐ HÓA VĂN BẰNG CHỨNG CHỈ THCS",
+            text="SỐ HÓA VĂN BẰNG CHỨNG CHỈ THCS",
             bg="#1565C0",
             fg="#FFFFFF",
             font=(FONT_FAMILY, 14, "bold")
@@ -127,7 +127,7 @@ class MainWindow:
 
         sub_lbl = tk.Label(
             hdr_frame,
-            text="MÔ-ĐUN: CHUẨN HOÁ DỮ LIỆU & XUẤT DANH SÁCH TÀI LIỆU SỐ HÓA",
+            text="Chuẩn hóa dữ liệu cấp bằng và lập hồ sơ số hóa",
             bg="#1565C0",
             fg="#E3F2FD",
             font=(FONT_FAMILY, 9)
@@ -139,19 +139,19 @@ class MainWindow:
         main_container.pack(fill=tk.BOTH, expand=True)
 
         # 2. Card 1: Chọn Đơn vị cấp bằng
-        unit_card = ttk.LabelFrame(main_container, text="🏢 1. ĐƠN VỊ CẤP BẰNG & TRƯỜNG TRỰC THUỘC", style="Card.TLabelframe", padding=10)
+        unit_card = ttk.LabelFrame(main_container, text="1. Đơn vị cấp bằng", style="Card.TLabelframe", padding=10)
         unit_card.pack(fill=tk.X, pady=(0, 6))
 
         row1 = ttk.Frame(unit_card)
         row1.pack(fill=tk.X, pady=2)
-        ttk.Label(row1, text="Tìm kiếm Đơn vị: ", font=(FONT_FAMILY, 9, "bold")).pack(side=tk.LEFT)
+        ttk.Label(row1, text="Tìm kiếm đơn vị: ", font=(FONT_FAMILY, 9, "bold")).pack(side=tk.LEFT)
 
         self.unit_search_var = tk.StringVar()
         self.unit_search_var.trace_add("write", self._on_search_unit)
         self.unit_search_entry = ttk.Entry(row1, textvariable=self.unit_search_var, width=22)
         self.unit_search_entry.pack(side=tk.LEFT, padx=(0, 10))
 
-        ttk.Label(row1, text="Chọn Đơn vị (kèm Xã/phường & Mã): ", font=(FONT_FAMILY, 9, "bold")).pack(side=tk.LEFT)
+        ttk.Label(row1, text="Chọn đơn vị: ", font=(FONT_FAMILY, 9, "bold")).pack(side=tk.LEFT)
         self.unit_combo_var = tk.StringVar()
         self.unit_combo = ttk.Combobox(row1, textvariable=self.unit_combo_var, state="readonly", width=50)
         self.unit_combo.pack(side=tk.LEFT, padx=6, fill=tk.X, expand=True)
@@ -160,11 +160,11 @@ class MainWindow:
         row2 = ttk.Frame(unit_card)
         row2.pack(fill=tk.X, pady=(6, 2))
 
-        ttk.Label(row2, text="Mã đơn vị (AA): ", font=(FONT_FAMILY, 9)).pack(side=tk.LEFT)
+        ttk.Label(row2, text="Mã đơn vị: ", font=(FONT_FAMILY, 9)).pack(side=tk.LEFT)
         self.unit_code_lbl = ttk.Label(row2, text="---", font=(FONT_FAMILY, 9, "bold"), foreground=CLR_PRIMARY)
         self.unit_code_lbl.pack(side=tk.LEFT, padx=(0, 12))
 
-        ttk.Label(row2, text="Tên đơn vị (AB): ", font=(FONT_FAMILY, 9)).pack(side=tk.LEFT)
+        ttk.Label(row2, text="Tên đơn vị: ", font=(FONT_FAMILY, 9)).pack(side=tk.LEFT)
         self.unit_name_lbl = ttk.Label(row2, text="---", font=(FONT_FAMILY, 9, "bold"), foreground=CLR_PRIMARY)
         self.unit_name_lbl.pack(side=tk.LEFT, padx=(0, 12))
 
@@ -172,7 +172,7 @@ class MainWindow:
         self.unit_commune_lbl = ttk.Label(row2, text="---", font=(FONT_FAMILY, 9, "bold"), foreground=CLR_ACCENT)
         self.unit_commune_lbl.pack(side=tk.LEFT, padx=(0, 12))
 
-        ttk.Label(row2, text="Số trường: ", font=(FONT_FAMILY, 9)).pack(side=tk.LEFT)
+        ttk.Label(row2, text="Số trường trực thuộc: ", font=(FONT_FAMILY, 9)).pack(side=tk.LEFT)
         self.school_count_lbl = ttk.Label(row2, text="0 trường", font=(FONT_FAMILY, 9, "bold"), foreground=CLR_SUCCESS)
         self.school_count_lbl.pack(side=tk.LEFT)
 
@@ -183,7 +183,7 @@ class MainWindow:
         self.schools_display_lbl.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         # 3. Card 2: Chọn Tệp hoặc Thư mục nguồn
-        file_card = ttk.LabelFrame(main_container, text="📁 2. CHỌN TỆP HOẶC THƯ MỤC NGUỒN (Hỗ trợ cả 3 cấu trúc thư mục)", style="Card.TLabelframe", padding=10)
+        file_card = ttk.LabelFrame(main_container, text="2. Tệp hoặc Thư mục nguồn", style="Card.TLabelframe", padding=10)
         file_card.pack(fill=tk.X, pady=(0, 6))
 
         f_row1 = ttk.Frame(file_card)
@@ -193,29 +193,29 @@ class MainWindow:
         self.path_entry = ttk.Entry(f_row1, textvariable=self.path_var)
         self.path_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
 
-        browse_file_btn = ttk.Button(f_row1, text="📂 Chọn 1 File...", command=self._browse_file)
+        browse_file_btn = ttk.Button(f_row1, text="📂 Chọn 1 file...", command=self._browse_file)
         browse_file_btn.pack(side=tk.LEFT, padx=3)
 
-        browse_dir_btn = ttk.Button(f_row1, text="📁 Chọn Thư Mục Đơn Vị...", command=self._browse_dir)
+        browse_dir_btn = ttk.Button(f_row1, text="📁 Chọn thư mục đơn vị...", command=self._browse_dir)
         browse_dir_btn.pack(side=tk.LEFT, padx=3)
 
         self.files_count_lbl = ttk.Label(
             file_card,
-            text="Hệ thống tự động quét đệ quy các thư mục con và nhận diện trường/niên khóa từ Thư mục, Tên file hoặc Sheet.",
+            text="Hệ thống tự động quét và nhận diện các trường, niên khóa từ thư mục, tên file hoặc sheet.",
             font=(FONT_FAMILY, 8, "italic"),
             foreground=CLR_MUTED
         )
         self.files_count_lbl.pack(anchor=tk.W, pady=(4, 0))
 
         # 4. Card 3: Tùy chọn Xuất file (Export Options)
-        opt_card = ttk.LabelFrame(main_container, text="⚙️ 3. TÙY CHỌN XUẤT TỆP EXCEL KẾT QUẢ", style="Card.TLabelframe", padding=8)
+        opt_card = ttk.LabelFrame(main_container, text="3. Tùy chọn xuất kết quả", style="Card.TLabelframe", padding=8)
         opt_card.pack(fill=tk.X, pady=(0, 6))
 
         opt_grid = ttk.Frame(opt_card)
         opt_grid.pack(fill=tk.X)
 
         # Cột 1: Tùy chọn Gộp
-        gop_frame = ttk.LabelFrame(opt_grid, text="1. Gộp Dữ Liệu", padding=6)
+        gop_frame = ttk.LabelFrame(opt_grid, text="Gộp dữ liệu", padding=6)
         gop_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 4))
 
         self.opt_gop_truong = tk.BooleanVar(value=True)
@@ -225,7 +225,7 @@ class MainWindow:
         ttk.Checkbutton(gop_frame, text="Gộp theo Năm", variable=self.opt_gop_nam).pack(anchor=tk.W, pady=3)
 
         # Cột 2: Tùy chọn Tách
-        tach_frame = ttk.LabelFrame(opt_grid, text="2. Tách Dữ Liệu", padding=6)
+        tach_frame = ttk.LabelFrame(opt_grid, text="Tách dữ liệu", padding=6)
         tach_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=4)
 
         self.opt_tach_truong = tk.BooleanVar(value=True)
@@ -238,7 +238,7 @@ class MainWindow:
         ttk.Checkbutton(tach_frame, text="Tách theo Trường & Năm", variable=self.opt_tach_truong_nam).pack(anchor=tk.W, pady=2)
 
         # Cột 3: Mô-đun 2: Danh sách tài liệu số hóa
-        doc_frame = ttk.LabelFrame(opt_grid, text="3. Danh Sách Tài Liệu Số Hóa", padding=6)
+        doc_frame = ttk.LabelFrame(opt_grid, text="Danh mục hồ sơ số hóa", padding=6)
         doc_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(4, 0))
 
         self.opt_doc_truong = tk.BooleanVar(value=True)
@@ -251,7 +251,7 @@ class MainWindow:
         ttk.Checkbutton(doc_frame, text="Tài liệu số hóa theo Trường & Năm", variable=self.opt_doc_truong_nam).pack(anchor=tk.W, pady=2)
 
         # 5. Card 4: Tiến trình & Điều khiển
-        prog_card = ttk.LabelFrame(main_container, text="🚀 4. TIẾN TRÌNH & ĐIỀU KHIỂN", style="Card.TLabelframe", padding=8)
+        prog_card = ttk.LabelFrame(main_container, text="4. Tiến trình xử lý", style="Card.TLabelframe", padding=8)
         prog_card.pack(fill=tk.X, pady=(0, 6))
 
         self.progress_bar = ttk.Progressbar(prog_card, orient=tk.HORIZONTAL, mode='determinate')
@@ -263,14 +263,14 @@ class MainWindow:
         self.status_lbl = ttk.Label(ctrl_row, text="Sẵn sàng thực hiện.", font=(FONT_FAMILY, 9, "bold"), foreground=CLR_PRIMARY)
         self.status_lbl.pack(side=tk.LEFT)
 
-        self.stop_btn = ttk.Button(ctrl_row, text="⏹ Hủy dừng", state=tk.DISABLED, command=self._stop_processing)
+        self.stop_btn = ttk.Button(ctrl_row, text="⏹ Dừng", state=tk.DISABLED, command=self._stop_processing)
         self.stop_btn.pack(side=tk.RIGHT, padx=4)
 
-        self.start_btn = ttk.Button(ctrl_row, text="▶️ BẮT ĐẦU CHUẨN HÓA & XUẤT TÀI LIỆU SỐ HÓA", style="Action.TButton", command=self._start_processing)
+        self.start_btn = ttk.Button(ctrl_row, text="▶️ Bắt đầu xử lý", style="Action.TButton", command=self._start_processing)
         self.start_btn.pack(side=tk.RIGHT, padx=4)
 
         # 6. Card 5: Thống kê & Log Console
-        log_card = ttk.LabelFrame(main_container, text="📊 5. BẢNG THỐNG KÊ & NHẬT KÝ HOẠT ĐỘNG", style="Card.TLabelframe", padding=8)
+        log_card = ttk.LabelFrame(main_container, text="5. Thống kê & Nhật ký hoạt động", style="Card.TLabelframe", padding=8)
         log_card.pack(fill=tk.BOTH, expand=True, pady=(0, 6))
 
         stat_row = ttk.Frame(log_card)
@@ -309,18 +309,18 @@ class MainWindow:
         bottom_frame = ttk.Frame(self.root, padding=(12, 6))
         bottom_frame.pack(fill=tk.X)
 
-        self.open_output_btn = ttk.Button(bottom_frame, text="📂 Mở thư mục Kết quả số hóa", command=self._open_output_dir)
+        self.open_output_btn = ttk.Button(bottom_frame, text="📂 Mở thư mục kết quả", command=self._open_output_dir)
         self.open_output_btn.pack(side=tk.LEFT, padx=(0, 6))
 
         self.inspect_btn = ttk.Button(
             bottom_frame,
-            text="🔍 Tra cứu & Đối soát Dữ liệu gốc (Data Inspector)",
+            text="🔍 Tra cứu & Đối soát dữ liệu",
             command=self._open_data_inspector,
             state=tk.DISABLED
         )
         self.inspect_btn.pack(side=tk.LEFT, padx=6)
 
-        exit_btn = ttk.Button(bottom_frame, text="❌ Thoát ứng dụng", command=self.root.destroy)
+        exit_btn = ttk.Button(bottom_frame, text="Thoát", command=self.root.destroy)
         exit_btn.pack(side=tk.RIGHT)
 
     def _init_data(self):
@@ -625,7 +625,7 @@ class MainWindow:
             f"• Số hoá chưa đầy đủ: {chua_day_du}\n"
             f"• Chưa số hoá: {chua_so_hoa}\n\n"
             f"Tất cả file kết quả & Danh sách tài liệu số hóa đã xuất tại:\n{output_dir.name}/\n\n"
-            f"Bạn có thể bấm '🔍 Tra cứu & Đối soát Dữ liệu gốc' để kiểm tra chi tiết!",
+            f"Bạn có thể bấm '🔍 Tra cứu & Đối soát dữ liệu' để kiểm tra chi tiết!",
             parent=self.root
         )
 

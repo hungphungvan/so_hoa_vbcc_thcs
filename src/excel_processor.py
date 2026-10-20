@@ -575,16 +575,16 @@ class ExcelProcessor:
                         default_y_ra = y2 if y2 else (mode_yr + 15 if mode_yr else "")
                         reason = f"Hiệu số năm ({y1}-{y2}) khác 4 năm chuẩn THCS"
 
-                    # Trường hợp 3: Chỉ có năm ra trường Y_ra (ví dụ 2022)
+                    # Trường hợp 3: Chỉ có năm tốt nghiệp (ví dụ 2022)
                     elif m_single:
                         default_y_ra = int(m_single.group(1))
-                        reason = f"Dữ liệu gốc chỉ có năm ra trường ({default_y_ra}), cần xác nhận niên khóa"
+                        reason = f"Dữ liệu gốc chỉ có năm tốt nghiệp ({default_y_ra}), cần xác nhận niên khóa 4 năm"
 
                     # Trường hợp 4: Niên khóa bị trống
                     elif is_empty_nk:
                         if mode_yr:
                             default_y_ra = mode_yr + 15
-                            reason = f"Niên khóa bị trống (Gợi ý năm ra trường {default_y_ra} từ năm sinh đa số {mode_yr})"
+                            reason = f"Niên khóa bị trống (Gợi ý tốt nghiệp năm {default_y_ra} từ năm sinh đa số {mode_yr})"
                         else:
                             cohort_ctx = extract_cohort_from_text(file_path.stem) or extract_cohort_from_text(ws_in.title)
                             if cohort_ctx:

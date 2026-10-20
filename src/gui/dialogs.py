@@ -48,7 +48,7 @@ class SchoolBlockDialog(tk.Toplevel):
     """
     def __init__(self, parent, block_info: dict, allowed_schools: list[str], default_suggestion: str = ""):
         super().__init__(parent)
-        self.title("Xử lý Tên trường học (Cột N)")
+        self.title("Xử lý Tên trường")
         self.transient(parent)
         self.grab_set()
         
@@ -75,9 +75,9 @@ class SchoolBlockDialog(tk.Toplevel):
         
         title_lbl = ttk.Label(
             hdr_frame, 
-            text=f"⚠️ XÁC ĐỊNH TÊN TRƯỜNG CHO {count} HỌC SINH (STT {start_stt} -> {end_stt})",
+            text=f"Xác nhận Tên trường cho {count} học sinh (STT {start_stt} - {end_stt})",
             font=(FONT_FAMILY, 11, "bold"),
-            foreground=CLR_DANGER
+            foreground=CLR_PRIMARY
         )
         title_lbl.pack(anchor=tk.W)
         
@@ -95,7 +95,7 @@ class SchoolBlockDialog(tk.Toplevel):
         )
         sub_lbl.pack(anchor=tk.W, pady=(2, 0))
 
-        tbl_frame = ttk.LabelFrame(self, text="📋 Bảng đối chiếu học sinh tham chiếu", padding=6)
+        tbl_frame = ttk.LabelFrame(self, text="Danh sách học sinh đối chiếu", padding=6)
         tbl_frame.pack(fill=tk.BOTH, expand=True, padx=12, pady=4)
         
         # Thống nhất 4 cột: Họ và tên, Ngày sinh, Niên khóa, Ngày cấp bằng
@@ -107,7 +107,7 @@ class SchoolBlockDialog(tk.Toplevel):
         self.tree.heading("name", text="Họ và tên")
         self.tree.heading("dob", text="Ngày sinh")
         self.tree.heading("cohort", text="Niên khóa")
-        self.tree.heading("grad", text="Ngày tháng năm cấp bằng")
+        self.tree.heading("grad", text="Ngày cấp bằng")
         
         self.tree.column("pos", width=36, anchor=tk.CENTER)
         self.tree.column("stt", width=54, anchor=tk.CENTER)
@@ -137,7 +137,7 @@ class SchoolBlockDialog(tk.Toplevel):
                 self.tree.tag_configure("highlight", background=CLR_HIGHLIGHT_BG, foreground=CLR_HIGHLIGHT_FG)
                 self.tree.item(item_id, tags=("highlight",))
 
-        act_frame = ttk.LabelFrame(self, text="💡 Chọn Tên trường chuẩn từ danh mục DS_Don_Vi áp dụng cho nhóm này", padding=10)
+        act_frame = ttk.LabelFrame(self, text="Chọn Tên trường chuẩn áp dụng cho nhóm này", padding=10)
         act_frame.pack(fill=tk.X, padx=12, pady=8)
         
         # Gợi ý thông minh (Fuzzy match hoặc từ ngữ cảnh)
@@ -155,7 +155,7 @@ class SchoolBlockDialog(tk.Toplevel):
 
         select_box = ttk.Frame(act_frame)
         select_box.pack(fill=tk.X, pady=4)
-        ttk.Label(select_box, text="Chọn tên trường chuẩn trực thuộc: ", font=(FONT_FAMILY, 9)).pack(side=tk.LEFT)
+        ttk.Label(select_box, text="Chọn tên trường chuẩn: ", font=(FONT_FAMILY, 9)).pack(side=tk.LEFT)
         
         init_val = self.default_suggestion or (fuzzy_suggestions[0] if fuzzy_suggestions else (self.allowed_schools[0] if self.allowed_schools else ""))
         self.school_var = tk.StringVar(value=init_val)
@@ -163,17 +163,17 @@ class SchoolBlockDialog(tk.Toplevel):
         self.school_combo.pack(side=tk.LEFT, padx=6)
         
         self.remember_var = tk.BooleanVar(value=True)
-        rem_chk = ttk.Checkbutton(act_frame, text="Tự động ghi nhớ ánh xạ này cho các trường hợp tương tự tiếp theo", variable=self.remember_var)
+        rem_chk = ttk.Checkbutton(act_frame, text="Tự động ghi nhớ cho các nhóm tương tự tiếp theo", variable=self.remember_var)
         rem_chk.pack(anchor=tk.W, pady=(4, 0))
 
         btn_frame = ttk.Frame(self, padding=(12, 8))
         btn_frame.pack(fill=tk.X)
         
         count = self.block_info.get("count", 1)
-        ok_btn = ttk.Button(btn_frame, text=f"✅ Áp dụng trường đã chọn cho {count} học sinh", command=self._confirm)
+        ok_btn = ttk.Button(btn_frame, text=f"✅ Áp dụng cho {count} học sinh", command=self._confirm)
         ok_btn.pack(side=tk.RIGHT, padx=4)
         
-        skip_btn = ttk.Button(btn_frame, text="⏩ Bỏ qua (Để trống)", command=self._skip)
+        skip_btn = ttk.Button(btn_frame, text="Bỏ qua (Để trống)", command=self._skip)
         skip_btn.pack(side=tk.RIGHT, padx=4)
 
     def _pick_suggestion(self, opt_school):
@@ -203,7 +203,7 @@ class CohortBlockDialog(tk.Toplevel):
     """
     def __init__(self, parent, block_info: dict, default_y_ra: int | str = "", reason: str = ""):
         super().__init__(parent)
-        self.title("Xử lý Niên khóa (Cột O)")
+        self.title("Xử lý Niên khóa")
         self.transient(parent)
         self.grab_set()
         
@@ -228,9 +228,9 @@ class CohortBlockDialog(tk.Toplevel):
         
         title_lbl = ttk.Label(
             hdr_frame, 
-            text=f"⚠️ XÁC ĐỊNH NIÊN KHÓA CHO NHÓM {count} HỌC SINH (Giá trị gốc: '{raw_val}')",
+            text=f"Xác nhận Niên khóa cho {count} học sinh (Giá trị gốc: '{raw_val}')",
             font=(FONT_FAMILY, 11, "bold"),
-            foreground=CLR_WARNING
+            foreground=CLR_PRIMARY
         )
         title_lbl.pack(anchor=tk.W)
         
@@ -249,7 +249,7 @@ class CohortBlockDialog(tk.Toplevel):
         )
         sub_lbl.pack(anchor=tk.W, pady=(2, 0))
 
-        tbl_frame = ttk.LabelFrame(self, text="📋 Danh sách học sinh trong nhóm đối chiếu (Hiển thị tối đa 15 học sinh)", padding=6)
+        tbl_frame = ttk.LabelFrame(self, text="Danh sách học sinh đối chiếu", padding=6)
         tbl_frame.pack(fill=tk.BOTH, expand=True, padx=12, pady=4)
         
         # Thống nhất 4 cột: Họ và tên, Ngày sinh, Niên khóa, Ngày cấp bằng
@@ -292,13 +292,13 @@ class CohortBlockDialog(tk.Toplevel):
                 self.tree.tag_configure("highlight", background=CLR_HIGHLIGHT_BG, foreground=CLR_HIGHLIGHT_FG)
                 self.tree.item(item_id, tags=("highlight",))
 
-        act_frame = ttk.LabelFrame(self, text="💡 Nhập Năm ra trường (Y_ra) - Hệ thống tự động tính Y_vao = Y_ra - 4", padding=10)
+        act_frame = ttk.LabelFrame(self, text="Nhập Năm tốt nghiệp (Hệ thống tự tính niên khóa 4 năm THCS)", padding=10)
         act_frame.pack(fill=tk.X, padx=12, pady=6)
         
         input_box = ttk.Frame(act_frame)
         input_box.pack(fill=tk.X, pady=4)
         
-        ttk.Label(input_box, text="Năm ra trường (Y_ra, ví dụ 2022): ", font=(FONT_FAMILY, 9, "bold")).pack(side=tk.LEFT)
+        ttk.Label(input_box, text="Năm tốt nghiệp (ví dụ 2024): ", font=(FONT_FAMILY, 9, "bold")).pack(side=tk.LEFT)
         
         self.y_ra_var = tk.StringVar(value=self.default_y_ra)
         self.y_ra_entry = ttk.Entry(input_box, textvariable=self.y_ra_var, width=12, font=(FONT_FAMILY, 10, "bold"))
@@ -320,10 +320,10 @@ class CohortBlockDialog(tk.Toplevel):
         btn_frame.pack(fill=tk.X)
         
         count = self.block_info.get("count", 1)
-        ok_btn = ttk.Button(btn_frame, text=f"✅ Áp dụng Niên khóa cho {count} học sinh", command=self._confirm)
+        ok_btn = ttk.Button(btn_frame, text=f"✅ Áp dụng cho {count} học sinh", command=self._confirm)
         ok_btn.pack(side=tk.RIGHT, padx=4)
         
-        skip_btn = ttk.Button(btn_frame, text="⏩ Bỏ qua (Giữ nguyên gốc)", command=self._skip)
+        skip_btn = ttk.Button(btn_frame, text="Bỏ qua (Giữ nguyên gốc)", command=self._skip)
         skip_btn.pack(side=tk.RIGHT, padx=4)
 
     def _update_preview(self):
@@ -339,12 +339,12 @@ class CohortBlockDialog(tk.Toplevel):
             self.preview_lbl.config(text=f"👉 Niên khóa: {m_full.group(1)}-{m_full.group(2)}")
             return
             
-        self.preview_lbl.config(text="(Vui lòng nhập 4 chữ số năm ra trường, vd: 2022)")
+        self.preview_lbl.config(text="(Nhập 4 chữ số năm tốt nghiệp, ví dụ: 2024)")
 
     def _confirm(self):
         val = self.y_ra_var.get().strip()
         if not val:
-            messagebox.showwarning("Cảnh báo", "Vui lòng nhập Năm ra trường (Y_ra) hoặc Niên khóa!", parent=self)
+            messagebox.showwarning("Cảnh báo", "Vui lòng nhập Năm tốt nghiệp hoặc Niên khóa!", parent=self)
             return
         
         m4 = re.match(r'^(19\d{2}|20\d{2})$', val)
@@ -378,7 +378,7 @@ class DateFixDialog(tk.Toplevel):
     """
     def __init__(self, parent, student_info: dict, field_name: str = "Ngày sinh", smart_suggestion: str = ""):
         super().__init__(parent)
-        self.title(f"Sửa {field_name}")
+        self.title(f"Xử lý {field_name}")
         self.transient(parent)
         self.grab_set()
         
@@ -398,7 +398,7 @@ class DateFixDialog(tk.Toplevel):
         err_desc = self.student_info.get("err_desc", "Sai định dạng ngày tháng")
         title_lbl = ttk.Label(
             hdr_frame, 
-            text=f"⚠️ PHÁT HIỆN {self.field_name.upper()} CHƯA HỢP LỆ: {err_desc}",
+            text=f"{self.field_name} chưa hợp lệ: {err_desc}",
             font=(FONT_FAMILY, 11, "bold"),
             foreground=CLR_DANGER
         )
@@ -411,12 +411,12 @@ class DateFixDialog(tk.Toplevel):
         
         sub_lbl = ttk.Label(
             hdr_frame,
-            text=f"Học sinh: {name} (STT: {stt}) | File: {self.student_info.get('file_name', '')} (Sheet: {self.student_info.get('sheet_name', '')})\nGiá trị gốc: '{raw_val}' | Kết quả hiện tại: '{curr_norm}'",
+            text=f"Học sinh: {name} (STT: {stt}) | Tệp: {self.student_info.get('file_name', '')} (Sheet: {self.student_info.get('sheet_name', '')})\nGiá trị gốc: '{raw_val}' | Kết quả hiện tại: '{curr_norm}'",
             font=(FONT_FAMILY, 9)
         )
         sub_lbl.pack(anchor=tk.W, pady=(2, 0))
 
-        tbl_frame = ttk.LabelFrame(self, text="📋 Bảng đối chiếu học sinh tham chiếu", padding=6)
+        tbl_frame = ttk.LabelFrame(self, text="Danh sách học sinh đối chiếu", padding=6)
         tbl_frame.pack(fill=tk.BOTH, expand=True, padx=12, pady=4)
         
         # Thống nhất 4 cột: Họ và tên, Ngày sinh, Niên khóa, Ngày cấp bằng
@@ -457,13 +457,13 @@ class DateFixDialog(tk.Toplevel):
                 self.tree.tag_configure("highlight", background=CLR_HIGHLIGHT_BG, foreground=CLR_HIGHLIGHT_FG)
                 self.tree.item(item_id, tags=("highlight",))
 
-        act_frame = ttk.LabelFrame(self, text=f"💡 Điều chỉnh {self.field_name}", padding=10)
+        act_frame = ttk.LabelFrame(self, text=f"Điều chỉnh {self.field_name}", padding=10)
         act_frame.pack(fill=tk.X, padx=12, pady=6)
         
         input_box = ttk.Frame(act_frame)
         input_box.pack(fill=tk.X, pady=4)
         
-        ttk.Label(input_box, text=f"Nhập {self.field_name} chuẩn (dd/MM/yyyy): ", font=(FONT_FAMILY, 9)).pack(side=tk.LEFT)
+        ttk.Label(input_box, text=f"Nhập {self.field_name} (ngày/tháng/năm): ", font=(FONT_FAMILY, 9)).pack(side=tk.LEFT)
         
         init_val = self.smart_suggestion or curr_norm or ""
         self.date_var = tk.StringVar(value=init_val)
@@ -487,10 +487,10 @@ class DateFixDialog(tk.Toplevel):
         ok_btn = ttk.Button(btn_frame, text="✅ Cập nhật", command=self._confirm)
         ok_btn.pack(side=tk.RIGHT, padx=4)
         
-        keep_btn = ttk.Button(btn_frame, text="⏩ Giữ nguyên (Ghi nhận Chưa đầy đủ)", command=self._keep)
+        keep_btn = ttk.Button(btn_frame, text="Giữ nguyên gốc", command=self._keep)
         keep_btn.pack(side=tk.RIGHT, padx=4)
         
-        skip_all_btn = ttk.Button(btn_frame, text="⏭️ Bỏ qua tất cả các lỗi sau", command=self._skip_all)
+        skip_all_btn = ttk.Button(btn_frame, text="Bỏ qua tất cả", command=self._skip_all)
         skip_all_btn.pack(side=tk.RIGHT, padx=4)
 
     def _check_swap_enable(self):
@@ -666,7 +666,7 @@ class DataInspectorDialog(tk.Toplevel):
     """
     def __init__(self, parent, all_students: list[dict]):
         super().__init__(parent)
-        self.title("🔍 Tra cứu & Đối soát Dữ liệu gốc (Data Inspector)")
+        self.title("Tra cứu & Đối soát dữ liệu")
         self.geometry("950x650")
         self.transient(parent)
 
@@ -681,7 +681,7 @@ class DataInspectorDialog(tk.Toplevel):
         top_frame = ttk.Frame(self, padding=(12, 10))
         top_frame.pack(fill=tk.X)
 
-        ttk.Label(top_frame, text="🔍 Tìm kiếm nhanh: ", font=(FONT_FAMILY, 9, "bold")).pack(side=tk.LEFT)
+        ttk.Label(top_frame, text="Tìm kiếm: ", font=(FONT_FAMILY, 9, "bold")).pack(side=tk.LEFT)
         self.search_var = tk.StringVar()
         self.search_var.trace_add("write", self._on_search)
         search_entry = ttk.Entry(top_frame, textvariable=self.search_var, width=35)
@@ -690,7 +690,7 @@ class DataInspectorDialog(tk.Toplevel):
         # Filter radio buttons
         self.filter_var = tk.StringVar(value="all")
         ttk.Radiobutton(top_frame, text="Tất cả", variable=self.filter_var, value="all", command=self._on_search).pack(side=tk.LEFT, padx=4)
-        ttk.Radiobutton(top_frame, text="Chỉ xem học sinh lỗi (Cột Y != Đã số hóa)", variable=self.filter_var, value="errors", command=self._on_search).pack(side=tk.LEFT, padx=4)
+        ttk.Radiobutton(top_frame, text="Chỉ xem học sinh có lỗi", variable=self.filter_var, value="errors", command=self._on_search).pack(side=tk.LEFT, padx=4)
 
         self.count_lbl = ttk.Label(top_frame, text=f"Tổng: {len(self.all_students)} học sinh", font=(FONT_FAMILY, 9, "bold"), foreground=CLR_PRIMARY)
         self.count_lbl.pack(side=tk.RIGHT)
@@ -734,14 +734,14 @@ class DataInspectorDialog(tk.Toplevel):
         self.tree.bind("<<TreeviewSelect>>", self._on_select_student)
 
         # Lower Detail: Side-by-side Inspector
-        detail_frame = ttk.LabelFrame(paned, text="📄 Chi tiết đối soát: [Dữ liệu gốc ban đầu] vs [Dữ liệu sau chuẩn hóa]", padding=10)
+        detail_frame = ttk.LabelFrame(paned, text="Chi tiết đối soát: Dữ liệu gốc trong tệp và Kết quả sau chuẩn hóa", padding=10)
         paned.add(detail_frame, weight=4)
 
         diff_cols = ("field", "raw_val", "norm_val")
         self.diff_tree = ttk.Treeview(detail_frame, columns=diff_cols, show="headings", height=7)
         self.diff_tree.heading("field", text="Trường thông tin")
-        self.diff_tree.heading("raw_val", text="📄 Dữ liệu gốc trong File nguồn")
-        self.diff_tree.heading("norm_val", text="✨ Kết quả sau chuẩn hóa")
+        self.diff_tree.heading("raw_val", text="Dữ liệu gốc trong tệp nguồn")
+        self.diff_tree.heading("norm_val", text="Kết quả sau chuẩn hóa")
 
         self.diff_tree.column("field", width=220, anchor=tk.W)
         self.diff_tree.column("raw_val", width=340, anchor=tk.W)
@@ -825,18 +825,18 @@ class DataInspectorDialog(tk.Toplevel):
         final_r = st.get("final_row", [])
 
         fields = [
-            ("Họ, chữ đệm và tên (Cột E)", st.get("raw_name", ""), st.get("name", "")),
-            ("Ngày, tháng, năm sinh (Cột I)", st.get("raw_dob", ""), st.get("dob", "")),
-            ("Giới tính (Cột J)", raw_r[9] if len(raw_r) > 9 else "", final_r[9] if len(final_r) > 9 else ""),
-            ("Dân tộc (Cột K)", raw_r[10] if len(raw_r) > 10 else "", final_r[10] if len(final_r) > 10 else ""),
-            ("Quốc tịch (Cột L)", raw_r[11] if len(raw_r) > 11 else "", final_r[11] if len(final_r) > 11 else ""),
-            ("Nơi sinh (Cột M)", raw_r[12] if len(raw_r) > 12 else "", final_r[12] if len(final_r) > 12 else ""),
-            ("Tên trường đã học (Cột N)", st.get("raw_school", ""), st.get("school", "")),
-            ("Niên khóa (Cột O)", st.get("raw_cohort", ""), st.get("cohort", "")),
-            ("Ngày cấp bằng (Cột S)", st.get("raw_grad", ""), st.get("grad_date", "")),
-            ("Trạng thái số hóa (Cột Y)", "(Chưa xác định)", final_r[24] if len(final_r) > 24 else ""),
-            ("Nguyên nhân lỗi (Cột Z)", "(Không có)", final_r[25] if len(final_r) > 25 and final_r[25] else "(Trống)"),
-            ("Vị trí nguồn gốc", f"File: {st.get('file_name', '')} | Sheet: {st.get('sheet_name', '')} | Dòng: {st.get('row_idx', '')}", "Lưu độc lập phục vụ đối soát")
+            ("Họ và tên", st.get("raw_name", ""), st.get("name", "")),
+            ("Ngày sinh", st.get("raw_dob", ""), st.get("dob", "")),
+            ("Giới tính", raw_r[9] if len(raw_r) > 9 else "", final_r[9] if len(final_r) > 9 else ""),
+            ("Dân tộc", raw_r[10] if len(raw_r) > 10 else "", final_r[10] if len(final_r) > 10 else ""),
+            ("Quốc tịch", raw_r[11] if len(raw_r) > 11 else "", final_r[11] if len(final_r) > 11 else ""),
+            ("Nơi sinh", raw_r[12] if len(raw_r) > 12 else "", final_r[12] if len(final_r) > 12 else ""),
+            ("Tên trường", st.get("raw_school", ""), st.get("school", "")),
+            ("Niên khóa", st.get("raw_cohort", ""), st.get("cohort", "")),
+            ("Ngày cấp bằng", st.get("raw_grad", ""), st.get("grad_date", "")),
+            ("Trạng thái số hóa", "(Chưa xác định)", final_r[24] if len(final_r) > 24 else ""),
+            ("Nguyên nhân lỗi", "(Không có)", final_r[25] if len(final_r) > 25 and final_r[25] else "(Trống)"),
+            ("Vị trí nguồn gốc", f"Tệp: {st.get('file_name', '')} | Sheet: {st.get('sheet_name', '')} | Dòng: {st.get('row_idx', '')}", "Lưu độc lập phục vụ đối soát")
         ]
 
         for f_name, r_val, n_val in fields:
