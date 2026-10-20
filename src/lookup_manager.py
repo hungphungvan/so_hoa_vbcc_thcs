@@ -103,12 +103,14 @@ class LookupManager:
             if "DS_Don_Vi" in wb.sheetnames:
                 ws = wb["DS_Don_Vi"]
                 # Cột: 1: Mã trường, 2: Tên trường đã học, 3: Mã đơn vị, 4: Tên đơn vị, 5: Xã/phường
-                for r in range(2, ws.max_row + 1):
-                    sch_code = str(ws.cell(r, 1).value or '').strip()
-                    sch_name = str(ws.cell(r, 2).value or '').strip()
-                    u_code = str(ws.cell(r, 3).value or '').strip()
-                    u_name = str(ws.cell(r, 4).value or '').strip()
-                    commune = str(ws.cell(r, 5).value or '').strip()
+                for row in ws.iter_rows(min_row=2, values_only=True):
+                    if not row:
+                        continue
+                    sch_code = str(row[0] or '').strip() if len(row) > 0 else ''
+                    sch_name = str(row[1] or '').strip() if len(row) > 1 else ''
+                    u_code = str(row[2] or '').strip() if len(row) > 2 else ''
+                    u_name = str(row[3] or '').strip() if len(row) > 3 else ''
+                    commune = str(row[4] or '').strip() if len(row) > 4 else ''
                     
                     if u_name:
                         # Tạo khóa định danh duy nhất hiển thị cả Tên đơn vị, Xã/phường và Mã đơn vị
@@ -138,9 +140,11 @@ class LookupManager:
             # 2. Sheet Gioi_Tinh
             if "Gioi_Tinh" in wb.sheetnames:
                 ws = wb["Gioi_Tinh"]
-                for r in range(2, ws.max_row + 1):
-                    code = str(ws.cell(r, 1).value or '').strip()
-                    name = str(ws.cell(r, 2).value or '').strip()
+                for row in ws.iter_rows(min_row=2, values_only=True):
+                    if not row or len(row) < 2:
+                        continue
+                    code = str(row[0] or '').strip()
+                    name = str(row[1] or '').strip()
                     if code and name:
                         code_clean = re.sub(r'\.0+$', '', code)
                         self.gender_map[code_clean] = name
@@ -148,9 +152,11 @@ class LookupManager:
             # 3. Sheet Dan_Toc
             if "Dan_Toc" in wb.sheetnames:
                 ws = wb["Dan_Toc"]
-                for r in range(2, ws.max_row + 1):
-                    code = str(ws.cell(r, 1).value or '').strip()
-                    name = str(ws.cell(r, 2).value or '').strip()
+                for row in ws.iter_rows(min_row=2, values_only=True):
+                    if not row or len(row) < 2:
+                        continue
+                    code = str(row[0] or '').strip()
+                    name = str(row[1] or '').strip()
                     if code and name:
                         code_clean = re.sub(r'\.0+$', '', code)
                         self.ethnic_map[code_clean] = name
@@ -158,9 +164,11 @@ class LookupManager:
             # 4. Sheet Quoc_Tich
             if "Quoc_Tich" in wb.sheetnames:
                 ws = wb["Quoc_Tich"]
-                for r in range(2, ws.max_row + 1):
-                    code = str(ws.cell(r, 1).value or '').strip()
-                    name = str(ws.cell(r, 2).value or '').strip()
+                for row in ws.iter_rows(min_row=2, values_only=True):
+                    if not row or len(row) < 2:
+                        continue
+                    code = str(row[0] or '').strip()
+                    name = str(row[1] or '').strip()
                     if code and name:
                         code_clean = re.sub(r'\.0+$', '', code)
                         self.nationality_map[code_clean] = name
@@ -168,9 +176,11 @@ class LookupManager:
             # 5. Sheet Noi_Sinh
             if "Noi_Sinh" in wb.sheetnames:
                 ws = wb["Noi_Sinh"]
-                for r in range(2, ws.max_row + 1):
-                    code = str(ws.cell(r, 1).value or '').strip()
-                    name = str(ws.cell(r, 2).value or '').strip()
+                for row in ws.iter_rows(min_row=2, values_only=True):
+                    if not row or len(row) < 2:
+                        continue
+                    code = str(row[0] or '').strip()
+                    name = str(row[1] or '').strip()
                     if code and name:
                         code_clean = re.sub(r'\.0+$', '', code)
                         self.birthplace_map[code_clean] = name

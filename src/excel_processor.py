@@ -27,7 +27,12 @@ from src.normalizer import (
     find_mode_birth_year,
     fuzzy_match_school,
     auto_fill_graduation_dates_by_school_and_cohort,
-    determine_status_and_reason
+    determine_status_and_reason,
+    auto_convert_legacy_encoding,
+    is_tcvn3,
+    tcvn3_to_unicode,
+    is_vni,
+    vni_to_unicode
 )
 from src.exporter import DataExporter
 
@@ -51,10 +56,10 @@ def is_valid_stt(val):
     return s_clean.isdigit() and int(s_clean) > 0
 
 def is_summary_or_footer_row(row_cells):
-    """Kiểm tra xem dòng có phải là dòng tổng kết, chân trang ký tên hay không."""
+    """Kiểm tra xem dòng có phải là dòng tổng kết, chân trang ký tên hay không (hỗ trợ cả TCVN3/VNI và Unicode)."""
     for cell in row_cells[:15]:
         val_raw = cell.value if hasattr(cell, 'value') else cell
-        val = str(val_raw or '').strip().lower()
+        val = auto_convert_legacy_encoding(str(val_raw or '')).strip().lower()
         if any(kw in val for kw in SUMMARY_KEYWORDS):
             return True
     return False
@@ -231,9 +236,10 @@ class ExcelProcessor:
                 remove_qrs = (fmt_type == "AE")
                 log(f"  -> Quét Sheet '{ws_in.title}': {'Dạng AE 31 cột (cắt Q, R, S)' if remove_qrs else 'Dạng AB 28 cột chuẩn'}", "info")
 
-                # Heuristic 3: Nhận diện trường hoặc niên khóa từ tên Sheet
-                sheet_level_school = match_school_from_text(ws_in.title, allowed_schools)
-                sheet_level_cohort = extract_cohort_from_text(ws_in.title)
+                # Heuristic 3: Nhận diện trường hoặc niên khóa từ tên Sheet (hỗ trợ cả TCVN3/VNI và Unicode)
+                title_unicode = auto_convert_legacy_encoding(ws_in.title)
+                sheet_level_school = match_school_from_text(title_unicode, allowed_schools)
+                sheet_level_cohort = extract_cohort_from_text(title_unicode)
 
                 effective_context_school = sheet_level_school or file_level_school
                 effective_context_cohort = sheet_level_cohort or file_level_cohort
@@ -242,18 +248,17 @@ class ExcelProcessor:
                 empty_consecutive = 0
                 sheet_students = []
 
-                for row in ws_in.iter_rows():
-                    r_idx = row[0].row if hasattr(row[0], 'row') else 0
+                for r_idx, row in enumerate(ws_in.iter_rows(values_only=True), start=1):
                     if header_r_idx is not None and r_idx <= header_r_idx:
                         continue
 
-                    cell_a_val = row[0].value
+                    cell_a_val = row[0] if len(row) > 0 else None
                     cell_a_str = str(cell_a_val).strip() if cell_a_val is not None else ""
 
-                    name_cell_val = row[4].value if len(row) > 4 else None
+                    name_cell_val = row[4] if len(row) > 4 else None
                     name_cell_str = clean_whitespace(str(name_cell_val)) if name_cell_val is not None else ""
                     has_letters = bool(re.search(r'[a-zA-ZÀ-ỹ]', name_cell_str))
-                    is_row_empty = not any(c.value is not None and str(c.value).strip() != "" for c in row[:15])
+                    is_row_empty = not any(c is not None and str(c).strip() != "" for c in row[:15])
 
                     if not start_extracting:
                         is_stt_one = bool(re.match(r'^0*1(\.0*)?$', cell_a_str))
@@ -276,7 +281,8 @@ class ExcelProcessor:
                         if not is_valid_stt(cell_a_val) or is_cell_empty(name_cell_val) or not has_letters:
                             continue
 
-                        row_vals = [cell.value for cell in row]
+                        # Tự động chuyển đổi toàn bộ các ô ký tự từ TCVN3 / VNI-Windows sang Unicode
+                        row_vals = [auto_convert_legacy_encoding(c) if isinstance(c, str) else c for c in row]
                         req_len = 31 if remove_qrs else 28
                         while len(row_vals) < req_len:
                             row_vals.append(None)

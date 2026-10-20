@@ -51,6 +51,7 @@ class SchoolBlockDialog(tk.Toplevel):
         self.title("Xử lý Tên trường")
         self.transient(parent)
         self.grab_set()
+        self.protocol("WM_DELETE_WINDOW", self._skip)
         
         self.block_info = block_info
         self.allowed_schools = allowed_schools
@@ -206,6 +207,7 @@ class CohortBlockDialog(tk.Toplevel):
         self.title("Xử lý Niên khóa")
         self.transient(parent)
         self.grab_set()
+        self.protocol("WM_DELETE_WINDOW", self._skip)
         
         self.block_info = block_info
         self.default_y_ra = str(default_y_ra) if default_y_ra else ""
@@ -381,6 +383,7 @@ class DateFixDialog(tk.Toplevel):
         self.title(f"Xử lý {field_name}")
         self.transient(parent)
         self.grab_set()
+        self.protocol("WM_DELETE_WINDOW", self._skip)
         
         self.student_info = student_info
         self.field_name = field_name
@@ -550,6 +553,7 @@ class GradDateBlockDialog(tk.Toplevel):
         self.title("Xử lý Ngày cấp bằng (Cột S)")
         self.transient(parent)
         self.grab_set()
+        self.protocol("WM_DELETE_WINDOW", self._skip)
 
         self.group_info = group_info
         self.default_date = default_date
@@ -732,6 +736,8 @@ class DataInspectorDialog(tk.Toplevel):
         self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         self.tree.bind("<<TreeviewSelect>>", self._on_select_student)
+        self.tree.tag_configure("red", foreground=CLR_DANGER, font=(FONT_FAMILY, 9, "bold"))
+        self.tree.tag_configure("orange", foreground=CLR_WARNING)
 
         # Lower Detail: Side-by-side Inspector
         detail_frame = ttk.LabelFrame(paned, text="Chi tiết đối soát: Dữ liệu gốc trong tệp và Kết quả sau chuẩn hóa", padding=10)
@@ -780,10 +786,8 @@ class DataInspectorDialog(tk.Toplevel):
             ))
 
             if status == "Chưa số hoá":
-                self.tree.tag_configure("red", foreground=CLR_DANGER, font=(FONT_FAMILY, 9, "bold"))
                 self.tree.item(item_id, tags=("red",))
             elif status == "Số hoá chưa đầy đủ, chính xác":
-                self.tree.tag_configure("orange", foreground=CLR_WARNING)
                 self.tree.item(item_id, tags=("orange",))
 
         self.count_lbl.config(text=f"Hiển thị: {len(self.filtered_students)}/{len(self.all_students)} học sinh")

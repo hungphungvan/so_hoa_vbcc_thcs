@@ -620,53 +620,70 @@ class MainWindow:
         output_dir: Path,
         export_options: dict
     ):
-        unit_code = unit_info.get("code", "")
-        unit_name = unit_info.get("name", "")
-        unit_commune = unit_info.get("commune", "")
-        allowed_schools = unit_info.get("schools", [])
+        try:
+            unit_code = unit_info.get("code", "")
+            unit_name = unit_info.get("name", "")
+            unit_commune = unit_info.get("commune", "")
+            allowed_schools = unit_info.get("schools", [])
 
-        self._log("\n" + "=" * 80, "info")
-        self._log(f"🚀 BẮT ĐẦU CHUẨN HÓA DỮ LIỆU ĐƠN VỊ: {unit_name} [Mã: {unit_code}]", "info")
-        if unit_commune:
-            self._log(f"📍 Địa bàn Xã/phường: {unit_commune}", "info")
-        self._log(f"📁 Tổng số file Excel phát hiện: {len(files)} tệp.", "info")
-        self._log(f"🏫 Số trường trực thuộc đơn vị: {len(allowed_schools)} trường.", "info")
-        self._log("=" * 80, "info")
+            self._log("\n" + "=" * 80, "info")
+            self._log(f"🚀 BẮT ĐẦU CHUẨN HÓA DỮ LIỆU ĐƠN VỊ: {unit_name} [Mã: {unit_code}]", "info")
+            if unit_commune:
+                self._log(f"📍 Địa bàn Xã/phường: {unit_commune}", "info")
+            self._log(f"📁 Tổng số file Excel phát hiện: {len(files)} tệp.", "info")
+            self._log(f"🏫 Số trường trực thuộc đơn vị: {len(allowed_schools)} trường.", "info")
+            self._log("=" * 80, "info")
 
-        def progress_cb(curr_idx, total_cnt, current_stats, stage_msg=None):
-            self.root.after(0, lambda: self._update_progress_ui(curr_idx, total_cnt, current_stats, stage_msg))
+            def progress_cb(curr_idx, total_cnt, current_stats, stage_msg=None):
+                self.root.after(0, lambda: self._update_progress_ui(curr_idx, total_cnt, current_stats, stage_msg))
 
-        def check_cancel_cb():
-            return self.cancel_requested
+            def check_cancel_cb():
+                return self.cancel_requested
 
-        all_students, overall_stats = self.processor.process_all_files(
-            files=files,
-            unit_info=unit_info,
-            output_dir=output_dir,
-            export_options=export_options,
-            dialog_callback=self._dialog_callback,
-            log_callback=self._log,
-            progress_callback=progress_cb,
-            check_cancel=check_cancel_cb
+            all_students, overall_stats = self.processor.process_all_files(
+                files=files,
+                unit_info=unit_info,
+                output_dir=output_dir,
+                export_options=export_options,
+                dialog_callback=self._dialog_callback,
+                log_callback=self._log,
+                progress_callback=progress_cb,
+                check_cancel=check_cancel_cb
+            )
+
+            self.all_unit_students = all_students
+
+            total_st = overall_stats["total_students"]
+            da_so_hoa = overall_stats["da_so_hoa"]
+            chua_day_du = overall_stats["chua_day_du"]
+            chua_so_hoa = overall_stats["chua_so_hoa"]
+
+            self._log("\n" + "=" * 80, "info")
+            self._log(f"🎉 HOÀN THÀNH XỬ LÝ {len(files)} TỆP EXCEL CHO ĐƠN VỊ {unit_name}!", "success")
+            self._log(f"✅ Tổng số học sinh: {total_st}", "info")
+            self._log(f"   • Đã số hóa đầy đủ, chính xác: {da_so_hoa}", "success")
+            self._log(f"   • Số hoá chưa đầy đủ, chính xác: {chua_day_du}", "warning")
+            self._log(f"   • Chưa số hoá: {chua_so_hoa}", "error")
+            self._log(f"📁 Thư mục kết quả: {output_dir.absolute()}", "success")
+            self._log("=" * 80, "info")
+
+            self.root.after(0, self._on_processing_finished, total_st, da_so_hoa, chua_day_du, chua_so_hoa, output_dir)
+        except Exception as e:
+            self._log(f"\n❌ LỖI TRONG QUÁ TRÌNH XỬ LÝ: {e}", "error")
+            import traceback
+            traceback.print_exc()
+            self.root.after(0, self._on_processing_error, str(e))
+
+    def _on_processing_error(self, err_msg: str):
+        self.status_lbl.config(text=f"Lỗi: {err_msg}")
+        self.is_processing = False
+        self.start_btn.config(state=tk.NORMAL)
+        self.stop_btn.config(state=tk.DISABLED)
+        messagebox.showerror(
+            "Lỗi xử lý",
+            f"Đã xảy ra lỗi trong quá trình xử lý dữ liệu:\n\n{err_msg}\n\nVui lòng kiểm tra lại cấu trúc file hoặc nhật ký lỗi.",
+            parent=self.root
         )
-
-        self.all_unit_students = all_students
-
-        total_st = overall_stats["total_students"]
-        da_so_hoa = overall_stats["da_so_hoa"]
-        chua_day_du = overall_stats["chua_day_du"]
-        chua_so_hoa = overall_stats["chua_so_hoa"]
-
-        self._log("\n" + "=" * 80, "info")
-        self._log(f"🎉 HOÀN THÀNH XỬ LÝ {len(files)} TỆP EXCEL CHO ĐƠN VỊ {unit_name}!", "success")
-        self._log(f"✅ Tổng số học sinh: {total_st}", "info")
-        self._log(f"   • Đã số hóa đầy đủ, chính xác: {da_so_hoa}", "success")
-        self._log(f"   • Số hoá chưa đầy đủ, chính xác: {chua_day_du}", "warning")
-        self._log(f"   • Chưa số hoá: {chua_so_hoa}", "error")
-        self._log(f"📁 Thư mục kết quả: {output_dir.absolute()}", "success")
-        self._log("=" * 80, "info")
-
-        self.root.after(0, self._on_processing_finished, total_st, da_so_hoa, chua_day_du, chua_so_hoa, output_dir)
 
     def _update_progress_ui(self, curr_idx, total_cnt, stats, stage_msg=None):
         self.progress_bar["maximum"] = total_cnt

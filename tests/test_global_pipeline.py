@@ -259,5 +259,127 @@ class TestGlobalPipeline(unittest.TestCase):
         self.assertFalse((out_dir / "Phòng GD Test_Nhat_Ky_Thay_Doi.xlsx").exists(), "Khi nhat_ky=False, không được xuất file nhật ký!")
         print("--> Test Export Options & Audit Log PASSED successfully!")
 
+    def test_tcvn3_auto_conversion(self):
+        """Kiểm tra tính năng tự động nhận diện và chuyển đổi bảng mã TCVN3 sang Unicode."""
+        from src.normalizer import auto_convert_tcvn3, is_tcvn3, tcvn3_to_unicode, clean_whitespace
+
+        # 1. Kiểm tra nhận diện & chuyển đổi chuỗi đơn lẻ
+        tcvn3_samples = {
+            "NguyÔn V¨n An": "Nguyễn Văn An",
+            "Ph¹m ThÞ Mai": "Phạm Thị Mai",
+            "TrÇn V¨n B×nh": "Trần Văn Bình",
+            "§Æng ThÞ Hång": "Đặng Thị Hồng",
+            "Hoµng V¨n Th¸i": "Hoàng Văn Thái",
+            "Hä vµ tªn": "Họ và tên",
+            "Ngµy sinh": "Ngày sinh",
+            "N¬i sinh": "Nơi sinh",
+            "Tªn tr\xadêng": "Tên trường"
+        }
+
+        for tcvn_str, expected_uni in tcvn3_samples.items():
+            self.assertTrue(is_tcvn3(tcvn_str), f"Chuỗi '{tcvn_str}' phải được nhận diện là TCVN3!")
+            self.assertEqual(auto_convert_tcvn3(tcvn_str), expected_uni)
+
+        # Chuỗi Unicode chuẩn không được bị biến dạng
+        unicode_samples = [
+            "Nguyễn Văn An",
+            "Phạm Thị Mai",
+            "Trần Văn Bình",
+            "Đặng Thị Hồng",
+            "Bác Hồ",
+            "Chú ý",
+            "Hoàng Văn Thái"
+        ]
+        for uni_str in unicode_samples:
+            self.assertFalse(is_tcvn3(uni_str), f"Chuỗi Unicode '{uni_str}' không được nhận diện nhầm thành TCVN3!")
+            self.assertEqual(auto_convert_tcvn3(uni_str), uni_str)
+
+        # 2. Kiểm tra đọc từ file Excel chứa dữ liệu TCVN3
+        tcvn_file = Path("/tmp/test_tcvn3_file.xlsx")
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "LÝp 9A"  # Sheet name TCVN3 cho 'Lớp 9A'
+        
+        # Header TCVN3
+        header_row = ["STT", "Sè hiÖu", "Sè vµo sæ", "Tªn v¨n b»ng", "Hä vµ tªn", "M·", "CCCD", "Hé chiÕu",
+                      "Ngµy sinh", "Giíi tÝnh", "D©n téc", "Quèc tÞch", "N¬i sinh", "Tªn tr\xadêng", "Niªn khãa",
+                      "XÕp lo¹i", "H×nh thøc", "N¨m TN", "Ngµy cÊp", "Sè Q§", "Ngµy Q§", "Ngêi ký", "CQ cÊp",
+                      "Ghi chó", "Tr¹ng th¸i", "Lý do", "M· §V", "Tªn §V"]
+        ws.append(["Danh s¸ch cÊp b»ng"])
+        ws.append(header_row)
+
+        # 2 học sinh với dữ liệu TCVN3
+        row1 = [1, "", "", "", "NguyÔn V¨n An", "", "", "", "15/05/2005", "Nam", "Kinh", "ViÖt Nam", "Hµ Néi", "THCS Lª Lîi", "2016-2020", "", "", "", "15/06/2020"] + [""] * 9
+        row2 = [2, "", "", "", "TrÇn ThÞ BÝch", "", "", "", "20/10/2005", "N÷", "Kinh", "ViÖt Nam", "Hµ Néi", "THCS Lª Lîi", "2016-2020", "", "", "", "15/06/2020"] + [""] * 9
+        ws.append(row1)
+        ws.append(row2)
+        wb.save(tcvn_file)
+        wb.close()
+
+        students = self.processor.extract_students_from_file(
+            file_path=tcvn_file,
+            allowed_schools=["THCS Lê Lợi"]
+        )
+
+        self.assertEqual(len(students), 2)
+        self.assertEqual(students[0]["name"], "Nguyễn Văn An")
+        self.assertEqual(students[0]["school"], "THCS Lê Lợi")
+        self.assertEqual(students[1]["name"], "Trần Thị Bích")
+        self.assertEqual(students[1]["school"], "THCS Lê Lợi")
+        print("--> Test TCVN3 Auto Conversion PASSED successfully!")
+
+    def test_vni_auto_conversion(self):
+        """Kiểm tra tính năng tự động nhận diện và chuyển đổi bảng mã VNI-Windows sang Unicode."""
+        from src.normalizer import auto_convert_legacy_encoding, is_vni, vni_to_unicode
+
+        vni_samples = {
+            "Nguyeãn Vaên An": "Nguyễn Văn An",
+            "Traàn Thò Bích": "Trần Thị Bích",
+            "Phaïm Vaên Ñaït": "Phạm Văn Đạt",
+            "Tröôøng THCS Leâ Lôïi": "Trường THCS Lê Lợi",
+            "Haø Noäi": "Hà Nội",
+            "Ñaëng Thò Hoàng": "Đặng Thị Hồng",
+            "Löông Thò Aùnh": "Lương Thị Ánh",
+            "NGUYEÃN VAÊN AN": "NGUYỄN VĂN AN",
+            "TRAÀN THÒ BÍCH": "TRẦN THỊ BÍCH",
+            "Toå quoác": "Tổ quốc"
+        }
+
+        for vni_str, expected_uni in vni_samples.items():
+            self.assertTrue(is_vni(vni_str), f"Chuỗi '{vni_str}' phải được nhận diện là VNI!")
+            self.assertEqual(auto_convert_legacy_encoding(vni_str), expected_uni)
+
+        # Kiểm tra đọc từ file Excel chứa dữ liệu VNI
+        vni_file = Path("/tmp/test_vni_file.xlsx")
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Lôùp 9A"  # VNI cho 'Lớp 9A'
+
+        header_row = ["STT", "Soá hieäu", "Soá vaøo soå", "Teân vaên baèng", "Hoï vaø teân", "Maõ", "CCCD", "Hoä chieáu",
+                      "Ngaøy sinh", "Giôùi tính", "Daân toäc", "Quoác tòch", "Nôi sinh", "Teân tröôøng", "Nieân khoùa",
+                      "Xeáp loaïi", "Hình thöùc", "Naêm TN", "Ngaøy caáp", "Soá QÑ", "Ngaøy QÑ", "Người ký", "CQ caáp",
+                      "Ghi chuù", "Traïng thaùi", "Lyù do", "Maõ ÑV", "Teân ÑV"]
+        ws.append(["Danh saùch caáp baèng"])
+        ws.append(header_row)
+
+        row1 = [1, "", "", "", "Nguyeãn Vaên An", "", "", "", "15/05/2005", "Nam", "Kinh", "Vieät Nam", "Haø Noäi", "THCS Leâ Lôïi", "2016-2020", "", "", "", "15/06/2020"] + [""] * 9
+        row2 = [2, "", "", "", "Traàn Thò Bích", "", "", "", "20/10/2005", "Nöõ", "Kinh", "Vieät Nam", "Haø Noäi", "THCS Leâ Lôïi", "2016-2020", "", "", "", "15/06/2020"] + [""] * 9
+        ws.append(row1)
+        ws.append(row2)
+        wb.save(vni_file)
+        wb.close()
+
+        students = self.processor.extract_students_from_file(
+            file_path=vni_file,
+            allowed_schools=["THCS Lê Lợi"]
+        )
+
+        self.assertEqual(len(students), 2)
+        self.assertEqual(students[0]["name"], "Nguyễn Văn An")
+        self.assertEqual(students[0]["school"], "THCS Lê Lợi")
+        self.assertEqual(students[1]["name"], "Trần Thị Bích")
+        self.assertEqual(students[1]["school"], "THCS Lê Lợi")
+        print("--> Test VNI Auto Conversion PASSED successfully!")
+
 if __name__ == "__main__":
     unittest.main()

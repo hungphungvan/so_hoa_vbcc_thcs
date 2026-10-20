@@ -8,14 +8,161 @@ from collections import Counter
 from openpyxl.utils.datetime import from_excel
 import difflib
 
+# Bảng mã TCVN3 (ABC / .VnTime) và bảng mã Unicode tương ứng
+TCVN3_CHARS = "µ¸¶·¹¨»¾¼½Æ©ÇÊÈÉË®ÌÐÎÏÑªÒÕÓÔÖ×ÝØÜÞßãáâä«åèæçé¬êíëìîïóñòô\u00adõøö÷ùúýûüþ¡¢§£¤¥¦"
+UNICODE_CHARS = "àáảãạăằắẳẵặâầấẩẫậđèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵĂÂĐÊÔƠƯ"
+
+TCVN3_TO_UNI_MAP = dict(zip(TCVN3_CHARS, UNICODE_CHARS))
+TCVN3_REGEX = re.compile("|".join(re.escape(c) for c in TCVN3_CHARS))
+
+# Ký tự đặc thù chỉ có ở TCVN3, không bao giờ xuất hiện trong từ tiếng Việt Unicode chuẩn
+TCVN3_EXCLUSIVE = set(TCVN3_CHARS) - set(UNICODE_CHARS)
+# Ký tự độc quyền của bảng mã Unicode tiếng Việt, không bao giờ xuất hiện trong TCVN3
+UNI_EXCLUSIVE = set(UNICODE_CHARS) - set(TCVN3_CHARS)
+
+# Bảng mã VNI-Windows (VNI-Times / VNI-Helve...) sang Unicode
+VNI_PAIRS = [
+    # 4-char / 3-char combinations (ưu tiên thay thế trước)
+    ("öôù", "ướ"), ("öôø", "ườ"), ("öôû", "ưở"), ("öôõ", "ưỡng"), ("öôï", "ược"),
+    ("ÖÔÙ", "ƯỚ"), ("ÖÔØ", "ƯỜ"), ("ÖÔÛ", "ƯỞ"), ("ÖÔÕ", "ƯỠ"), ("ÖÔÏ", "ƯỢ"),
+    ("Öôù", "Ướ"), ("Öôø", "Ườ"), ("Öôû", "Ưở"), ("Öôõ", "Ưỡ"), ("Öôï", "Ượ"),
+    ("aâù", "ấ"), ("aâø", "ầ"), ("aâuû", "ẩ"), ("aâõ", "ẫ"), ("aâï", "ậ"),
+    ("AÂÙ", "Ấ"), ("AÂØ", "Ầ"), ("AÂUÛ", "Ẩ"), ("AÂÕ", "Ẫ"), ("AÂÏ", "Ậ"),
+    ("Aâù", "Ấ"), ("Aâø", "Ầ"), ("Aâuû", "Ẩ"), ("Aâõ", "Ẫ"), ("Aâï", "Ậ"),
+    ("eâù", "ế"), ("eâø", "ề"), ("eâuû", "ể"), ("eâõ", "ễ"), ("eâï", "ệ"),
+    ("EÂÙ", "Ế"), ("EÂØ", "Ề"), ("EÂUÛ", "Ể"), ("EÂÕ", "Ễ"), ("EÂÏ", "Ệ"),
+    ("Eâù", "Ế"), ("Eâø", "Ề"), ("Eâuû", "Ể"), ("Eâõ", "Ễ"), ("Eâï", "Ệ"),
+    ("oâù", "ố"), ("oâø", "ồ"), ("oâuû", "ổ"), ("oâõ", "ỗ"), ("oâï", "ộ"),
+    ("OÂÙ", "Ố"), ("OÂØ", "Ồ"), ("OÂUÛ", "Ổ"), ("OÂÕ", "Ỗ"), ("OÂÏ", "Ộ"),
+    ("Oâù", "Ố"), ("Oâø", "Ồ"), ("Oâuû", "Ổ"), ("Oâõ", "Ỗ"), ("Oâï", "Ộ"),
+    ("aêù", "ắ"), ("aêø", "ằ"), ("aêuû", "ẳ"), ("aêõ", "ẵ"), ("aêï", "ặ"),
+    ("AÊÙ", "Ắ"), ("AÊØ", "Ằ"), ("AÊUÛ", "Ẳ"), ("AÊÕ", "Ẵ"), ("AÊÏ", "Ặ"),
+    ("Aêù", "Ắ"), ("Aêø", "Ằ"), ("Aêuû", "Ẳ"), ("Aêõ", "Ẵ"), ("Aêï", "Ặ"),
+
+    # 2-char combinations
+    ("öô", "ươ"), ("ÖÔ", "ƯƠ"), ("Öô", "Ươ"),
+    ("öù", "ứ"), ("öø", "ừ"), ("öû", "ử"), ("öõ", "ữ"), ("öï", "ự"),
+    ("ÖÙ", "Ứ"), ("ÖØ", "Ừ"), ("ÖÛ", "Ử"), ("ÖÕ", "Ữ"), ("ÖÏ", "Ự"),
+    ("Öù", "Ứ"), ("Öø", "Ừ"), ("Öû", "Ử"), ("Öõ", "Ữ"), ("Öï", "Ự"),
+    ("ôù", "ớ"), ("ôø", "ờ"), ("ôû", "ở"), ("ôõ", "ỡ"), ("ôï", "ợ"),
+    ("ÔÙ", "Ớ"), ("ÔØ", "Ờ"), ("ÔÛ", "Ở"), ("ÔÕ", "Ỡ"), ("ÔÏ", "Ợ"),
+    ("Ôù", "Ớ"), ("Ôø", "Ờ"), ("Ôû", "Ở"), ("Ôõ", "Ỡ"), ("Ôï", "Ợ"),
+    ("aù", "á"), ("aø", "à"), ("aû", "ả"), ("aõ", "ã"), ("aï", "ạ"),
+    ("AÙ", "Á"), ("AØ", "À"), ("AÛ", "Ả"), ("AÕ", "Ã"), ("AÏ", "Ạ"),
+    ("Aù", "Á"), ("Aø", "À"), ("Aû", "Ả"), ("Aõ", "Ã"), ("Aï", "Ạ"),
+    ("aê", "ă"), ("aé", "ắ"), ("aè", "ằ"), ("aú", "ẳ"), ("aü", "ẵ"), ("aë", "ặ"),
+    ("AÊ", "Ă"), ("AÉ", "Ắ"), ("AÈ", "Ằ"), ("AÚ", "Ẳ"), ("AÜ", "Ẵ"), ("AË", "Ặ"),
+    ("Aê", "Ă"), ("Aé", "Ắ"), ("Aè", "Ằ"), ("Aú", "Ẳ"), ("Aü", "Ẵ"), ("Aë", "Ặ"),
+    ("aâ", "â"), ("aá", "ấ"), ("aà", "ầ"), ("aå", "ẩ"), ("aã", "ẫ"), ("aä", "ậ"),
+    ("AÂ", "Â"), ("AÁ", "Ấ"), ("AÀ", "Ầ"), ("AÅ", "Ẩ"), ("AÃ", "Ẫ"), ("AÄ", "Ậ"),
+    ("Aâ", "Â"), ("Aá", "Ấ"), ("Aà", "Ầ"), ("Aå", "Ẩ"), ("Aã", "Ẫ"), ("Aä", "Ậ"),
+    ("eù", "é"), ("eø", "è"), ("eû", "ẻ"), ("eõ", "ẽ"), ("eï", "ẹ"),
+    ("EÙ", "É"), ("EØ", "È"), ("EÛ", "Ẻ"), ("EÕ", "Ẽ"), ("EÏ", "Ẹ"),
+    ("Eù", "É"), ("Eø", "È"), ("Eû", "Ẻ"), ("Eõ", "Ẽ"), ("Eï", "Ẹ"),
+    ("eâ", "ê"), ("eá", "ế"), ("eà", "ề"), ("eå", "ể"), ("eã", "ễ"), ("eä", "ệ"),
+    ("EÂ", "Ê"), ("EÁ", "Ế"), ("EÀ", "Ề"), ("EÅ", "Ể"), ("EÃ", "Ễ"), ("EÄ", "Ệ"),
+    ("Eâ", "Ê"), ("Eá", "Ế"), ("Eà", "Ề"), ("Eå", "Ể"), ("Eã", "Ễ"), ("Eä", "Ệ"),
+    ("où", "ó"), ("oø", "ò"), ("oû", "ỏ"), ("oõ", "õ"), ("oï", "ọ"),
+    ("OÙ", "Ó"), ("OØ", "Ò"), ("OÛ", "Ỏ"), ("OÕ", "Õ"), ("OÏ", "Ọ"),
+    ("Où", "Ó"), ("Oø", "Ò"), ("Oû", "Ỏ"), ("Oõ", "Õ"), ("Oï", "Ọ"),
+    ("oâ", "ô"), ("oá", "ố"), ("oà", "ồ"), ("oå", "ổ"), ("oã", "ỗ"), ("oä", "ộ"),
+    ("OÂ", "Ô"), ("OÁ", "Ố"), ("OÀ", "Ồ"), ("OÅ", "Ổ"), ("OÃ", "Ỗ"), ("OÄ", "Ộ"),
+    ("Oâ", "Ô"), ("Oá", "Ố"), ("Oà", "Ồ"), ("Oå", "Ổ"), ("Oã", "Ỗ"), ("Oä", "Ộ"),
+    ("uù", "ú"), ("uø", "ù"), ("uû", "ủ"), ("uõ", "ũ"), ("uï", "ụ"),
+    ("UÙ", "Ú"), ("UØ", "Ù"), ("UÛ", "Ủ"), ("UÕ", "Ũ"), ("UÏ", "Ụ"),
+    ("Uù", "Ú"), ("Uø", "Ù"), ("Uû", "Ủ"), ("Uõ", "Ũ"), ("Uï", "Ụ"),
+    ("yù", "ý"), ("yø", "ỳ"), ("yû", "ỷ"), ("yõ", "ỹ"), ("yï", "ỵ"),
+    ("YÙ", "Ý"), ("YØ", "Ỳ"), ("YÛ", "Ỷ"), ("YÕ", "Ỹ"), ("YÏ", "Ỵ"),
+    ("Yù", "Ý"), ("Yø", "Ỳ"), ("Yû", "Ỷ"), ("Yõ", "Ỹ"), ("Yï", "Ỵ"),
+    ("iù", "í"), ("iø", "ì"), ("iû", "ỉ"), ("iõ", "ĩ"), ("iï", "ị"),
+    ("IÙ", "Í"), ("IØ", "Ì"), ("IÛ", "Ỉ"), ("IÕ", "Ĩ"), ("IÏ", "Ị"),
+    ("Iù", "Í"), ("Iø", "Ì"), ("Iû", "Ỉ"), ("Iõ", "Ĩ"), ("Iï", "Ị"),
+
+    # 1-char combinations
+    ("ñ", "đ"), ("Ñ", "Đ"),
+    ("ô", "ơ"), ("Ô", "Ơ"),
+    ("ö", "ư"), ("Ö", "Ư"),
+    ("ò", "ị"), ("Ò", "Ị"),
+    ("æ", "ỉ"), ("Æ", "Ỉ"),
+    ("î", "ỵ"), ("Î", "Ỵ")
+]
+
+# Khử trùng lặp và sắp xếp theo độ dài giảm dần
+_seen_vni = set()
+_unique_vni_pairs = []
+for _k, _v in VNI_PAIRS:
+    if _k not in _seen_vni:
+        _seen_vni.add(_k)
+        _unique_vni_pairs.append((_k, _v))
+_unique_vni_pairs.sort(key=lambda x: len(x[0]), reverse=True)
+
+VNI_TO_UNI_MAP = dict(_unique_vni_pairs)
+VNI_REGEX = re.compile("|".join(re.escape(k) for k in VNI_TO_UNI_MAP.keys()))
+
+# Biểu thức chính quy phát hiện dấu hiệu đặc thù của bảng mã VNI-Windows
+VNI_EXCLUSIVE_PATTERN = re.compile(
+    r"(?i:[aeouyöô][ùøûï]|a[êeéèúüëâáàåãä]|e[âáàåãä]|o[âåãä]|öô|ñ|ö)"
+)
+
+def is_vni(text: str) -> bool:
+    """Kiểm tra xem chuỗi có dấu hiệu mã hóa VNI-Windows (VNI-Times) hay không."""
+    if not text or not isinstance(text, str) or text.isascii():
+        return False
+    # Nếu chuỗi chứa các ký tự Unicode tiếng Việt cấp cao (ord >= 256) -> chắc chắn là Unicode
+    if any(ord(c) >= 256 for c in text):
+        return False
+    return bool(VNI_EXCLUSIVE_PATTERN.search(text))
+
+def vni_to_unicode(text: str) -> str:
+    """Chuyển đổi chuỗi từ bảng mã VNI-Windows sang Unicode dựng sẵn chuẩn."""
+    if not text or not isinstance(text, str):
+        return "" if text is None else str(text)
+    return VNI_REGEX.sub(lambda m: VNI_TO_UNI_MAP.get(m.group(0), m.group(0)), text)
+
+def is_tcvn3(text: str) -> bool:
+    """Kiểm tra xem chuỗi có dấu hiệu mã hóa TCVN3 (ABC/.VnTime) hay không."""
+    if not text or not isinstance(text, str) or text.isascii():
+        return False
+    # Nếu chuỗi chứa các ký tự đặc trưng riêng của Unicode tiếng Việt -> chắc chắn là Unicode
+    if any(c in UNI_EXCLUSIVE for c in text):
+        return False
+    # Ưu tiên kiểm tra VNI trước nếu có dấu hiệu ghép đôi
+    if is_vni(text):
+        return False
+    # Nếu chuỗi chứa bất kỳ ký tự đặc thù độc quyền nào của TCVN3 -> là TCVN3
+    return any(c in TCVN3_EXCLUSIVE for c in text)
+
+def tcvn3_to_unicode(text: str) -> str:
+    """Chuyển đổi chuỗi từ bảng mã TCVN3 (ABC/.VnTime) sang Unicode dựng sẵn."""
+    if not text or not isinstance(text, str):
+        return "" if text is None else str(text)
+    return TCVN3_REGEX.sub(lambda m: TCVN3_TO_UNI_MAP.get(m.group(0), m.group(0)), text)
+
+def auto_convert_legacy_encoding(text: str) -> str:
+    """Tự động phát hiện và chuyển đổi chuỗi từ TCVN3 hoặc VNI-Windows sang Unicode (nếu đã là Unicode thì giữ nguyên)."""
+    if not isinstance(text, str):
+        return text
+    if is_vni(text):
+        return vni_to_unicode(text)
+    if is_tcvn3(text):
+        return tcvn3_to_unicode(text)
+    return text
+
+# Giữ nguyên alias auto_convert_tcvn3 để tương thích ngược
+auto_convert_tcvn3 = auto_convert_legacy_encoding
+
 def clean_whitespace(value):
-    """Làm sạch khoảng trắng thừa trong chuỗi, xử lý nan/none."""
+    """Làm sạch khoảng trắng thừa trong chuỗi, tự động chuyển đổi TCVN3/VNI sang Unicode nếu phát hiện, xử lý nan/none."""
     if value is None:
         return ""
     if isinstance(value, float):
         if math.isnan(value):
             return ""
     if isinstance(value, str):
+        if is_vni(value):
+            value = vni_to_unicode(value)
+        elif is_tcvn3(value):
+            value = tcvn3_to_unicode(value)
         cleaned = unicodedata.normalize('NFC', value)
         cleaned = re.sub(r'\s+', ' ', cleaned).strip()
         if cleaned.lower() in ("none", "nan", "null", "<na>"):

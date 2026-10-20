@@ -26,6 +26,7 @@ from src.normalizer import (
 # - Cột 23 (W: Tình trạng văn bằng), Cột 24 (X: Ghi chú)
 # - Cột 25 (Y: Trạng thái số hóa), Cột 26 (Z: Lý do lỗi), Cột 27 (AA: Mã đơn vị), Cột 28 (AB: Tên đơn vị)
 EXCLUDE_YELLOW_COLS = {1, 2, 3, 4, 6, 7, 8, 16, 23, 24, 25, 26, 27, 28}
+TEXT_COLS = {2, 3, 6, 7, 8, 9, 19, 24, 27}
 
 def sanitize_filename(name: str) -> str:
     r"""Loại bỏ các ký tự cấm của Windows/macOS (\ / : * ? " < > |) khỏi tên file/thư mục. Giữ nguyên tiếng Việt có dấu và ký tự & hoàn toàn hợp lệ."""
@@ -139,27 +140,22 @@ class DataExporter:
                 
             ws.append(row_vals)
             curr_row = ws.max_row
+            row_cells = ws[curr_row]
             
-            # Gán font và ép định dạng TEXT
+            # Gán font, ép định dạng TEXT và tô vàng chỉ trong 1 lượt duyệt ô duy nhất
             for col_idx, font in enumerate(self.cached_fonts, start=1):
-                cell = ws.cell(row=curr_row, column=col_idx)
+                cell = row_cells[col_idx - 1]
                 if font:
                     cell.font = font
                     
-                # Ép định dạng TEXT cho các cột:
-                # Cột 9 (I: Ngày sinh), Cột 19 (S: Ngày cấp bằng), Cột 2 (B: Số hiệu), Cột 3 (C: Số vào sổ),
-                # Cột 6 (F: Mã người học), Cột 7 (G: CCCD), Cột 8 (H: Hộ chiếu), Cột 24 (X: Ghi chú), Cột 27 (AA: Mã đơn vị)
-                if col_idx in (2, 3, 6, 7, 8, 9, 19, 24, 27):
+                if col_idx in TEXT_COLS:
                     cell.number_format = '@'
                     if cell.value is not None:
                         cell.data_type = 's'
                         cell.value = str(cell.value)
-                    
-            # Tô vàng các ô thông tin cốt lõi bị thiếu (bỏ qua các cột không yêu cầu tô vàng)
-            for col in range(1, min(28, len(row_vals))):
-                col_num = col + 1  # 1-based index (1..28)
-                if col_num not in EXCLUDE_YELLOW_COLS and is_cell_empty(row_vals[col]):
-                    ws.cell(row=curr_row, column=col_num).fill = self.yellow_fill
+                        
+                if col_idx not in EXCLUDE_YELLOW_COLS and is_cell_empty(cell.value):
+                    cell.fill = self.yellow_fill
                     yellow_count += 1
                     
         return yellow_count
@@ -191,20 +187,19 @@ class DataExporter:
             ])
             err_ws.append(row_vals)
             c_row = err_ws.max_row
+            row_cells = err_ws[c_row]
+            
             for col_idx, font in enumerate(self.cached_fonts, start=1):
-                cell_c = err_ws.cell(row=c_row, column=col_idx)
+                cell_c = row_cells[col_idx - 1]
                 if font:
                     cell_c.font = font
-                if col_idx in (2, 3, 6, 7, 8, 9, 19, 24, 27):
+                if col_idx in TEXT_COLS:
                     cell_c.number_format = '@'
                     if cell_c.value is not None:
                         cell_c.data_type = 's'
                         cell_c.value = str(cell_c.value)
-
-            for col in range(1, min(28, len(row_vals))):
-                col_num = col + 1
-                if col_num not in EXCLUDE_YELLOW_COLS and is_cell_empty(row_vals[col]):
-                    err_ws.cell(row=c_row, column=col_num).fill = self.yellow_fill
+                if col_idx not in EXCLUDE_YELLOW_COLS and is_cell_empty(cell_c.value):
+                    cell_c.fill = self.yellow_fill
 
         out_file_path.parent.mkdir(parents=True, exist_ok=True)
         err_wb.save(out_file_path)
@@ -288,9 +283,10 @@ class DataExporter:
             ws.append(row_data)
             c_row = ws.max_row
             ws.row_dimensions[c_row].height = 20
+            row_cells = ws[c_row]
 
             for col_idx in range(1, len(headers) + 1):
-                c_cell = ws.cell(row=c_row, column=col_idx)
+                c_cell = row_cells[col_idx - 1]
                 c_cell.font = font_data
                 c_cell.border = border
                 c_cell.number_format = '@'
@@ -476,21 +472,10 @@ class DataExporter:
                     wb_s.save(fpath)
                     wb_s.close()
                     results["split_school_files"].append(fpath)
-
-                    # Xuất danh sách lỗi bên cạnh file tách (nếu trường có học sinh lỗi)
-                    sch_errors = [
-                        st for st in s_list
-                        if len(st.get("final_row", [])) > 24 and st["final_row"][24] != "Đã số hóa đầy đủ, chính xác"
-                    ]
-                    if sch_errors:
-                        err_fpath = split_sch_dir / f"{base_name}_DS_Loi.xlsx"
-                        self._write_error_workbook(err_fpath, sch_errors)
-                        results["split_school_error_files"].append(err_fpath)
-                        log(f"    ⚠️ Trường {sch_name} có {len(sch_errors)} lỗi: đã xuất {err_fpath.name}", "warning")
                 except Exception as e:
                     log(f"⚠️ Lỗi khi tách trường {sch_name}: {e}", "warning")
 
-            log(f"  📂 Đã tách thành {len(school_groups)} file theo trường tại: Da_Tach_Theo_Truong/ (kèm {len(results['split_school_error_files'])} file DS_Loi)", "success")
+            log(f"  📂 Đã tách thành {len(school_groups)} file theo trường tại: Da_Tach_Theo_Truong/", "success")
 
         # ----------------------------------------------------------------------
         # 6. TÁCH THEO NĂM: Da_Tach_Theo_Nam/{Ten_Don_Vi}_{Nam}.xlsx
@@ -514,21 +499,10 @@ class DataExporter:
                     wb_y.save(fpath)
                     wb_y.close()
                     results["split_year_files"].append(fpath)
-
-                    # Xuất danh sách lỗi bên cạnh file tách (nếu năm có học sinh lỗi)
-                    yr_errors = [
-                        st for st in s_list
-                        if len(st.get("final_row", [])) > 24 and st["final_row"][24] != "Đã số hóa đầy đủ, chính xác"
-                    ]
-                    if yr_errors:
-                        err_fpath = split_yr_dir / f"{base_name}_DS_Loi.xlsx"
-                        self._write_error_workbook(err_fpath, yr_errors)
-                        results["split_year_error_files"].append(err_fpath)
-                        log(f"    ⚠️ Năm {yr_val} có {len(yr_errors)} lỗi: đã xuất {err_fpath.name}", "warning")
                 except Exception as e:
                     log(f"⚠️ Lỗi khi tách theo năm {yr_val}: {e}", "warning")
 
-            log(f"  📂 Đã tách thành {len(year_groups)} file theo năm tại: Da_Tach_Theo_Nam/ (kèm {len(results['split_year_error_files'])} file DS_Loi)", "success")
+            log(f"  📂 Đã tách thành {len(year_groups)} file theo năm tại: Da_Tach_Theo_Nam/", "success")
 
         # ----------------------------------------------------------------------
         # 7. TÁCH THEO TRƯỜNG VÀ NĂM: Tach_Theo_Truong_Va_Nam/{Ten_Truong}/{Ten_Truong}_{Nam}.xlsx
@@ -560,20 +534,10 @@ class DataExporter:
                         wb_sy.close()
                         results["split_school_year_files"].append(fpath)
                         total_split_files += 1
-
-                        # Xuất danh sách lỗi bên cạnh file tách (nếu trường & năm có học sinh lỗi)
-                        sch_yr_errors = [
-                            st for st in s_list
-                            if len(st.get("final_row", [])) > 24 and st["final_row"][24] != "Đã số hóa đầy đủ, chính xác"
-                        ]
-                        if sch_yr_errors:
-                            err_fpath = sch_folder / f"{base_name}_DS_Loi.xlsx"
-                            self._write_error_workbook(err_fpath, sch_yr_errors)
-                            results["split_school_year_error_files"].append(err_fpath)
                     except Exception as e:
                         log(f"⚠️ Lỗi khi tách {sch_name} năm {yr_val}: {e}", "warning")
 
-            log(f"  📂 Đã tách thành {total_split_files} file theo Trường & Năm tại: Tach_Theo_Truong_Va_Nam/ (kèm {len(results['split_school_year_error_files'])} file DS_Loi)", "success")
+            log(f"  📂 Đã tách thành {total_split_files} file theo Trường & Năm tại: Tach_Theo_Truong_Va_Nam/", "success")
 
         # ======================================================================
         # MÔ-ĐUN 2: XUẤT DANH SÁCH TÀI LIỆU SỐ HOÁ (3 TÙY CHỌN)
@@ -632,8 +596,9 @@ class DataExporter:
                 r_vals[0] = r_idx  # STT 1..N
                 ws.append(r_vals)
                 cur_r = ws.max_row
+                row_cells = ws[cur_r]
                 for c_idx in range(1, 12):
-                    cell = ws.cell(row=cur_r, column=c_idx)
+                    cell = row_cells[c_idx - 1]
                     if self.cached_doc_fonts and c_idx - 1 < len(self.cached_doc_fonts) and self.cached_doc_fonts[c_idx - 1]:
                         cell.font = self.cached_doc_fonts[c_idx - 1]
                     # Ép định dạng TEXT @ cho các cột text: Cột B (2), Cột D (4), Cột F (6), Cột G (7), Cột H (8 - Ngày lập sổ)

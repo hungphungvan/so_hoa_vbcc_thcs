@@ -55,6 +55,9 @@ Nếu trong bảng dữ liệu gốc, ô Tên trường (Cột N) hoặc Niên k
 - **Niên khóa:** Tự động trích xuất chuỗi năm (dạng `2018-2022`, `18-22`, `2020`) từ Tên file hoặc Tên sheet.
 
 #### 3. Quy chuẩn làm sạch & chuẩn hóa dữ liệu
+- **Tự động nhận diện & chuyển đổi font chữ cũ (TCVN3 / .VnTime & VNI-Windows / VNI-Times):**
+  - Tích hợp bộ giải mã kép ưu tiên 4 tầng: Lọc chuỗi ASCII thuần ($O(1)$) $\rightarrow$ Kiểm tra ký tự Unicode cấp cao (`ord >= 256` hoặc ký tự độc quyền tiếng Việt) $\rightarrow$ Nhận diện VNI-Windows $\rightarrow$ Nhận diện TCVN3.
+  - Tự động chuẩn hóa 100% về Unicode NFC cho: Tên Sheet, Dòng tiêu đề cột, Toàn bộ ô dữ liệu học sinh, Dòng tổng kết/chân trang mà không làm biến dạng dữ liệu Unicode chuẩn.
 - **Họ và tên (Cột E):** Viết hoa chữ cái đầu mỗi từ (`vietnamese_title_case`), loại bỏ khoảng trắng thừa.
 - **Dân tộc (Cột K), Quốc tịch (Cột L):** Tra mã số sang chữ chuẩn và Title Case.
 - **Nơi sinh (Cột M):** Tra mã và Title Case, riêng các từ hành chính `"Thành phố"`, `"Thị xã"`, `"Thị trấn"` chỉ viết hoa chữ cái đầu tiên (chữ thứ hai viết thường: *Thành phố Hà Nội, Thị xã Sơn Tây*).
@@ -68,22 +71,27 @@ Nếu trong bảng dữ liệu gốc, ô Tên trường (Cột N) hoặc Niên k
   - `"Chưa số hoá"`: Khi thiếu hẳn ngày sinh $\rightarrow$ Cột Z: `"Thiếu ngày sinh"`.
   - `"Số hoá chưa đầy đủ, chính xác"`: Khi ngày sinh sai định dạng hoặc sai logic $\rightarrow$ Cột Z: chi tiết lỗi cụ thể.
   - `"Đã số hóa đầy đủ, chính xác"`: Khi dữ liệu hợp lệ $\rightarrow$ Cột Z để trống.
-- **Đính kèm tọa độ truy vết nguồn gốc (Cột X - Ghi chú):**
-  Tự động gắn tag: `[Nguồn: {Tên_File} | Sheet: {Tên_Sheet} | Dòng {Dòng_Gốc}]`.
+- **Đính kèm tọa độ truy vết nguồn gốc:**
+  Tọa độ nguồn gốc được đưa vào 4 cột riêng biệt (Cột AC..AF) trong tệp Danh sách lỗi và hiển thị đối chiếu trực quan trên màn hình Data Inspector.
 - **Ép định dạng TEXT (`@`) tuyệt đối:**
   Toàn bộ Cột I (Ngày sinh), Cột S (Ngày cấp), và các cột mã số được cấu hình `cell.number_format = '@'` và `cell.data_type = 's'`, ngăn chặn 100% lỗi Excel tự parse hoặc tự đổi định dạng ngày tháng theo cài đặt vùng miền (Locale) của hệ điều hành.
 
-#### 4. Hệ thống xuất file đa tùy chọn
-- **File Gộp:**
+#### 4. Hệ thống xuất file đa tùy chọn & Báo cáo kiểm soát (4 cột khoa học)
+- **Cột 1: Gộp dữ liệu:**
   - `{Ten_Don_Vi}_Đa_Gop_Theo_Truong.xlsx` (sắp xếp: Trường $\rightarrow$ Năm $\rightarrow$ STT).
   - `{Ten_Don_Vi}_Đa_Gop_Theo_Nam.xlsx` (sắp xếp: Năm $\rightarrow$ Trường $\rightarrow$ STT).
-- **File Tách:**
+- **Cột 2: Tách dữ liệu:**
   - `Da_Tach_Theo_Truong/{Ten_Truong}_Tu_{Min}_Den_{Max}.xlsx`.
   - `Da_Tach_Theo_Nam/{Ten_Don_Vi}_{Nam}.xlsx`.
   - `Tach_Theo_Truong_Va_Nam/{Ten_Truong}/{Ten_Truong}_{Nam}.xlsx`.
-- **File Danh sách lỗi duy nhất:** `{Ten_Don_Vi}_DS_Loi.xlsx` mở rộng thêm 4 cột chỉ đường (Cột AC..AF: *Tệp nguồn, Sheet nguồn, Dòng Excel gốc, STT ban đầu*).
-- **File Dữ liệu gốc tổng hợp:** `{Ten_Don_Vi}_Du_Lieu_Goc.xlsx` lưu nguyên vẹn dữ liệu gốc ban đầu.
-- **Màn hình Data Inspector:** Tra cứu nhanh học sinh và đối chiếu trực quan song song giữa **[Dữ liệu gốc]** và **[Dữ liệu chuẩn hóa]** trực tiếp trên phần mềm.
+- **Cột 3: Danh mục hồ sơ số hóa (Mô-đun 2):**
+  - `{Ten_Don_Vi}_DS_Tai_Lieu_So_Hoa_Theo_Truong.xlsx`.
+  - `{Ten_Don_Vi}_DS_Tai_Lieu_So_Hoa_Theo_Nam.xlsx`.
+  - `{Ten_Don_Vi}_DS_Tai_Lieu_So_Hoa_Theo_Truong_Va_Nam.xlsx`.
+- **Cột 4: Báo cáo & Kiểm soát (Mặc định chọn cả 2):**
+  - **Tệp Danh sách lỗi tổng hợp duy nhất:** `{Ten_Don_Vi}_DS_Loi.xlsx` mở rộng thêm 4 cột chỉ đường (Cột AC..AF: *Tệp nguồn, Sheet nguồn, Dòng Excel gốc, STT ban đầu*). Người dùng dễ dàng sử dụng bộ lọc AutoFilter của Excel để lọc theo bất kỳ trường/năm nào mà không bị phân mảnh thành nhiều file lỗi nhỏ.
+  - **Tệp Nhật ký thay đổi (.xlsx):** `{Ten_Don_Vi}_Nhat_Ky_Thay_Doi.xlsx` ghi nhận toàn bộ biến động dữ liệu khi chuẩn hóa (ngày sinh, tên trường, niên khóa, ngày cấp bằng) với 9 cột chi tiết: STT, Mã HS, Họ tên, Trường gốc, Trường chuẩn hóa, Tên trường dữ liệu, Giá trị trước, Giá trị sau, Ghi chú.
+- **Màn hình Data Inspector:** Tra cứu tức thì học sinh và đối chiếu trực quan song song giữa **[Dữ liệu gốc]** và **[Dữ liệu chuẩn hóa]** trực tiếp trên phần mềm (không cần sinh thêm tệp dữ liệu gốc cồng kềnh).
 
 ---
 
