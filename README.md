@@ -17,7 +17,7 @@ Hệ thống được đóng gói tự động qua **GitHub Actions** thành cá
 | :--- | :--- | :--- |
 | 🪟 **Windows (x64)** | [**`SohoaTHCS.exe`**](https://github.com/hungphungvan/so_hoa_vbcc_thcs/releases/latest) | Tải về và click đúp để chạy trực tiếp trên Windows 10/11. |
 | 🍏 **macOS (Khuyên dùng)** | [**`SohoaTHCS_macOS.dmg`**](https://github.com/hungphungvan/so_hoa_vbcc_thcs/releases/latest) | **Tệp đĩa cài đặt chuẩn macOS:** Mở tệp `.dmg`, kéo biểu tượng ứng dụng vào thư mục `Applications` là xong! |
-| 🍏 **macOS (Bản nén Zip)** | [**`SohoaTHCS_macOS.zip`**](https://github.com/hungphungvan/so_hoa_vbcc_thcs/releases/latest) | Giải nén, click đúp file `SohoaTHCS_macOS.app` để chạy. |
+| 🍏 **macOS (Bản nén Zip)** | [**`SohoaTHCS_macOS.zip`**](https://github.com/hungphungvan/so_hoa_vbcc_thcs/releases/latest) | Giải nén, click đúp file `SohoaTHCS.app` để chạy. |
 
 > [!NOTE]
 > **Hướng dẫn khởi chạy trên macOS:**
@@ -169,7 +169,7 @@ Sau khi chuẩn hóa, toàn bộ tệp kết quả được lưu tại thư mụ
 Phần mềm tích hợp cơ chế nhận diện động ưu tiên tải tài nguyên:
 - **Mặc định**: Tệp danh mục chuẩn đã được đóng gói sẵn bên trong ứng dụng (`.exe` / `.app`).
 - **Khi muốn thêm trường mới hoặc thay đổi danh sách trường/đơn vị**:
-  - Người dùng chỉ cần đặt tệp `Danh_Muc_Tra_Cuu.xlsx` (hoặc thư mục `data/Danh_Muc_Tra_Cuu.xlsx`) **ngay bên cạnh tệp thực thi `SohoaTHCS.exe` hoặc ứng dụng `SohoaTHCS_macOS.app`**.
+  - Người dùng chỉ cần đặt tệp `Danh_Muc_Tra_Cuu.xlsx` (hoặc thư mục `data/Danh_Muc_Tra_Cuu.xlsx`) **ngay bên cạnh tệp thực thi `SohoaTHCS.exe` hoặc ứng dụng `SohoaTHCS.app`**.
   - Phần mềm sẽ tự động phát hiện và ưu tiên nạp tệp bên ngoài này thay cho tệp mặc định nội bộ mà **không cần phải đóng gói hay build lại mã nguồn**.
   - Nguồn tệp danh mục đang nạp được hiển thị trực tiếp và minh bạch trên khung nhật ký log (`📖 Nguồn danh mục: ...`) ngay khi mở phần mềm.
 
@@ -181,5 +181,5 @@ Dự án đã được tích hợp sẵn quy trình CI/CD hoàn toàn tự độ
 
 - **Kích hoạt tự động**: Mỗi khi có commit mới được `push` lên nhánh `main` (hoặc `master`).
 - **Máy chủ ảo Windows (`windows-latest`)**: Tự động cài đặt Python 3.11, OpenPyXL, PyInstaller và biên dịch thành tệp thực thi duy nhất `SohoaTHCS.exe` (`--onefile --windowed`).
-- **Máy chủ ảo macOS (`macos-latest`)**: Tự động biên dịch thành ứng dụng `SohoaTHCS_macOS.app` và đóng gói thành `SohoaTHCS_macOS.zip` cũng như đĩa cài đặt `SohoaTHCS_macOS.dmg`.
+- **Máy chủ ảo macOS (`macos-latest`)**: Tự động biên dịch thành ứng dụng `SohoaTHCS.app` và đóng gói thành `SohoaTHCS_macOS.zip` cũng như đĩa cài đặt `SohoaTHCS_macOS.dmg`.
 - **Tự động xuất bản GitHub Release**: Tải cả 3 tệp nhị phân lên mục [Releases](https://github.com/hungphungvan/so_hoa_vbcc_thcs/releases/latest) với tag `latest` để người dùng tải về sử dụng ngay lập tức mà không cần cài đặt Python.

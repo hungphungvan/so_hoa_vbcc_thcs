@@ -69,21 +69,21 @@ jobs:
 
     - name: Build macOS with PyInstaller
       run: |
-        pyinstaller --noconfirm --onefile --windowed --name "SohoaTHCS_macOS" --add-data "data:data" --collect-all certifi main.py
+        pyinstaller --noconfirm --onefile --windowed --name "SohoaTHCS" --add-data "data:data" --collect-all certifi main.py
         cd dist
-        if [ -d "SohoaTHCS_macOS.app" ]; then
-          chmod -R +x SohoaTHCS_macOS.app/Contents/MacOS || true
-          zip -r -y SohoaTHCS_macOS.zip SohoaTHCS_macOS.app
+        if [ -d "SohoaTHCS.app" ]; then
+          chmod -R +x SohoaTHCS.app/Contents/MacOS || true
+          zip -r -y SohoaTHCS_macOS.zip SohoaTHCS.app
 
           # Tạo file cài đặt đĩa ảo DMG kéo thả vào Applications chuẩn macOS
           mkdir -p dmg_root
-          cp -R SohoaTHCS_macOS.app dmg_root/
+          cp -R SohoaTHCS.app dmg_root/
           ln -s /Applications dmg_root/Applications
           hdiutil create -volname "SohoaTHCS" -srcfolder dmg_root -ov -format UDZO SohoaTHCS_macOS.dmg
           rm -rf dmg_root
         else
-          chmod +x SohoaTHCS_macOS || true
-          zip -r SohoaTHCS_macOS.zip SohoaTHCS_macOS
+          chmod +x SohoaTHCS || true
+          zip -r SohoaTHCS_macOS.zip SohoaTHCS
         fi
         cd ..
 
@@ -124,7 +124,7 @@ jobs:
           | :--- | :--- | :--- |
           | **Windows (x64)** | **`SohoaTHCS.exe`** | Tải về và click đúp để chạy trực tiếp trên Windows 10/11. |
           | **macOS (Khuyên dùng)** | **`SohoaTHCS_macOS.dmg`** | Tệp đĩa cài đặt chuẩn macOS: Mở tệp DMG và kéo ứng dụng vào thư mục Applications. |
-          | **macOS (Bản Zip)** | **`SohoaTHCS_macOS.zip`** | Giải nén, click đúp file `SohoaTHCS_macOS.app` (hoặc nhị phân) để chạy. |
+          | **macOS (Bản Zip)** | **`SohoaTHCS_macOS.zip`** | Giải nén, click đúp file `SohoaTHCS.app` (hoặc nhị phân) để chạy. |
 
           ---
           > [!NOTE]

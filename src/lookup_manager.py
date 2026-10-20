@@ -19,7 +19,7 @@ def find_data_file(filename: str) -> Path:
     # 1. Khi chạy file đóng gói (PyInstaller frozen)
     if getattr(sys, 'frozen', False):
         exe_path = Path(sys.executable).resolve()
-        # Đối với ứng dụng macOS .app bundle: vd SohoaTHCS_macOS.app/Contents/MacOS/SohoaTHCS_macOS
+        # Đối với ứng dụng macOS .app bundle: vd SohoaTHCS.app/Contents/MacOS/SohoaTHCS
         # Thư mục chứa .app là cha cấp 4 của binary
         if len(exe_path.parents) >= 4 and exe_path.parent.name == "MacOS" and exe_path.parents[1].name == "Contents":
             app_dir = exe_path.parents[3]
