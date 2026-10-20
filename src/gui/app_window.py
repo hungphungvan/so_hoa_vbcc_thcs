@@ -12,7 +12,7 @@ from tkinter.scrolledtext import ScrolledText
 
 from src.lookup_manager import LookupManager, get_data_dir
 from src.excel_processor import ExcelProcessor
-from src.version import APP_VERSION
+from src.version import APP_VERSION, APP_NAME
 from src.updater import check_for_updates_async, check_for_updates, open_release_page
 from src.gui.dialogs import (
     SchoolBlockDialog,
@@ -40,7 +40,7 @@ from src.gui.theme import (
 class MainWindow:
     def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title(f"Số hóa Văn bằng Chứng chỉ THCS - v{APP_VERSION}")
+        self.root.title(f"{APP_NAME} - v{APP_VERSION}")
         
         # Đặt kích thước và vị trí cửa sổ tối ưu đa nền tảng
         sw = self.root.winfo_screenwidth()
@@ -121,7 +121,7 @@ class MainWindow:
 
         title_lbl = tk.Label(
             hdr_frame,
-            text="SỐ HÓA VĂN BẰNG CHỨNG CHỈ THCS",
+            text=f"{APP_NAME} - SỐ HÓA VĂN BẰNG CHỨNG CHỈ THCS",
             bg="#1565C0",
             fg="#FFFFFF",
             font=(FONT_FAMILY, 14, "bold")

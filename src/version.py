@@ -4,5 +4,5 @@ Số phiên bản sẽ được GitHub Actions tự động tiêm vào khi đón
 """
 
 APP_VERSION = "1.2.0"
-APP_NAME = "CÔNG CỤ SỐ HÓA VĂN BẰNG CHỨNG CHỈ THCS"
+APP_NAME = "SohoaTHCS"
 GITHUB_REPO = "hungphungvan/so_hoa_vbcc_thcs"

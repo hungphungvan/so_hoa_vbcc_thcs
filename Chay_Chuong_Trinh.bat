@@ -1,10 +1,10 @@
 @echo off
 chcp 65001 >nul
 cd /d "%~dp0"
-title CÔNG CỤ XỬ LÝ & SỐ HÓA VĂN BẰNG CHỨNG CHỈ THCS
+title SohoaTHCS - CÔNG CỤ XỬ LÝ & SỐ HÓA VĂN BẰNG CHỨNG CHỈ THCS
 
 echo ========================================================================
-echo     CÔNG CỤ XỬ LÝ & SỐ HÓA VĂN BẰNG CHỨNG CHỈ THCS    
+echo        SohoaTHCS - CÔNG CỤ SỐ HÓA VĂN BẰNG CHỨNG CHỈ THCS    
 echo ========================================================================
 echo.
 

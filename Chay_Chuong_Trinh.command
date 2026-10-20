@@ -10,7 +10,7 @@ defaults write org.python.python NSRequiresAquaSystemAppearance -bool true 2>/de
 defaults write com.apple.python3 NSRequiresAquaSystemAppearance -bool true 2>/dev/null || true
 
 echo "========================================================================"
-echo "    CÔNG CỤ XỬ LÝ & SỐ HÓA VĂN BẰNG CHỨNG CHỈ THCS    "
+echo "        SohoaTHCS - CÔNG CỤ SỐ HÓA VĂN BẰNG CHỨNG CHỈ THCS    "
 echo "========================================================================"
 echo ""
 

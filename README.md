@@ -1,4 +1,4 @@
-# CÔNG CỤ SỐ HÓA VÀ CHUẨN HÓA DỮ LIỆU VĂN BẰNG CHỨNG CHỈ THCS
+# SohoaTHCS - CÔNG CỤ SỐ HÓA VÀ CHUẨN HÓA DỮ LIỆU VĂN BẰNG CHỨNG CHỈ THCS
 
 Ứng dụng đồ họa chuyên dụng (**Desktop GUI Application**) phục vụ công tác số hóa, làm sạch, chuẩn hóa và tổng hợp dữ liệu cấp bằng tốt nghiệp Trung học cơ sở (THCS) của các Phòng/Sở Giáo dục và Đào tạo theo đúng chuẩn quy định của Bộ Giáo dục & Đào tạo.
 
@@ -15,9 +15,9 @@ Hệ thống được đóng gói tự động qua **GitHub Actions** thành cá
 
 | Hệ điều hành | Tệp tải về | Hướng dẫn sử dụng |
 | :--- | :--- | :--- |
-| 🪟 **Windows (x64)** | [**`SoHoa_VBCC.exe`**](https://github.com/hungphungvan/so_hoa_vbcc_thcs/releases/latest) | Tải về và click đúp để chạy trực tiếp trên Windows 10/11. |
-| 🍏 **macOS (Khuyên dùng)** | [**`SoHoa_VBCC_macOS.dmg`**](https://github.com/hungphungvan/so_hoa_vbcc_thcs/releases/latest) | **Tệp đĩa cài đặt chuẩn macOS:** Mở tệp `.dmg`, kéo biểu tượng ứng dụng vào thư mục `Applications` là xong! |
-| 🍏 **macOS (Bản nén Zip)** | [**`SoHoa_VBCC_macOS.zip`**](https://github.com/hungphungvan/so_hoa_vbcc_thcs/releases/latest) | Giải nén, click đúp file `SoHoa_VBCC_macOS.app` để chạy. |
+| 🪟 **Windows (x64)** | [**`SohoaTHCS.exe`**](https://github.com/hungphungvan/so_hoa_vbcc_thcs/releases/latest) | Tải về và click đúp để chạy trực tiếp trên Windows 10/11. |
+| 🍏 **macOS (Khuyên dùng)** | [**`SohoaTHCS_macOS.dmg`**](https://github.com/hungphungvan/so_hoa_vbcc_thcs/releases/latest) | **Tệp đĩa cài đặt chuẩn macOS:** Mở tệp `.dmg`, kéo biểu tượng ứng dụng vào thư mục `Applications` là xong! |
+| 🍏 **macOS (Bản nén Zip)** | [**`SohoaTHCS_macOS.zip`**](https://github.com/hungphungvan/so_hoa_vbcc_thcs/releases/latest) | Giải nén, click đúp file `SohoaTHCS_macOS.app` để chạy. |
 
 > [!NOTE]
 > **Hướng dẫn khởi chạy trên macOS:**
@@ -26,7 +26,7 @@ Hệ thống được đóng gói tự động qua **GitHub Actions** thành cá
 > 👉 Click đúp vào tệp **`Chay_Chuong_Trinh.command`** trong thư mục dự án để khởi động ngay giao diện đồ họa. Script sẽ tự động cập nhật bản mới nhất từ GitHub trong 1 giây mỗi khi chạy!
 > 
 > **Cách 2: Chạy từ tệp cài đặt `.dmg` tải từ GitHub Releases**
-> 👉 Tải file `SoHoa_VBCC_macOS.dmg`, mở tệp và kéo ứng dụng vào `Applications`.
+> 👉 Tải file `SohoaTHCS_macOS.dmg`, mở tệp và kéo ứng dụng vào `Applications`.
 > Nếu macOS hiển thị cảnh báo Gatekeeper lần đầu mở: **Click chuột phải** (hoặc `Control` + Click) vào ứng dụng $\rightarrow$ chọn **Open (Mở)** $\rightarrow$ chọn tiếp **Open**.
 
 ---
@@ -154,7 +154,7 @@ Sau khi chuẩn hóa, toàn bộ tệp kết quả được lưu tại thư mụ
 Phần mềm tích hợp cơ chế nhận diện động ưu tiên tải tài nguyên:
 - **Mặc định**: Tệp danh mục chuẩn đã được đóng gói sẵn bên trong ứng dụng (`.exe` / `.app`).
 - **Khi muốn thêm trường mới hoặc thay đổi danh sách trường/đơn vị**:
-  - Người dùng chỉ cần đặt tệp `Danh_Muc_Tra_Cuu.xlsx` (hoặc thư mục `data/Danh_Muc_Tra_Cuu.xlsx`) **ngay bên cạnh tệp thực thi `SoHoa_VBCC.exe` hoặc ứng dụng `SoHoa_VBCC_macOS.app`**.
+  - Người dùng chỉ cần đặt tệp `Danh_Muc_Tra_Cuu.xlsx` (hoặc thư mục `data/Danh_Muc_Tra_Cuu.xlsx`) **ngay bên cạnh tệp thực thi `SohoaTHCS.exe` hoặc ứng dụng `SohoaTHCS_macOS.app`**.
   - Phần mềm sẽ tự động phát hiện và ưu tiên nạp tệp bên ngoài này thay cho tệp mặc định nội bộ mà **không cần phải đóng gói hay build lại mã nguồn**.
   - Nguồn tệp danh mục đang nạp được hiển thị trực tiếp và minh bạch trên khung nhật ký log (`📖 Nguồn danh mục: ...`) ngay khi mở phần mềm.
 
@@ -165,6 +165,6 @@ Phần mềm tích hợp cơ chế nhận diện động ưu tiên tải tài ng
 Dự án đã được tích hợp sẵn quy trình CI/CD hoàn toàn tự động tại [`.github/workflows/build.yml`](.github/workflows/build.yml):
 
 - **Kích hoạt tự động**: Mỗi khi có commit mới được `push` lên nhánh `main` (hoặc `master`).
-- **Máy chủ ảo Windows (`windows-latest`)**: Tự động cài đặt Python 3.11, OpenPyXL, PyInstaller và biên dịch thành tệp thực thi duy nhất `SoHoa_VBCC.exe` (`--onefile --windowed`).
-- **Máy chủ ảo macOS (`macos-latest`)**: Tự động biên dịch thành ứng dụng `SoHoa_VBCC_macOS.app` và đóng gói thành `SoHoa_VBCC_macOS.zip`.
-- **Tự động xuất bản GitHub Release**: Tải cả 2 tệp nhị phân lên mục [Releases](https://github.com/hungphungvan/so_hoa_vbcc_thcs/releases/latest) với tag `latest` để người dùng tải về sử dụng ngay lập tức mà không cần cài đặt Python.
+- **Máy chủ ảo Windows (`windows-latest`)**: Tự động cài đặt Python 3.11, OpenPyXL, PyInstaller và biên dịch thành tệp thực thi duy nhất `SohoaTHCS.exe` (`--onefile --windowed`).
+- **Máy chủ ảo macOS (`macos-latest`)**: Tự động biên dịch thành ứng dụng `SohoaTHCS_macOS.app` và đóng gói thành `SohoaTHCS_macOS.zip` cũng như đĩa cài đặt `SohoaTHCS_macOS.dmg`.
+- **Tự động xuất bản GitHub Release**: Tải cả 3 tệp nhị phân lên mục [Releases](https://github.com/hungphungvan/so_hoa_vbcc_thcs/releases/latest) với tag `latest` để người dùng tải về sử dụng ngay lập tức mà không cần cài đặt Python.
