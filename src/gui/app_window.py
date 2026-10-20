@@ -138,8 +138,8 @@ class MainWindow:
         main_container = ttk.Frame(self.root, padding=12)
         main_container.pack(fill=tk.BOTH, expand=True)
 
-        # 2. Card 1: Chọn Đơn vị cấp bằng
-        unit_card = ttk.LabelFrame(main_container, text="1. Đơn vị cấp bằng", style="Card.TLabelframe", padding=10)
+        # 2. Card 1: Chọn Đơn vị
+        unit_card = ttk.LabelFrame(main_container, text="1. Chọn đơn vị", style="Card.TLabelframe", padding=10)
         unit_card.pack(fill=tk.X, pady=(0, 6))
 
         row1 = ttk.Frame(unit_card)
