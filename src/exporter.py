@@ -164,6 +164,53 @@ class DataExporter:
                     
         return yellow_count
 
+    def _write_error_workbook(self, out_file_path: Path, error_students: list[dict]) -> int:
+        """Xuất workbook danh sách học sinh lỗi với 28 cột chuẩn + 4 cột truy vết nguồn mở rộng (Cột AC..AF)."""
+        if not error_students:
+            return 0
+        err_wb, err_ws = self._create_base_workbook("DS_Loi")
+        # Thêm 4 cột chỉ đường truy vết nguồn gốc (Cột AC đến AF)
+        err_ws.cell(row=2, column=29, value="Tệp nguồn gốc")
+        err_ws.cell(row=2, column=30, value="Sheet nguồn")
+        err_ws.cell(row=2, column=31, value="Dòng Excel gốc")
+        err_ws.cell(row=2, column=32, value="STT ban đầu")
+
+        for col_c in range(29, 33):
+            c_ref = err_ws.cell(row=2, column=col_c)
+            if self.cached_fonts and self.cached_fonts[0]:
+                c_ref.font = copy.copy(self.cached_fonts[0])
+
+        for err_idx, st in enumerate(error_students, start=1):
+            row_vals = list(st["final_row"])
+            row_vals[0] = err_idx
+            row_vals.extend([
+                st.get("file_name", ""),
+                st.get("sheet_name", ""),
+                f"Dòng {st.get('row_idx', '')}",
+                st.get("clean_stt", "")
+            ])
+            err_ws.append(row_vals)
+            c_row = err_ws.max_row
+            for col_idx, font in enumerate(self.cached_fonts, start=1):
+                cell_c = err_ws.cell(row=c_row, column=col_idx)
+                if font:
+                    cell_c.font = font
+                if col_idx in (2, 3, 6, 7, 8, 9, 19, 24, 27):
+                    cell_c.number_format = '@'
+                    if cell_c.value is not None:
+                        cell_c.data_type = 's'
+                        cell_c.value = str(cell_c.value)
+
+            for col in range(1, min(28, len(row_vals))):
+                col_num = col + 1
+                if col_num not in EXCLUDE_YELLOW_COLS and is_cell_empty(row_vals[col]):
+                    err_ws.cell(row=c_row, column=col_num).fill = self.yellow_fill
+
+        out_file_path.parent.mkdir(parents=True, exist_ok=True)
+        err_wb.save(out_file_path)
+        err_wb.close()
+        return len(error_students)
+
     def export_all(
         self,
         all_students: list[dict],
@@ -177,9 +224,9 @@ class DataExporter:
         MÔ-ĐUN 1 (Chuẩn hóa văn bằng THCS):
         - Gộp theo trường
         - Gộp theo năm
-        - Tách theo trường
-        - Tách theo năm
-        - Tách theo trường và năm
+        - Tách theo trường (kèm DS_Loi theo trường nếu có lỗi)
+        - Tách theo năm (kèm DS_Loi theo năm nếu có lỗi)
+        - Tách theo trường và năm (kèm DS_Loi theo trường và năm nếu có lỗi)
         - 1 File DS_Loi duy nhất kèm 4 cột truy vết nguồn (Cột AC..AF)
         - 1 File Du_Lieu_Goc tổng hợp
         
@@ -198,8 +245,11 @@ class DataExporter:
             "merged_school_file": None,
             "merged_year_file": None,
             "split_school_files": [],
+            "split_school_error_files": [],
             "split_year_files": [],
+            "split_year_error_files": [],
             "split_school_year_files": [],
+            "split_school_year_error_files": [],
             "error_file": None,
             "raw_file": None,
             "doc_school_file": None,
@@ -290,47 +340,8 @@ class DataExporter:
         ]
         if error_students:
             try:
-                err_wb, err_ws = self._create_base_workbook("DS_Loi")
-                # Thêm 4 cột chỉ đường truy vết nguồn gốc (Cột AC đến AF)
-                err_ws.cell(row=2, column=29, value="Tệp nguồn gốc")
-                err_ws.cell(row=2, column=30, value="Sheet nguồn")
-                err_ws.cell(row=2, column=31, value="Dòng Excel gốc")
-                err_ws.cell(row=2, column=32, value="STT ban đầu")
-
-                for col_c in range(29, 33):
-                    c_ref = err_ws.cell(row=2, column=col_c)
-                    if self.cached_fonts and self.cached_fonts[0]:
-                        c_ref.font = copy.copy(self.cached_fonts[0])
-
-                for err_idx, st in enumerate(error_students, start=1):
-                    row_vals = list(st["final_row"])
-                    row_vals[0] = err_idx
-                    row_vals.extend([
-                        st.get("file_name", ""),
-                        st.get("sheet_name", ""),
-                        f"Dòng {st.get('row_idx', '')}",
-                        st.get("clean_stt", "")
-                    ])
-                    err_ws.append(row_vals)
-                    c_row = err_ws.max_row
-                    for col_idx, font in enumerate(self.cached_fonts, start=1):
-                        cell_c = err_ws.cell(row=c_row, column=col_idx)
-                        if font:
-                            cell_c.font = font
-                        if col_idx in (2, 3, 6, 7, 8, 9, 19, 24, 27):
-                            cell_c.number_format = '@'
-                            if cell_c.value is not None:
-                                cell_c.data_type = 's'
-                                cell_c.value = str(cell_c.value)
-
-                    for col in range(1, min(28, len(row_vals))):
-                        col_num = col + 1
-                        if col_num not in EXCLUDE_YELLOW_COLS and is_cell_empty(row_vals[col]):
-                            err_ws.cell(row=c_row, column=col_num).fill = self.yellow_fill
-
                 err_file_path = output_dir / f"{unit_safe}_DS_Loi.xlsx"
-                err_wb.save(err_file_path)
-                err_wb.close()
+                self._write_error_workbook(err_file_path, error_students)
                 results["error_file"] = err_file_path
                 log(f"  ⚠️ Đã xuất 1 file Danh sách lỗi duy nhất: {err_file_path.name} ({len(error_students)} học sinh lỗi kèm 4 cột truy vết nguồn)", "warning")
             except Exception as e:
@@ -353,9 +364,10 @@ class DataExporter:
                 years = [get_graduation_year(st) for st in s_list if isinstance(get_graduation_year(st), int)]
                 if years:
                     y_min, y_max = min(years), max(years)
-                    fname = f"{sch_safe}_Tu_{y_min}_Den_{y_max}.xlsx"
+                    base_name = f"{sch_safe}_Tu_{y_min}_Den_{y_max}"
                 else:
-                    fname = f"{sch_safe}.xlsx"
+                    base_name = f"{sch_safe}"
+                fname = f"{base_name}.xlsx"
 
                 try:
                     wb_s, ws_s = self._create_base_workbook("Data")
@@ -364,10 +376,21 @@ class DataExporter:
                     wb_s.save(fpath)
                     wb_s.close()
                     results["split_school_files"].append(fpath)
+
+                    # Xuất danh sách lỗi bên cạnh file tách (nếu trường có học sinh lỗi)
+                    sch_errors = [
+                        st for st in s_list
+                        if len(st.get("final_row", [])) > 24 and st["final_row"][24] != "Đã số hóa đầy đủ, chính xác"
+                    ]
+                    if sch_errors:
+                        err_fpath = split_sch_dir / f"{base_name}_DS_Loi.xlsx"
+                        self._write_error_workbook(err_fpath, sch_errors)
+                        results["split_school_error_files"].append(err_fpath)
+                        log(f"    ⚠️ Trường {sch_name} có {len(sch_errors)} lỗi: đã xuất {err_fpath.name}", "warning")
                 except Exception as e:
                     log(f"⚠️ Lỗi khi tách trường {sch_name}: {e}", "warning")
 
-            log(f"  📂 Đã tách thành {len(school_groups)} file theo trường tại: Da_Tach_Theo_Truong/", "success")
+            log(f"  📂 Đã tách thành {len(school_groups)} file theo trường tại: Da_Tach_Theo_Truong/ (kèm {len(results['split_school_error_files'])} file DS_Loi)", "success")
 
         # ----------------------------------------------------------------------
         # 6. TÁCH THEO NĂM: Da_Tach_Theo_Nam/{Ten_Don_Vi}_{Nam}.xlsx
@@ -382,7 +405,8 @@ class DataExporter:
                 year_groups.setdefault(yr, []).append(st)
 
             for yr_val, s_list in year_groups.items():
-                fname = f"{unit_safe}_{yr_val}.xlsx"
+                base_name = f"{unit_safe}_{yr_val}"
+                fname = f"{base_name}.xlsx"
                 try:
                     wb_y, ws_y = self._create_base_workbook("Data")
                     self._write_student_rows(ws_y, s_list, renumber=True)
@@ -390,10 +414,21 @@ class DataExporter:
                     wb_y.save(fpath)
                     wb_y.close()
                     results["split_year_files"].append(fpath)
+
+                    # Xuất danh sách lỗi bên cạnh file tách (nếu năm có học sinh lỗi)
+                    yr_errors = [
+                        st for st in s_list
+                        if len(st.get("final_row", [])) > 24 and st["final_row"][24] != "Đã số hóa đầy đủ, chính xác"
+                    ]
+                    if yr_errors:
+                        err_fpath = split_yr_dir / f"{base_name}_DS_Loi.xlsx"
+                        self._write_error_workbook(err_fpath, yr_errors)
+                        results["split_year_error_files"].append(err_fpath)
+                        log(f"    ⚠️ Năm {yr_val} có {len(yr_errors)} lỗi: đã xuất {err_fpath.name}", "warning")
                 except Exception as e:
                     log(f"⚠️ Lỗi khi tách theo năm {yr_val}: {e}", "warning")
 
-            log(f"  📂 Đã tách thành {len(year_groups)} file theo năm tại: Da_Tach_Theo_Nam/", "success")
+            log(f"  📂 Đã tách thành {len(year_groups)} file theo năm tại: Da_Tach_Theo_Nam/ (kèm {len(results['split_year_error_files'])} file DS_Loi)", "success")
 
         # ----------------------------------------------------------------------
         # 7. TÁCH THEO TRƯỜNG VÀ NĂM: Tach_Theo_Truong_Va_Nam/{Ten_Truong}/{Ten_Truong}_{Nam}.xlsx
@@ -415,7 +450,8 @@ class DataExporter:
                 sch_folder.mkdir(parents=True, exist_ok=True)
 
                 for yr_val, s_list in yr_dict.items():
-                    fname = f"{sch_safe}_{yr_val}.xlsx"
+                    base_name = f"{sch_safe}_{yr_val}"
+                    fname = f"{base_name}.xlsx"
                     try:
                         wb_sy, ws_sy = self._create_base_workbook("Data")
                         self._write_student_rows(ws_sy, s_list, renumber=True)
@@ -424,10 +460,20 @@ class DataExporter:
                         wb_sy.close()
                         results["split_school_year_files"].append(fpath)
                         total_split_files += 1
+
+                        # Xuất danh sách lỗi bên cạnh file tách (nếu trường & năm có học sinh lỗi)
+                        sch_yr_errors = [
+                            st for st in s_list
+                            if len(st.get("final_row", [])) > 24 and st["final_row"][24] != "Đã số hóa đầy đủ, chính xác"
+                        ]
+                        if sch_yr_errors:
+                            err_fpath = sch_folder / f"{base_name}_DS_Loi.xlsx"
+                            self._write_error_workbook(err_fpath, sch_yr_errors)
+                            results["split_school_year_error_files"].append(err_fpath)
                     except Exception as e:
                         log(f"⚠️ Lỗi khi tách {sch_name} năm {yr_val}: {e}", "warning")
 
-            log(f"  📂 Đã tách thành {total_split_files} file theo Trường & Năm tại: Tach_Theo_Truong_Va_Nam/", "success")
+            log(f"  📂 Đã tách thành {total_split_files} file theo Trường & Năm tại: Tach_Theo_Truong_Va_Nam/ (kèm {len(results['split_school_year_error_files'])} file DS_Loi)", "success")
 
         # ======================================================================
         # MÔ-ĐUN 2: XUẤT DANH SÁCH TÀI LIỆU SỐ HOÁ (3 TÙY CHỌN)

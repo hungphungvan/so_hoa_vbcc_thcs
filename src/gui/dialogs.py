@@ -836,7 +836,7 @@ class DataInspectorDialog(tk.Toplevel):
             ("Ngày cấp bằng (Cột S)", st.get("raw_grad", ""), st.get("grad_date", "")),
             ("Trạng thái số hóa (Cột Y)", "(Chưa xác định)", final_r[24] if len(final_r) > 24 else ""),
             ("Nguyên nhân lỗi (Cột Z)", "(Không có)", final_r[25] if len(final_r) > 25 and final_r[25] else "(Trống)"),
-            ("Vị trí nguồn gốc", f"File: {st.get('file_name', '')} | Sheet: {st.get('sheet_name', '')} | Dòng: {st.get('row_idx', '')}", "Đã gắn vào Cột X (Ghi chú)")
+            ("Vị trí nguồn gốc", f"File: {st.get('file_name', '')} | Sheet: {st.get('sheet_name', '')} | Dòng: {st.get('row_idx', '')}", "Lưu độc lập phục vụ đối soát")
         ]
 
         for f_name, r_val, n_val in fields:

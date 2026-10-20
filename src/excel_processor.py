@@ -197,7 +197,7 @@ class ExcelProcessor:
         Trích xuất và chuẩn hóa học sinh từ 1 tệp Excel:
         - Tự động nhận diện Tên trường và Niên khóa từ Context (Thư mục / Tên file / Sheet).
         - Xử lý tương tác theo khối đối với Trường, Niên khóa, Ngày sinh.
-        - Đính kèm tọa độ nguồn gốc vào Cột X (Ghi chú): [Nguồn: File | Sheet | Dòng].
+        - Giữ nguyên nội dung Cột X (Ghi chú) ban đầu (nếu có), không chèn thẻ nguồn.
         - Trả về: (file_students, stats)
         """
         def log(msg, level="info"):
@@ -687,14 +687,10 @@ class ExcelProcessor:
                     else:
                         row_vals[21] = None
 
-                    # Cột X (Index 23): Ghi chú -> ĐÍNH KÈM TỌA ĐỘ NGUỒN GỐC
-                    source_tag = f"[Nguồn: {file_path.name} | Sheet: {ws_in.title} | Dòng {st_item['row_idx']}]"
+                    # Cột X (Index 23): Ghi chú -> Giữ nguyên ghi chú gốc nếu có, nếu rỗng thì để trống
                     raw_note_val = row_vals[23]
                     orig_note = clean_whitespace(str(raw_note_val)) if not is_cell_empty(raw_note_val) else ""
-                    if orig_note:
-                        row_vals[23] = f"{orig_note} | {source_tag}"
-                    else:
-                        row_vals[23] = source_tag
+                    row_vals[23] = orig_note if orig_note else None
 
                     # Cột Y (Index 24) & Cột Z (Index 25): Trạng thái số hóa & Nguyên nhân
                     status_y, reason_z = determine_status_and_reason(

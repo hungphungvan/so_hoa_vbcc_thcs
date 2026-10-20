@@ -88,7 +88,7 @@ Phần mềm tự động quét đệ quy toàn bộ thư mục và nhận diệ
 | **U** | **Chức danh người ký bằng** | Cột 21 (index 20) từ Excel gốc | Chuẩn hóa Title Case (ví dụ: *Trưởng phòng, Phó Trưởng phòng, Hiệu trưởng*). | Giữ nguyên chức danh người ký (nếu có). | Nếu thiếu: Để trống và tô vàng. |
 | **V** | **Họ, chữ đệm, tên người ký bằng** | Cột 22 (index 21) từ Excel gốc | Chuẩn hóa Title Case (`vietnamese_title_case`). | Giữ nguyên họ tên người ký bằng (nếu có). | Nếu thiếu: Để trống và tô vàng. |
 | **W** | **Tình trạng văn bằng** | Cột 23 (index 22) từ Excel gốc | Chuẩn hóa Title Case (ví dụ: *Cấp lần đầu, Cấp lại, Đã thu hồi*). | Giữ nguyên tình trạng văn bằng (nếu có). | Nếu thiếu: Để trống (không tô vàng). |
-| **X** | **Ghi chú (TỌA ĐỘ TRUY VẾT NGUỒN GỐC)** | Cột 24 (index 23) từ Excel gốc | Ép định dạng Text `@`. | Giữ lại ghi chú ban đầu (nếu có) và không bị chèn chuỗi `"None"`. | **Tự động gắn thẻ tọa độ nguồn gốc độc bản**:<br>`[Nguồn: {Tên_Tệp_Excel} \| Sheet: {Tên_Sheet} \| Dòng {Dòng_Excel_Gốc}]`. Không tô vàng khi không có ghi chú ban đầu. |
+| **X** | **Ghi chú** | Cột 24 (index 23) từ Excel gốc | Ép định dạng Text `@`. | Giữ nguyên vẹn ghi chú ban đầu từ file gốc (nếu có) và không bị chèn chuỗi `"None"`. | Nếu file gốc để trống thì để trống hoàn toàn (không tô vàng). Tọa độ nguồn gốc được quản lý độc lập tại màn hình tra cứu đối soát và các tệp Danh sách lỗi. |
 | **Y** | **Trạng thái số hóa** | Tự động tính toán logic theo quy định | Ép kiểu Text `@`. Chỉ nhận 1 trong 3 giá trị chuẩn. | **Quy tắc ấn định tự động 100%**:<br>1. `"Chưa số hoá"`: Khi thiếu hẳn ngày sinh (Cột I rỗng cả ở file gốc và sau xử lý).<br>2. `"Số hoá chưa đầy đủ, chính xác"`: Khi có ngày sinh nhưng sai định dạng hoặc sai logic thực tế.<br>3. `"Đã số hóa đầy đủ, chính xác"`: Khi ngày sinh đầy đủ và hoàn toàn chính xác. | Luôn được điền tự động 100% cho mọi học sinh. |
 | **Z** | **Thông tin chưa bảo đảm đầy đủ, chính xác và nguyên nhân** | Tự động tính toán logic theo quy định | Ép kiểu Text `@`. | **Quy tắc giải trình lỗi tự động**:<br>1. Nếu Cột Y là `"Chưa số hoá"` $\rightarrow$ Điền `"Thiếu ngày sinh"`.<br>2. Nếu Cột Y là `"Số hoá chưa đầy đủ, chính xác"` $\rightarrow$ Ghi rõ nguyên nhân cụ thể (ví dụ: *Ngày sinh không hợp lệ: Tháng 02 năm 2007 không thể có 30 ngày*).<br>3. Nếu Cột Y là `"Đã số hóa đầy đủ, chính xác"` $\rightarrow$ Bỏ trống (`None`). | Luôn được điền tự động 100% cho mọi học sinh. |
 | **AA** | **Mã đơn vị** | Nạp từ danh mục tra cứu `DS_Don_Vi` | Ép định dạng Text `@` (ví dụ: `722`, `723`, `724`...). | Lấy chính xác mã số đơn vị của Phòng GD&ĐT được người dùng chọn trên combobox giao diện. | Tự động điền đầy đủ 100% cho mọi học sinh. |
@@ -123,12 +123,12 @@ Sau khi chuẩn hóa, toàn bộ tệp kết quả được lưu tại thư mụ
 1. **Tệp Gộp tổng thể**:
    - `{Ten_Don_Vi}_Đa_Gop_Theo_Truong.xlsx` (sắp xếp: Tên trường $\rightarrow$ Năm tốt nghiệp $\rightarrow$ STT gốc).
    - `{Ten_Don_Vi}_Đa_Gop_Theo_Nam.xlsx` (sắp xếp: Năm tốt nghiệp $\rightarrow$ Tên trường $\rightarrow$ STT gốc).
-2. **Tệp Tách độc lập**:
-   - `Da_Tach_Theo_Truong/{Ten_Truong}_Tu_{Min}_Den_{Max}.xlsx`.
-   - `Da_Tach_Theo_Nam/{Ten_Don_Vi}_{Nam}.xlsx`.
-   - `Tach_Theo_Truong_Va_Nam/{Ten_Truong}/{Ten_Truong}_{Nam}.xlsx`.
-3. **1 Tệp Danh sách lỗi duy nhất ({Ten_Don_Vi}_DS_Loi.xlsx)**:
-   - Gom toàn bộ học sinh có trạng thái *"Chưa số hoá"* hoặc *"Số hoá chưa đầy đủ, chính xác"*.
+2. **Tệp Tách độc lập (kèm Danh sách lỗi đặt bên cạnh nếu có lỗi)**:
+   - `Da_Tach_Theo_Truong/{Ten_Truong}_Tu_{Min}_Den_{Max}.xlsx` (và `{Ten_Truong}_Tu_{Min}_Den_{Max}_DS_Loi.xlsx` nếu trường có học sinh lỗi).
+   - `Da_Tach_Theo_Nam/{Ten_Don_Vi}_{Nam}.xlsx` (và `{Ten_Don_Vi}_{Nam}_DS_Loi.xlsx` nếu năm có học sinh lỗi).
+   - `Tach_Theo_Truong_Va_Nam/{Ten_Truong}/{Ten_Truong}_{Nam}.xlsx` (và `{Ten_Truong}_{Nam}_DS_Loi.xlsx` nếu trường & năm có học sinh lỗi).
+3. **Tệp Danh sách lỗi tổng hợp ({Ten_Don_Vi}_DS_Loi.xlsx)**:
+   - Gom toàn bộ học sinh lỗi của toàn bộ đơn vị có trạng thái *"Chưa số hoá"* hoặc *"Số hoá chưa đầy đủ, chính xác"*.
    - Mở rộng thêm **4 cột truy vết nguồn gốc (Cột AC $\rightarrow$ AF)**: *Tệp nguồn gốc, Sheet nguồn, Dòng Excel gốc, STT ban đầu* giúp tra soát tận nơi dữ liệu gốc chỉ trong 1 giây.
 4. **Tệp Dữ liệu gốc tổng hợp ({Ten_Don_Vi}_Du_Lieu_Goc.xlsx)**:
    - Lưu nguyên trạng 100% dữ liệu ban đầu kèm 3 cột tọa độ nguồn.
