@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import re
+import sys
 import tkinter as tk
 from tkinter import ttk, messagebox
 from tkinter.scrolledtext import ScrolledText
+
+FONT_FAMILY = "Helvetica Neue" if sys.platform == "darwin" else "Segoe UI"
+FONT_FAMILY_MONO = "Menlo" if sys.platform == "darwin" else "Consolas"
 
 def center_window(window, parent=None, width=None, height=None):
     """Căn giữa cửa sổ dialog trên cửa sổ cha hoặc màn hình."""
@@ -17,6 +21,7 @@ def center_window(window, parent=None, width=None, height=None):
         x = (window.winfo_screenwidth() // 2) - (w // 2)
         y = (window.winfo_screenheight() // 2) - (h // 2)
     window.geometry(f"{w}x{h}+{max(0, x)}+{max(0, y)}")
+    window.lift()
 
 class SchoolBlockDialog(tk.Toplevel):
     """
@@ -54,7 +59,7 @@ class SchoolBlockDialog(tk.Toplevel):
         title_lbl = ttk.Label(
             hdr_frame, 
             text=f"⚠️ XÁC ĐỊNH TÊN TRƯỜNG CHO {count} HỌC SINH (STT {start_stt} -> {end_stt})",
-            font=("Segoe UI", 11, "bold"),
+            font=(FONT_FAMILY, 11, "bold"),
             foreground="#B71C1C"
         )
         title_lbl.pack(anchor=tk.W)
@@ -69,7 +74,7 @@ class SchoolBlockDialog(tk.Toplevel):
         sub_lbl = ttk.Label(
             hdr_frame,
             text=" | ".join(info_lines),
-            font=("Segoe UI", 9)
+            font=(FONT_FAMILY, 9)
         )
         sub_lbl.pack(anchor=tk.W, pady=(2, 0))
 
@@ -126,14 +131,14 @@ class SchoolBlockDialog(tk.Toplevel):
         if fuzzy_suggestions:
             sugg_box = ttk.Frame(act_frame)
             sugg_box.pack(fill=tk.X, pady=(0, 6))
-            ttk.Label(sugg_box, text="Gợi ý gần đúng nhất: ", font=("Segoe UI", 9, "bold")).pack(side=tk.LEFT)
+            ttk.Label(sugg_box, text="Gợi ý gần đúng nhất: ", font=(FONT_FAMILY, 9, "bold")).pack(side=tk.LEFT)
             for s_opt in fuzzy_suggestions[:3]:
                 btn = ttk.Button(sugg_box, text=f"👉 {s_opt}", command=lambda opt=s_opt: self._pick_suggestion(opt))
                 btn.pack(side=tk.LEFT, padx=3)
 
         select_box = ttk.Frame(act_frame)
         select_box.pack(fill=tk.X, pady=4)
-        ttk.Label(select_box, text="Chọn tên trường chuẩn trực thuộc: ", font=("Segoe UI", 9)).pack(side=tk.LEFT)
+        ttk.Label(select_box, text="Chọn tên trường chuẩn trực thuộc: ", font=(FONT_FAMILY, 9)).pack(side=tk.LEFT)
         
         init_val = self.default_suggestion or (fuzzy_suggestions[0] if fuzzy_suggestions else (self.allowed_schools[0] if self.allowed_schools else ""))
         self.school_var = tk.StringVar(value=init_val)
@@ -207,7 +212,7 @@ class CohortBlockDialog(tk.Toplevel):
         title_lbl = ttk.Label(
             hdr_frame, 
             text=f"⚠️ XÁC ĐỊNH NIÊN KHÓA CHO NHÓM {count} HỌC SINH (Giá trị gốc: '{raw_val}')",
-            font=("Segoe UI", 11, "bold"),
+            font=(FONT_FAMILY, 11, "bold"),
             foreground="#E65100"
         )
         title_lbl.pack(anchor=tk.W)
@@ -223,7 +228,7 @@ class CohortBlockDialog(tk.Toplevel):
         sub_lbl = ttk.Label(
             hdr_frame,
             text=" | ".join(info_parts),
-            font=("Segoe UI", 9)
+            font=(FONT_FAMILY, 9)
         )
         sub_lbl.pack(anchor=tk.W, pady=(2, 0))
 
@@ -276,15 +281,15 @@ class CohortBlockDialog(tk.Toplevel):
         input_box = ttk.Frame(act_frame)
         input_box.pack(fill=tk.X, pady=4)
         
-        ttk.Label(input_box, text="Năm ra trường (Y_ra, ví dụ 2022): ", font=("Segoe UI", 9, "bold")).pack(side=tk.LEFT)
+        ttk.Label(input_box, text="Năm ra trường (Y_ra, ví dụ 2022): ", font=(FONT_FAMILY, 9, "bold")).pack(side=tk.LEFT)
         
         self.y_ra_var = tk.StringVar(value=self.default_y_ra)
-        self.y_ra_entry = ttk.Entry(input_box, textvariable=self.y_ra_var, width=12, font=("Segoe UI", 10, "bold"))
+        self.y_ra_entry = ttk.Entry(input_box, textvariable=self.y_ra_var, width=12, font=(FONT_FAMILY, 10, "bold"))
         self.y_ra_entry.pack(side=tk.LEFT, padx=6)
         self.y_ra_entry.focus_set()
         self.y_ra_entry.bind("<Return>", lambda event: self._confirm())
         
-        self.preview_lbl = ttk.Label(input_box, text="", font=("Segoe UI", 10, "bold"), foreground="#1B5E20")
+        self.preview_lbl = ttk.Label(input_box, text="", font=(FONT_FAMILY, 10, "bold"), foreground="#1B5E20")
         self.preview_lbl.pack(side=tk.LEFT, padx=12)
         
         self.y_ra_var.trace_add("write", lambda *args: self._update_preview())
@@ -377,7 +382,7 @@ class DateFixDialog(tk.Toplevel):
         title_lbl = ttk.Label(
             hdr_frame, 
             text=f"⚠️ PHÁT HIỆN {self.field_name.upper()} CHƯA HỢP LỆ: {err_desc}",
-            font=("Segoe UI", 11, "bold"),
+            font=(FONT_FAMILY, 11, "bold"),
             foreground="#C62828"
         )
         title_lbl.pack(anchor=tk.W)
@@ -390,7 +395,7 @@ class DateFixDialog(tk.Toplevel):
         sub_lbl = ttk.Label(
             hdr_frame,
             text=f"Học sinh: {name} (STT: {stt}) | File: {self.student_info.get('file_name', '')} (Sheet: {self.student_info.get('sheet_name', '')})\nGiá trị gốc: '{raw_val}' | Kết quả hiện tại: '{curr_norm}'",
-            font=("Segoe UI", 9)
+            font=(FONT_FAMILY, 9)
         )
         sub_lbl.pack(anchor=tk.W, pady=(2, 0))
 
@@ -441,7 +446,7 @@ class DateFixDialog(tk.Toplevel):
         input_box = ttk.Frame(act_frame)
         input_box.pack(fill=tk.X, pady=4)
         
-        ttk.Label(input_box, text=f"Nhập {self.field_name} chuẩn (dd/MM/yyyy): ", font=("Segoe UI", 9)).pack(side=tk.LEFT)
+        ttk.Label(input_box, text=f"Nhập {self.field_name} chuẩn (dd/MM/yyyy): ", font=(FONT_FAMILY, 9)).pack(side=tk.LEFT)
         
         init_val = self.smart_suggestion or curr_norm or ""
         self.date_var = tk.StringVar(value=init_val)
@@ -548,7 +553,7 @@ class GradDateBlockDialog(tk.Toplevel):
         title_lbl = ttk.Label(
             hdr_frame,
             text=f"⚠️ XÁC ĐỊNH NGÀY CẤP BẰNG CHO NHÓM: {sch} (Niên khóa: {nk})",
-            font=("Segoe UI", 11, "bold"),
+            font=(FONT_FAMILY, 11, "bold"),
             foreground="#1565C0"
         )
         title_lbl.pack(anchor=tk.W)
@@ -556,7 +561,7 @@ class GradDateBlockDialog(tk.Toplevel):
         sub_lbl = ttk.Label(
             hdr_frame,
             text=f"Nhóm gồm {count} học sinh cùng trường và cùng niên khóa hiện chưa có ngày cấp bằng chuẩn dd/MM/yyyy.",
-            font=("Segoe UI", 9)
+            font=(FONT_FAMILY, 9)
         )
         sub_lbl.pack(anchor=tk.W, pady=(2, 0))
 
@@ -601,7 +606,7 @@ class GradDateBlockDialog(tk.Toplevel):
         in_box = ttk.Frame(act_frame)
         in_box.pack(fill=tk.X)
 
-        ttk.Label(in_box, text="Ngày cấp bằng chuẩn (dd/MM/yyyy): ", font=("Segoe UI", 9)).pack(side=tk.LEFT)
+        ttk.Label(in_box, text="Ngày cấp bằng chuẩn (dd/MM/yyyy): ", font=(FONT_FAMILY, 9)).pack(side=tk.LEFT)
         self.grad_var = tk.StringVar(value=self.default_date)
         self.grad_entry = ttk.Entry(in_box, textvariable=self.grad_var, width=18)
         self.grad_entry.pack(side=tk.LEFT, padx=6)
@@ -659,7 +664,7 @@ class DataInspectorDialog(tk.Toplevel):
         top_frame = ttk.Frame(self, padding=(12, 10))
         top_frame.pack(fill=tk.X)
 
-        ttk.Label(top_frame, text="🔍 Tìm kiếm nhanh: ", font=("Segoe UI", 9, "bold")).pack(side=tk.LEFT)
+        ttk.Label(top_frame, text="🔍 Tìm kiếm nhanh: ", font=(FONT_FAMILY, 9, "bold")).pack(side=tk.LEFT)
         self.search_var = tk.StringVar()
         self.search_var.trace_add("write", self._on_search)
         search_entry = ttk.Entry(top_frame, textvariable=self.search_var, width=35)
@@ -670,7 +675,7 @@ class DataInspectorDialog(tk.Toplevel):
         ttk.Radiobutton(top_frame, text="Tất cả", variable=self.filter_var, value="all", command=self._on_search).pack(side=tk.LEFT, padx=4)
         ttk.Radiobutton(top_frame, text="Chỉ xem học sinh lỗi (Cột Y != Đã số hóa)", variable=self.filter_var, value="errors", command=self._on_search).pack(side=tk.LEFT, padx=4)
 
-        self.count_lbl = ttk.Label(top_frame, text=f"Tổng: {len(self.all_students)} học sinh", font=("Segoe UI", 9, "bold"), foreground="#0D47A1")
+        self.count_lbl = ttk.Label(top_frame, text=f"Tổng: {len(self.all_students)} học sinh", font=(FONT_FAMILY, 9, "bold"), foreground="#0D47A1")
         self.count_lbl.pack(side=tk.RIGHT)
 
         # Split Pane
@@ -758,7 +763,7 @@ class DataInspectorDialog(tk.Toplevel):
             ))
 
             if status == "Chưa số hoá":
-                self.tree.tag_configure("red", foreground="#C62828", font=("Segoe UI", 9, "bold"))
+                self.tree.tag_configure("red", foreground="#C62828", font=(FONT_FAMILY, 9, "bold"))
                 self.tree.item(item_id, tags=("red",))
             elif status == "Số hoá chưa đầy đủ, chính xác":
                 self.tree.tag_configure("orange", foreground="#E65100")

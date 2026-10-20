@@ -20,12 +20,24 @@ from src.gui.dialogs import (
     DataInspectorDialog
 )
 
+# Phông chữ đa nền tảng tối ưu cho cả macOS và Windows
+FONT_FAMILY = "Helvetica Neue" if sys.platform == "darwin" else "Segoe UI"
+FONT_FAMILY_MONO = "Menlo" if sys.platform == "darwin" else "Consolas"
+
 class MainWindow:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("Công cụ Xử lý & Số hóa Văn bằng Chứng chỉ THCS - Chuẩn hóa dữ liệu & Danh sách tài liệu số hóa")
-        self.root.geometry("1120x840")
-        self.root.minsize(980, 720)
+        
+        # Đặt kích thước và vị trí cửa sổ tối ưu đa nền tảng
+        sw = self.root.winfo_screenwidth()
+        sh = self.root.winfo_screenheight()
+        win_w = min(1120, max(960, sw - 60))
+        win_h = min(780, max(640, sh - 80))
+        x = max(0, (sw - win_w) // 2)
+        y = max(0, (sh - win_h) // 2)
+        self.root.geometry(f"{win_w}x{win_h}+{x}+{y}")
+        self.root.minsize(920, 620)
 
         # Cấu hình style
         self._setup_styles()
@@ -46,34 +58,68 @@ class MainWindow:
         # Bắt đầu vòng lặp kiểm tra queue cho thread-safe GUI
         self.root.after(50, self._process_queues)
 
-    def _setup_styles(self):
-        style = ttk.Style(self.root)
+        # Cập nhật layout và kích hoạt khắc phục lỗi Cocoa redraw lag trên macOS
+        self.root.update_idletasks()
+        self.root.lift()
+        if sys.platform == "darwin":
+            self.root.after(80, self._force_macos_redraw)
+
+    def _force_macos_redraw(self):
+        """Khắc phục triệt để lỗi macOS Tkinter không vẽ nội dung (trắng/trống cửa sổ) cho đến khi người dùng resize."""
         try:
-            style.theme_use('clam')
+            w = self.root.winfo_width()
+            h = self.root.winfo_height()
+            if w > 10 and h > 10:
+                self.root.geometry(f"{w+1}x{h+1}")
+                self.root.update_idletasks()
+                self.root.geometry(f"{w}x{h}")
+                self.root.update_idletasks()
+                self.root.lift()
         except Exception:
             pass
 
-        style.configure("Header.TFrame", background="#1565C0")
-        style.configure("HeaderTitle.TLabel", background="#1565C0", foreground="#FFFFFF", font=("Segoe UI", 15, "bold"))
-        style.configure("HeaderSub.TLabel", background="#1565C0", foreground="#E3F2FD", font=("Segoe UI", 10))
+    def _setup_styles(self):
+        style = ttk.Style(self.root)
+        # Chỉ áp dụng 'clam' trên Windows/Linux. Trên macOS giữ nguyên 'aqua' nguyên bản để Cocoa vẽ mượt mà.
+        if sys.platform != "darwin":
+            try:
+                style.theme_use('clam')
+            except Exception:
+                pass
 
-        style.configure("Card.TLabelframe", font=("Segoe UI", 10, "bold"))
-        style.configure("Card.TLabelframe.Label", font=("Segoe UI", 10, "bold"), foreground="#0D47A1")
+        style.configure("Card.TLabelframe", font=(FONT_FAMILY, 10, "bold"))
+        style.configure("Card.TLabelframe.Label", font=(FONT_FAMILY, 10, "bold"), foreground="#0D47A1")
 
-        style.configure("Action.TButton", font=("Segoe UI", 10, "bold"), padding=6)
-        style.configure("Inspect.TButton", font=("Segoe UI", 10, "bold"), foreground="#0D47A1")
-        style.configure("Success.TButton", font=("Segoe UI", 10, "bold"), background="#2E7D32", foreground="#FFFFFF")
-        style.configure("Stop.TButton", font=("Segoe UI", 10, "bold"), background="#C62828", foreground="#FFFFFF")
+        style.configure("Action.TButton", font=(FONT_FAMILY, 10, "bold"), padding=6)
+        style.configure("Inspect.TButton", font=(FONT_FAMILY, 10, "bold"), foreground="#0D47A1")
+        if sys.platform != "darwin":
+            style.configure("Success.TButton", font=(FONT_FAMILY, 10, "bold"), background="#2E7D32", foreground="#FFFFFF")
+            style.configure("Stop.TButton", font=(FONT_FAMILY, 10, "bold"), background="#C62828", foreground="#FFFFFF")
+        else:
+            style.configure("Success.TButton", font=(FONT_FAMILY, 10, "bold"))
+            style.configure("Stop.TButton", font=(FONT_FAMILY, 10, "bold"))
 
     def _build_ui(self):
-        # 1. Header Banner
-        hdr_frame = ttk.Frame(self.root, style="Header.TFrame", padding=(16, 12))
+        # 1. Header Banner (dùng tk.Frame và tk.Label thuần để đảm bảo hiển thị nền xanh đậm chữ trắng sắc nét trên cả macOS Aqua và Windows)
+        hdr_frame = tk.Frame(self.root, bg="#1565C0", padx=16, pady=12)
         hdr_frame.pack(fill=tk.X)
 
-        title_lbl = ttk.Label(hdr_frame, text="CÔNG CỤ XỬ LÝ & SỐ HÓA VĂN BẰNG CHỨNG CHỈ THCS", style="HeaderTitle.TLabel")
+        title_lbl = tk.Label(
+            hdr_frame,
+            text="CÔNG CỤ XỬ LÝ & SỐ HÓA VĂN BẰNG CHỨNG CHỈ THCS",
+            bg="#1565C0",
+            fg="#FFFFFF",
+            font=(FONT_FAMILY, 14, "bold")
+        )
         title_lbl.pack(anchor=tk.W)
 
-        sub_lbl = ttk.Label(hdr_frame, text="MÔ-ĐUN: CHUẨN HOÁ DỮ LIỆU & XUẤT DANH SÁCH TÀI LIỆU SỐ HÓA", style="HeaderSub.TLabel")
+        sub_lbl = tk.Label(
+            hdr_frame,
+            text="MÔ-ĐUN: CHUẨN HOÁ DỮ LIỆU & XUẤT DANH SÁCH TÀI LIỆU SỐ HÓA",
+            bg="#1565C0",
+            fg="#E3F2FD",
+            font=(FONT_FAMILY, 9)
+        )
         sub_lbl.pack(anchor=tk.W, pady=(2, 0))
 
         # Main Container
@@ -86,14 +132,14 @@ class MainWindow:
 
         row1 = ttk.Frame(unit_card)
         row1.pack(fill=tk.X, pady=2)
-        ttk.Label(row1, text="Tìm kiếm Đơn vị: ", font=("Segoe UI", 9, "bold")).pack(side=tk.LEFT)
+        ttk.Label(row1, text="Tìm kiếm Đơn vị: ", font=(FONT_FAMILY, 9, "bold")).pack(side=tk.LEFT)
 
         self.unit_search_var = tk.StringVar()
         self.unit_search_var.trace_add("write", self._on_search_unit)
         self.unit_search_entry = ttk.Entry(row1, textvariable=self.unit_search_var, width=22)
         self.unit_search_entry.pack(side=tk.LEFT, padx=(0, 10))
 
-        ttk.Label(row1, text="Chọn Đơn vị (kèm Xã/phường & Mã): ", font=("Segoe UI", 9, "bold")).pack(side=tk.LEFT)
+        ttk.Label(row1, text="Chọn Đơn vị (kèm Xã/phường & Mã): ", font=(FONT_FAMILY, 9, "bold")).pack(side=tk.LEFT)
         self.unit_combo_var = tk.StringVar()
         self.unit_combo = ttk.Combobox(row1, textvariable=self.unit_combo_var, state="readonly", width=50)
         self.unit_combo.pack(side=tk.LEFT, padx=6, fill=tk.X, expand=True)
@@ -102,26 +148,26 @@ class MainWindow:
         row2 = ttk.Frame(unit_card)
         row2.pack(fill=tk.X, pady=(6, 2))
 
-        ttk.Label(row2, text="Mã đơn vị (AA): ", font=("Segoe UI", 9)).pack(side=tk.LEFT)
-        self.unit_code_lbl = ttk.Label(row2, text="---", font=("Segoe UI", 9, "bold"), foreground="#0D47A1")
+        ttk.Label(row2, text="Mã đơn vị (AA): ", font=(FONT_FAMILY, 9)).pack(side=tk.LEFT)
+        self.unit_code_lbl = ttk.Label(row2, text="---", font=(FONT_FAMILY, 9, "bold"), foreground="#0D47A1")
         self.unit_code_lbl.pack(side=tk.LEFT, padx=(0, 12))
 
-        ttk.Label(row2, text="Tên đơn vị (AB): ", font=("Segoe UI", 9)).pack(side=tk.LEFT)
-        self.unit_name_lbl = ttk.Label(row2, text="---", font=("Segoe UI", 9, "bold"), foreground="#0D47A1")
+        ttk.Label(row2, text="Tên đơn vị (AB): ", font=(FONT_FAMILY, 9)).pack(side=tk.LEFT)
+        self.unit_name_lbl = ttk.Label(row2, text="---", font=(FONT_FAMILY, 9, "bold"), foreground="#0D47A1")
         self.unit_name_lbl.pack(side=tk.LEFT, padx=(0, 12))
 
-        ttk.Label(row2, text="Xã/phường: ", font=("Segoe UI", 9)).pack(side=tk.LEFT)
-        self.unit_commune_lbl = ttk.Label(row2, text="---", font=("Segoe UI", 9, "bold"), foreground="#7B1FA2")
+        ttk.Label(row2, text="Xã/phường: ", font=(FONT_FAMILY, 9)).pack(side=tk.LEFT)
+        self.unit_commune_lbl = ttk.Label(row2, text="---", font=(FONT_FAMILY, 9, "bold"), foreground="#7B1FA2")
         self.unit_commune_lbl.pack(side=tk.LEFT, padx=(0, 12))
 
-        ttk.Label(row2, text="Số trường: ", font=("Segoe UI", 9)).pack(side=tk.LEFT)
-        self.school_count_lbl = ttk.Label(row2, text="0 trường", font=("Segoe UI", 9, "bold"), foreground="#2E7D32")
+        ttk.Label(row2, text="Số trường: ", font=(FONT_FAMILY, 9)).pack(side=tk.LEFT)
+        self.school_count_lbl = ttk.Label(row2, text="0 trường", font=(FONT_FAMILY, 9, "bold"), foreground="#2E7D32")
         self.school_count_lbl.pack(side=tk.LEFT)
 
         row3 = ttk.Frame(unit_card)
         row3.pack(fill=tk.X, pady=(4, 0))
-        ttk.Label(row3, text="Danh sách trường: ", font=("Segoe UI", 8, "italic")).pack(side=tk.LEFT)
-        self.schools_display_lbl = ttk.Label(row3, text="(Chưa chọn đơn vị)", font=("Segoe UI", 8), foreground="#555555")
+        ttk.Label(row3, text="Danh sách trường: ", font=(FONT_FAMILY, 8, "italic")).pack(side=tk.LEFT)
+        self.schools_display_lbl = ttk.Label(row3, text="(Chưa chọn đơn vị)", font=(FONT_FAMILY, 8), foreground="#555555")
         self.schools_display_lbl.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         # 3. Card 2: Chọn Tệp hoặc Thư mục nguồn
@@ -144,7 +190,7 @@ class MainWindow:
         self.files_count_lbl = ttk.Label(
             file_card,
             text="Hệ thống tự động quét đệ quy các thư mục con và nhận diện trường/niên khóa từ Thư mục, Tên file hoặc Sheet.",
-            font=("Segoe UI", 8, "italic"),
+            font=(FONT_FAMILY, 8, "italic"),
             foreground="#555555"
         )
         self.files_count_lbl.pack(anchor=tk.W, pady=(4, 0))
@@ -199,7 +245,7 @@ class MainWindow:
             note_row,
             text="⭐ Mặc định: Luôn tự động xuất 1 file Danh sách lỗi duy nhất ({Ten_Đon_Vi}_DS_Loi.xlsx) kèm 4 cột truy vết nguồn (AC..AF), "
                  "1 file Dữ liệu gốc ({Ten_Đon_Vi}_Du_Lieu_Goc.xlsx) và ép định dạng TEXT (@) cho toàn bộ cột ngày tháng.",
-            font=("Segoe UI", 8, "italic"),
+            font=(FONT_FAMILY, 8, "italic"),
             foreground="#0D47A1"
         ).pack(anchor=tk.W)
 
@@ -213,7 +259,7 @@ class MainWindow:
         ctrl_row = ttk.Frame(prog_card)
         ctrl_row.pack(fill=tk.X)
 
-        self.status_lbl = ttk.Label(ctrl_row, text="Sẵn sàng thực hiện.", font=("Segoe UI", 9, "bold"), foreground="#0D47A1")
+        self.status_lbl = ttk.Label(ctrl_row, text="Sẵn sàng thực hiện.", font=(FONT_FAMILY, 9, "bold"), foreground="#0D47A1")
         self.status_lbl.pack(side=tk.LEFT)
 
         self.stop_btn = ttk.Button(ctrl_row, text="⏹ Hủy dừng", state=tk.DISABLED, command=self._stop_processing)
@@ -229,26 +275,26 @@ class MainWindow:
         stat_row = ttk.Frame(log_card)
         stat_row.pack(fill=tk.X, pady=(0, 4))
 
-        self.stat_total_lbl = ttk.Label(stat_row, text="Tổng học sinh: 0", font=("Segoe UI", 9, "bold"))
+        self.stat_total_lbl = ttk.Label(stat_row, text="Tổng học sinh: 0", font=(FONT_FAMILY, 9, "bold"))
         self.stat_total_lbl.pack(side=tk.LEFT, padx=(0, 20))
 
-        self.stat_da_so_hoa_lbl = ttk.Label(stat_row, text="✅ Đã số hóa đầy đủ: 0", font=("Segoe UI", 9, "bold"), foreground="#2E7D32")
+        self.stat_da_so_hoa_lbl = ttk.Label(stat_row, text="✅ Đã số hóa đầy đủ: 0", font=(FONT_FAMILY, 9, "bold"), foreground="#2E7D32")
         self.stat_da_so_hoa_lbl.pack(side=tk.LEFT, padx=(0, 20))
 
-        self.stat_chua_day_du_lbl = ttk.Label(stat_row, text="⚠️ Số hoá chưa đầy đủ: 0", font=("Segoe UI", 9, "bold"), foreground="#EF6C00")
+        self.stat_chua_day_du_lbl = ttk.Label(stat_row, text="⚠️ Số hoá chưa đầy đủ: 0", font=(FONT_FAMILY, 9, "bold"), foreground="#EF6C00")
         self.stat_chua_day_du_lbl.pack(side=tk.LEFT, padx=(0, 20))
 
-        self.stat_chua_so_hoa_lbl = ttk.Label(stat_row, text="❌ Chưa số hoá: 0", font=("Segoe UI", 9, "bold"), foreground="#C62828")
+        self.stat_chua_so_hoa_lbl = ttk.Label(stat_row, text="❌ Chưa số hoá: 0", font=(FONT_FAMILY, 9, "bold"), foreground="#C62828")
         self.stat_chua_so_hoa_lbl.pack(side=tk.LEFT)
 
         # Log text console
-        self.log_text = ScrolledText(log_card, height=8, font=("Consolas", 9), wrap=tk.WORD)
+        self.log_text = ScrolledText(log_card, height=8, font=(FONT_FAMILY_MONO, 9), wrap=tk.WORD)
         self.log_text.pack(fill=tk.BOTH, expand=True)
 
         self.log_text.tag_config("info", foreground="#000000")
-        self.log_text.tag_config("success", foreground="#2E7D32", font=("Consolas", 9, "bold"))
+        self.log_text.tag_config("success", foreground="#2E7D32", font=(FONT_FAMILY_MONO, 9, "bold"))
         self.log_text.tag_config("warning", foreground="#E65100")
-        self.log_text.tag_config("error", foreground="#C62828", font=("Consolas", 9, "bold"))
+        self.log_text.tag_config("error", foreground="#C62828", font=(FONT_FAMILY_MONO, 9, "bold"))
 
         # 7. Bottom Bar
         bottom_frame = ttk.Frame(self.root, padding=(12, 6))
