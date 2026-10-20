@@ -1,10 +1,19 @@
 import sys
 import unittest
+import tempfile
 from pathlib import Path
 import openpyxl
 
+if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+
 from src.lookup_manager import LookupManager, find_data_file
 from src.excel_processor import ExcelProcessor
+
+TEMP_DIR = Path(tempfile.gettempdir())
 
 class TestGlobalPipeline(unittest.TestCase):
     def setUp(self):
@@ -13,7 +22,7 @@ class TestGlobalPipeline(unittest.TestCase):
 
     def test_pipeline_stages_order(self):
         # Tạo file Excel giả lập gồm 2 sheets với lỗi Ngày sinh, Tên trường chưa chuẩn, và Niên khóa
-        test_file = Path("/tmp/test_pipeline_multi_sheets.xlsx")
+        test_file = TEMP_DIR / "test_pipeline_multi_sheets.xlsx"
         wb = openpyxl.Workbook()
         
         # Sheet 1: Dạng chuẩn 28 cột
@@ -105,7 +114,7 @@ class TestGlobalPipeline(unittest.TestCase):
 
     def test_cancellation_stops_immediately(self):
         """Kiểm tra khi check_cancel=True thì chương trình dừng ngay, không tiếp tục các giai đoạn sau."""
-        test_file = Path("/tmp/test_cancel.xlsx")
+        test_file = TEMP_DIR / "test_cancel.xlsx"
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "Sheet1"
@@ -142,7 +151,7 @@ class TestGlobalPipeline(unittest.TestCase):
 
     def test_empty_school_and_cohort_caching(self):
         """Kiểm tra tính năng tối ưu: nhớ nhóm trường trống cùng tệp và nhớ niên khóa trống an toàn."""
-        test_file = Path("/tmp/test_empty_cache.xlsx")
+        test_file = TEMP_DIR / "test_empty_cache.xlsx"
         wb = openpyxl.Workbook()
         # Sheet 1: trường trống, niên khóa trống, năm sinh 2005
         ws1 = wb.active
@@ -195,7 +204,7 @@ class TestGlobalPipeline(unittest.TestCase):
         2. Tùy chọn ds_loi: chỉ xuất DS_Loi khi được chọn.
         3. Tùy chọn nhat_ky: xuất Nhat_Ky_Thay_Doi.xlsx ghi nhận đầy đủ thay đổi chuẩn hóa.
         """
-        test_file = Path("/tmp/test_audit_log.xlsx")
+        test_file = TEMP_DIR / "test_audit_log.xlsx"
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "Lop 9"
@@ -212,7 +221,7 @@ class TestGlobalPipeline(unittest.TestCase):
         wb.save(test_file)
         wb.close()
 
-        out_dir = Path("/tmp/test_out_audit")
+        out_dir = TEMP_DIR / "test_out_audit"
         if out_dir.exists():
             for f in out_dir.glob("*.xlsx"):
                 f.unlink()
@@ -295,7 +304,7 @@ class TestGlobalPipeline(unittest.TestCase):
             self.assertEqual(auto_convert_tcvn3(uni_str), uni_str)
 
         # 2. Kiểm tra đọc từ file Excel chứa dữ liệu TCVN3
-        tcvn_file = Path("/tmp/test_tcvn3_file.xlsx")
+        tcvn_file = TEMP_DIR / "test_tcvn3_file.xlsx"
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "LÝp 9A"  # Sheet name TCVN3 cho 'Lớp 9A'
@@ -350,7 +359,7 @@ class TestGlobalPipeline(unittest.TestCase):
             self.assertEqual(auto_convert_legacy_encoding(vni_str), expected_uni)
 
         # Kiểm tra đọc từ file Excel chứa dữ liệu VNI
-        vni_file = Path("/tmp/test_vni_file.xlsx")
+        vni_file = TEMP_DIR / "test_vni_file.xlsx"
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "Lôùp 9A"  # VNI cho 'Lớp 9A'
