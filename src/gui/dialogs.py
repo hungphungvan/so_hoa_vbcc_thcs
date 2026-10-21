@@ -545,6 +545,9 @@ class DateFixDialog(tk.Toplevel):
                 self.result = formatted
                 self.destroy()
 
+    def _skip(self):
+        self._keep()
+
     def _keep(self):
         self.result = self.student_info.get("curr_norm", "")
         self.destroy()

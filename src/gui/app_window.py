@@ -560,6 +560,11 @@ class MainWindow:
                     res_box["result"] = (dlg.result, dlg.apply_to_group)
             except Exception as e:
                 print(f"Lỗi hiển thị dialog: {e}")
+                try:
+                    if 'dlg' in locals() and dlg and dlg.winfo_exists():
+                        dlg.destroy()
+                except Exception:
+                    pass
                 res_box["result"] = (None, False)
             finally:
                 evt.set()
