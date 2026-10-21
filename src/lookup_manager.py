@@ -59,7 +59,7 @@ def find_data_file(filename: str) -> Path:
     return get_data_dir() / filename
 
 def get_data_dir() -> Path:
-    """Xác định đường dẫn thư mục data chính (ưu tiên thư mục chứa Danh_Muc_Tra_Cuu.xlsx)."""
+    """Xác định đường dẫn thư mục data chứa tài nguyên biểu mẫu (ưu tiên thư mục chứa Danh_Muc_Tra_Cuu.xlsx)."""
     p = find_data_file("Danh_Muc_Tra_Cuu.xlsx")
     if p.is_file():
         return p.parent
@@ -74,6 +74,75 @@ def get_data_dir() -> Path:
     if cur.exists():
         return cur
     return Path.cwd()
+
+def get_persistent_data_dir() -> Path:
+    """
+    Xác định thư mục dữ liệu người dùng bền vững (Persistent Data Directory).
+    Dùng cho các tệp CẦN GHI VÀ LƯU TRỮ LÂU DÀI:
+    - CSDL SQLite: vbcc_database.db
+    - Thư mục sao lưu: backups/
+    - Cấu hình ánh xạ cột: mapping_profiles.json
+    
+    Quy tắc xác định:
+    1. Khi chạy từ mã nguồn (Development / Chay_Chuong_Trinh.command):
+       Trả về thư mục <gốc_dự_án>/data.
+    2. Khi chạy ứng dụng đóng gói độc lập (PyInstaller Frozen):
+       - Ưu tiên 1 (Portable Mode): Thư mục `data/` đặt ngay cạnh tệp thực thi (.exe trên Windows, hoặc cạnh .app trên macOS).
+         Nếu thư mục này có quyền ghi (writable), sử dụng ngay để dữ liệu mang tính di động.
+       - Ưu tiên 2 (Standard AppData / Application Support):
+         Nếu thư mục chứa ứng dụng là chỉ đọc (ví dụ macOS /Applications hoặc Windows C:\\Program Files):
+         + macOS: ~/Library/Application Support/SohoaTHCS/data
+         + Windows: %APPDATA%\\SohoaTHCS\\data
+         + Linux: ~/.local/share/SohoaTHCS/data
+    """
+    # 1. Chạy từ mã nguồn
+    if not getattr(sys, 'frozen', False):
+        cur = Path(__file__).resolve().parent.parent / "data"
+        cur.mkdir(parents=True, exist_ok=True)
+        return cur
+
+    # 2. Chạy từ ứng dụng đóng gói độc lập
+    exe_path = Path(sys.executable).resolve()
+
+    candidate_portable: Path | None = None
+    if sys.platform == "darwin" and "Contents/MacOS" in str(exe_path):
+        # exe_path: /path/to/SohoaTHCS.app/Contents/MacOS/SohoaTHCS
+        app_bundle_dir = exe_path.parents[3]  # Thư mục chứa .app
+        if str(app_bundle_dir) not in ("/Applications", "/System/Applications") and not str(app_bundle_dir).startswith("/Volumes/"):
+            candidate_portable = app_bundle_dir / "data"
+    else:
+        # Windows .exe hoặc Linux standalone binary
+        candidate_portable = exe_path.parent / "data"
+
+    # Thử kiểm tra quyền ghi tại thư mục portable
+    if candidate_portable is not None:
+        try:
+            candidate_portable.mkdir(parents=True, exist_ok=True)
+            test_file = candidate_portable / ".perm_check"
+            test_file.touch()
+            test_file.unlink()
+            return candidate_portable
+        except (PermissionError, OSError):
+            pass
+
+    # Fallback chuẩn theo hệ điều hành (Đảm bảo luôn luôn ghi được 100%)
+    if sys.platform == "darwin":
+        fallback_dir = Path.home() / "Library" / "Application Support" / "SohoaTHCS" / "data"
+    elif sys.platform == "win32":
+        appdata = os.getenv("APPDATA")
+        if appdata:
+            fallback_dir = Path(appdata) / "SohoaTHCS" / "data"
+        else:
+            fallback_dir = Path.home() / "AppData" / "Roaming" / "SohoaTHCS" / "data"
+    else:
+        xdg_data = os.getenv("XDG_DATA_HOME")
+        if xdg_data:
+            fallback_dir = Path(xdg_data) / "SohoaTHCS" / "data"
+        else:
+            fallback_dir = Path.home() / ".local" / "share" / "SohoaTHCS" / "data"
+
+    fallback_dir.mkdir(parents=True, exist_ok=True)
+    return fallback_dir
 
 class LookupManager:
     """Quản lý nạp và tra cứu từ tệp Danh_Muc_Tra_Cuu.xlsx."""

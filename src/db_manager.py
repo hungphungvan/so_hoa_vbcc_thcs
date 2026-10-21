@@ -11,13 +11,14 @@ from typing import Callable, Any
 
 try:
     from src.normalizer import check_dob_validity, determine_status_and_reason
+    from src.lookup_manager import get_persistent_data_dir
 except ImportError:
     from normalizer import check_dob_validity, determine_status_and_reason
+    from lookup_manager import get_persistent_data_dir
 
 def get_default_db_path() -> Path:
-    """Trả về đường dẫn tệp CSDL mặc định data/vbcc_database.db."""
-    base_dir = Path(__file__).resolve().parent.parent / "data"
-    base_dir.mkdir(parents=True, exist_ok=True)
+    """Trả về đường dẫn tệp CSDL mặc định vbcc_database.db trong thư mục dữ liệu bền vững."""
+    base_dir = get_persistent_data_dir()
     return base_dir / "vbcc_database.db"
 
 class DatabaseManager:

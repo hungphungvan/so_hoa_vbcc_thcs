@@ -17,7 +17,7 @@ import openpyxl
 from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter
 
-from src.lookup_manager import find_data_file, get_data_dir
+from src.lookup_manager import find_data_file, get_data_dir, get_persistent_data_dir
 from src.normalizer import (
     clean_whitespace,
     is_cell_empty,
@@ -255,12 +255,20 @@ class MappingProfileManager:
         if storage_path:
             self.storage_path = Path(storage_path)
         else:
-            self.storage_path = get_data_dir() / "mapping_profiles.json"
+            self.storage_path = get_persistent_data_dir() / "mapping_profiles.json"
         self._ensure_storage()
 
     def _ensure_storage(self):
         if not self.storage_path.exists():
             self.storage_path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                bundled = find_data_file("mapping_profiles.json")
+                if bundled.is_file() and bundled.resolve() != self.storage_path.resolve():
+                    import shutil
+                    shutil.copy2(bundled, self.storage_path)
+                    return
+            except Exception:
+                pass
             self._save_raw({"profiles": []})
 
     def _load_raw(self) -> dict:
