@@ -1,0 +1,123 @@
+from __future__ import annotations
+
+import unittest
+import tempfile
+import shutil
+from pathlib import Path
+import xlwt
+import openpyxl
+
+from src.file_converter import FileFormatConverter
+
+
+class TestFileFormatConverter(unittest.TestCase):
+    def setUp(self):
+        self.tmp_dir = Path(tempfile.mkdtemp())
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp_dir, ignore_errors=True)
+
+    def test_scan_files(self):
+        """Kiểm tra quét tìm tệp .doc và .xls trong thư mục, loại bỏ file tạm ~$."""
+        f_doc = self.tmp_dir / "so_yeu_ly_lich.doc"
+        f_doc.write_text("dummy doc content")
+
+        f_xls = self.tmp_dir / "danh_sach_hoc_sinh.xls"
+        f_xls.write_text("dummy xls content")
+
+        f_temp = self.tmp_dir / "~$so_yeu_ly_lich.doc"
+        f_temp.write_text("temp lock file")
+
+        f_txt = self.tmp_dir / "note.txt"
+        f_txt.write_text("ignored file")
+
+        results = FileFormatConverter.scan_files([self.tmp_dir])
+        self.assertEqual(len(results), 2)
+        exts = [r["ext"] for r in results]
+        self.assertIn(".doc", exts)
+        self.assertIn(".xls", exts)
+        self.assertNotIn("~$so_yeu_ly_lich.doc", [r["name"] for r in results])
+
+    def test_convert_doc_to_docx(self):
+        """Kiểm tra chuyển đổi file .doc sang .docx."""
+        doc_file = self.tmp_dir / "van_ban_mau.doc"
+        doc_file.write_text("<html><body><p>Van ban thi tot nghiep THCS</p></body></html>", encoding="utf-8")
+
+        ok, out_docx, msg = FileFormatConverter.convert_doc_to_docx(doc_file)
+        self.assertTrue(ok)
+        self.assertIsNotNone(out_docx)
+        self.assertTrue(out_docx.exists())
+        self.assertEqual(out_docx.suffix.lower(), ".docx")
+        self.assertGreater(out_docx.stat().st_size, 0)
+
+    def test_convert_xls_to_xlsx(self):
+        """Kiểm tra chuyển đổi file .xls sang .xlsx (đa sheet, định dạng ngày, số, chữ)."""
+        xls_file = self.tmp_dir / "bang_diem.xls"
+
+        wb_xls = xlwt.Workbook(encoding="utf-8")
+        ws = wb_xls.add_sheet("Lop_9A")
+        ws.write(0, 0, "STT")
+        ws.write(0, 1, "Họ và tên")
+        ws.write(0, 2, "Ngày sinh")
+        ws.write(0, 3, "Điểm trung bình")
+
+        ws.write(1, 0, 1)
+        ws.write(1, 1, "Nguyễn Văn An")
+        ws.write(1, 2, "15/05/2005")
+        ws.write(1, 3, 8.75)
+
+        wb_xls.save(str(xls_file))
+        self.assertTrue(xls_file.exists())
+
+        ok, out_xlsx, msg = FileFormatConverter.convert_xls_to_xlsx(xls_file)
+        self.assertTrue(ok)
+        self.assertIsNotNone(out_xlsx)
+        self.assertTrue(out_xlsx.exists())
+        self.assertEqual(out_xlsx.suffix.lower(), ".xlsx")
+
+        # Đọc lại bằng openpyxl để xác thực
+        wb_check = openpyxl.load_workbook(out_xlsx)
+        self.assertIn("Lop_9A", wb_check.sheetnames)
+        ws_chk = wb_check["Lop_9A"]
+        rows = list(ws_chk.iter_rows(values_only=True))
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0], ("STT", "Họ và tên", "Ngày sinh", "Điểm trung bình"))
+        self.assertEqual(rows[1][0], 1)
+        self.assertEqual(rows[1][1], "Nguyễn Văn An")
+        self.assertEqual(rows[1][3], 8.75)
+        wb_check.close()
+
+    def test_batch_convert(self):
+        """Kiểm tra chuyển đổi hàng loạt với tiến trình và tùy chọn."""
+        f1 = self.tmp_dir / "doc1.doc"
+        f1.write_text("<html><body>Test 1</body></html>")
+
+        f2 = self.tmp_dir / "sheet1.xls"
+        wb_x = xlwt.Workbook(encoding="utf-8")
+        ws = wb_x.add_sheet("S1")
+        ws.write(0, 0, "Hello")
+        wb_x.save(str(f2))
+
+        progress_records = []
+        def prog_cb(cur, tot, msg):
+            progress_records.append((cur, tot, msg))
+
+        out_sub_dir = self.tmp_dir / "converted_out"
+        res = FileFormatConverter.batch_convert(
+            files=[f1, f2],
+            output_dir=out_sub_dir,
+            delete_source=False,
+            skip_existing=True,
+            progress_callback=prog_cb
+        )
+
+        self.assertEqual(res["total"], 2)
+        self.assertEqual(res["success"], 2)
+        self.assertEqual(res["failed"], 0)
+        self.assertTrue((out_sub_dir / "doc1.docx").exists())
+        self.assertTrue((out_sub_dir / "sheet1.xlsx").exists())
+        self.assertGreater(len(progress_records), 0)
+
+
+if __name__ == '__main__':
+    unittest.main()

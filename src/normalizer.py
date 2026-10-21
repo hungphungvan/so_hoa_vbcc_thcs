@@ -277,7 +277,7 @@ def check_dob_validity(val):
     if is_cell_empty(val):
         return False, 1, "Thiếu ngày sinh"
     
-    s = str(val).strip()
+    s = str(val).strip().strip("'\"`’‘“”, ")
     m = re.match(r'^(\d{2})/(\d{2})/(\d{4})$', s)
     if not m:
         return False, 1, "Sai định dạng ngày sinh"
@@ -339,9 +339,15 @@ def format_date_to_text(value):
     if not val_str or val_str.lower() in ("none", "nan", "null"):
         return ""
 
+    # Loại bỏ dấu nháy đơn (apostrophe), nháy kép, dấu phẩy thừa do người dùng gõ text trong Excel (ví dụ '04/07/1994)
+    val_str = val_str.strip("'\"`’‘“”, \t\r\n")
+    if not val_str:
+        return ""
+
     val_clean = re.sub(r'\.0+$', '', val_str)
     # Cắt bỏ phần giờ nếu có (ví dụ ISO datetime: "2022-06-25 00:00:00" -> "2022-06-25")
     val_clean = re.sub(r'\s+\d{1,2}:\d{2}(:\d{2})?(\.\d+)?$', '', val_clean)
+    val_clean = val_clean.strip("'\"`’‘“”, ")
 
     # 3. Xử lý dạng số liền 7-8 chữ số (ví dụ: 19061998 hoặc 1061998)
     if val_clean.isdigit() and len(val_clean) in (7, 8):
@@ -373,6 +379,7 @@ def format_date_to_text(value):
 
     # 4. Gom các dấu phân cách lặp lại (//, ..., --) và khoảng trắng
     val_norm = re.sub(r'[/.\-\s]+', '/', val_clean).strip('/')
+    val_norm = val_norm.strip("'\"`’‘“”, ")
     if not val_norm:
         return ""
 
@@ -421,12 +428,16 @@ def format_grad_date_to_text(value):
     if is_cell_empty(value):
         return ""
     val_str = str(value).strip()
-    if val_str.lower() in ("trong", "trống", "xoa", "xóa"):
+    if val_str.lower() in ("trong", "trống", "xoa", "xóa", "none", "nan", "null"):
+        return ""
+    val_str = val_str.strip("'\"`’‘“”, \t\r\n")
+    if not val_str:
         return ""
 
     val_clean = re.sub(r'\.0+$', '', val_str)
     # Cắt bỏ phần giờ nếu có (ví dụ ISO datetime: "2022-06-25 00:00:00" -> "2022-06-25")
     val_clean = re.sub(r'\s+\d{1,2}:\d{2}(:\d{2})?(\.\d+)?$', '', val_clean)
+    val_clean = val_clean.strip("'\"`’‘“”, ")
 
     # Nếu là số serial Excel
     if isinstance(value, (int, float)) and 10000 <= value <= 80000:
@@ -551,7 +562,7 @@ def extract_birth_year_from_dob(dob_val) -> int | None:
     """Trích xuất năm sinh từ ngày sinh đã chuẩn hóa hoặc chuỗi gốc."""
     if is_cell_empty(dob_val):
         return None
-    s = str(dob_val).strip()
+    s = str(dob_val).strip().strip("'\"`’‘“”, ")
     m = re.search(r'\b(19\d{2}|20\d{2})\b', s)
     if m:
         return int(m.group(1))

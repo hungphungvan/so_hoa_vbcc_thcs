@@ -84,7 +84,11 @@ class LookupManager:
             self.excel_path = Path(excel_path)
             
         self.units: dict[str, dict] = {}  # {unit_key: {"key": ..., "code": ..., "name": ..., "commune": ..., "schools": [...], "school_map": {...}}}
+        self.unit_headers: list[str] = []
         self.unit_names_list: list[str] = []
+        self.all_schools_list: list[str] = []
+        self.all_schools_display_list: list[str] = []
+        self.school_details_map: dict[str, dict] = {}
         self.gender_map: dict[str, str] = {}
         self.ethnic_map: dict[str, str] = {}
         self.nationality_map: dict[str, str] = {}
@@ -102,16 +106,56 @@ class LookupManager:
             # 1. Sheet DS_Don_Vi
             if "DS_Don_Vi" in wb.sheetnames:
                 ws = wb["DS_Don_Vi"]
-                # Cột: 1: Mã trường, 2: Tên trường đã học, 3: Mã đơn vị, 4: Tên đơn vị, 5: Xã/phường
+                # Đọc dòng tiêu đề (Dòng 1) để nhận diện vị trí các cột linh hoạt
+                header_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
+                self.unit_headers = [str(c).strip() for c in header_row if c] if header_row else []
+                
+                # Mặc định theo index chuẩn: 0: Mã trường, 1: Tên trường, 2: Mã đơn vị, 3: Tên đơn vị, 4: Xã/phường
+                sch_code_idx = 0
+                sch_name_idx = 1
+                u_code_idx = 2
+                u_name_idx = 3
+                commune_idx = 4
+                extra_col_map = {}
+
+                if header_row:
+                    for c_idx, col_name in enumerate(header_row):
+                        if not col_name:
+                            continue
+                        cn_lower = str(col_name).strip().lower()
+                        if "mã trường" in cn_lower:
+                            sch_code_idx = c_idx
+                        elif "tên trường" in cn_lower:
+                            sch_name_idx = c_idx
+                        elif "mã đơn vị" in cn_lower:
+                            u_code_idx = c_idx
+                        elif "tên đơn vị" in cn_lower:
+                            u_name_idx = c_idx
+                        elif any(w in cn_lower for w in ["xã/phường", "xã / phường", "tên xã", "tên phường", "xã", "phường"]) and "mã" not in cn_lower:
+                            commune_idx = c_idx
+                        else:
+                            extra_col_map[str(col_name).strip()] = c_idx
+
                 for row in ws.iter_rows(min_row=2, values_only=True):
                     if not row:
                         continue
-                    sch_code = str(row[0] or '').strip() if len(row) > 0 else ''
-                    sch_name = str(row[1] or '').strip() if len(row) > 1 else ''
-                    u_code = str(row[2] or '').strip() if len(row) > 2 else ''
-                    u_name = str(row[3] or '').strip() if len(row) > 3 else ''
-                    commune = str(row[4] or '').strip() if len(row) > 4 else ''
-                    
+                    sch_code = str(row[sch_code_idx] or '').strip() if len(row) > sch_code_idx and row[sch_code_idx] is not None else ''
+                    sch_name = str(row[sch_name_idx] or '').strip() if len(row) > sch_name_idx and row[sch_name_idx] is not None else ''
+                    u_code = str(row[u_code_idx] or '').strip() if len(row) > u_code_idx and row[u_code_idx] is not None else ''
+                    u_name = str(row[u_name_idx] or '').strip() if len(row) > u_name_idx and row[u_name_idx] is not None else ''
+                    commune = str(row[commune_idx] or '').strip() if len(row) > commune_idx and row[commune_idx] is not None else ''
+
+                    sch_code = re.sub(r'\.0+$', '', sch_code)
+                    u_code = re.sub(r'\.0+$', '', u_code)
+
+                    # Thu thập các cột người dùng bổ sung thêm (nếu có)
+                    extra_data = {}
+                    for col_title, c_i in extra_col_map.items():
+                        if len(row) > c_i and row[c_i] is not None and str(row[c_i]).strip():
+                            val_clean = str(row[c_i]).strip()
+                            val_clean = re.sub(r'\.0+$', '', val_clean)
+                            extra_data[col_title] = val_clean
+
                     if u_name:
                         # Tạo khóa định danh duy nhất hiển thị cả Tên đơn vị, Xã/phường và Mã đơn vị
                         if commune:
@@ -125,17 +169,63 @@ class LookupManager:
                                 "code": u_code,
                                 "name": u_name,
                                 "commune": commune,
+                                "district_code": extra_data.get("Mã huyện cũ", ""),
+                                "district_name": extra_data.get("Tên Huyện cũ", ""),
+                                "province_name": extra_data.get("Tên tỉnh cũ", ""),
+                                "province_code": extra_data.get("Mã tỉnh cũ", ""),
+                                "commune_code": extra_data.get("Mã xã phường", ""),
                                 "schools": [],
-                                "school_map": {}
+                                "school_map": {},
+                                "extra": extra_data
                             }
+                        else:
+                            if extra_data:
+                                self.units[unit_key].setdefault("extra", {}).update(extra_data)
+                                if not self.units[unit_key].get("district_code") and "Mã huyện cũ" in extra_data:
+                                    self.units[unit_key]["district_code"] = extra_data["Mã huyện cũ"]
+                                if not self.units[unit_key].get("district_name") and "Tên Huyện cũ" in extra_data:
+                                    self.units[unit_key]["district_name"] = extra_data["Tên Huyện cũ"]
+                                if not self.units[unit_key].get("province_name") and "Tên tỉnh cũ" in extra_data:
+                                    self.units[unit_key]["province_name"] = extra_data["Tên tỉnh cũ"]
+                                if not self.units[unit_key].get("province_code") and "Mã tỉnh cũ" in extra_data:
+                                    self.units[unit_key]["province_code"] = extra_data["Mã tỉnh cũ"]
+                                if not self.units[unit_key].get("commune_code") and "Mã xã phường" in extra_data:
+                                    self.units[unit_key]["commune_code"] = extra_data["Mã xã phường"]
 
                         u_dict = self.units[unit_key]
                         if sch_name and sch_name not in u_dict["schools"]:
                             u_dict["schools"].append(sch_name)
                         if sch_name and sch_code:
                             u_dict["school_map"][sch_name.lower()] = sch_code
+
+                    if sch_name:
+                        dist_name = extra_data.get("Tên Huyện cũ", "")
+                        prov_name = extra_data.get("Tên tỉnh cũ", "")
+                        if dist_name and prov_name:
+                            disp_name = f"{sch_name} — [{dist_name}, {prov_name}]"
+                        elif dist_name or prov_name:
+                            disp_name = f"{sch_name} — [{dist_name or prov_name}]"
+                        else:
+                            disp_name = sch_name
+
+                        sch_detail = {
+                            "school_code": sch_code,
+                            "school_name": sch_name,
+                            "display_name": disp_name,
+                            "unit_code": u_code,
+                            "unit_name": u_name,
+                            "commune": commune,
+                            "commune_code": extra_data.get("Mã xã phường", ""),
+                            "district_code": extra_data.get("Mã huyện cũ", ""),
+                            "district_name": dist_name,
+                            "province_name": prov_name,
+                        }
+                        self.school_details_map[sch_name.lower()] = sch_detail
+                        self.school_details_map[disp_name.lower()] = sch_detail
                             
                 self.unit_names_list = sorted(list(self.units.keys()))
+                self.all_schools_list = sorted(list({v["school_name"] for v in self.school_details_map.values()}))
+                self.all_schools_display_list = sorted(list({v["display_name"] for v in self.school_details_map.values()}))
 
             # 2. Sheet Gioi_Tinh
             if "Gioi_Tinh" in wb.sheetnames:
@@ -284,3 +374,47 @@ class LookupManager:
         if s_clean in self.birthplace_map:
             return self.birthplace_map[s_clean]
         return s_clean
+
+    def get_all_schools(self) -> list[str]:
+        """Lấy toàn bộ danh sách tên trường chuẩn (không phân biệt đơn vị)."""
+        return self.all_schools_list
+
+    def get_all_schools_display(self) -> list[str]:
+        """Lấy toàn bộ danh sách tên trường hiển thị kèm [Huyện cũ, Tỉnh cũ]."""
+        return self.all_schools_display_list
+
+    def parse_school_clean_name(self, name_or_display: str) -> str:
+        """Tách lấy tên trường thuần túy nếu người dùng chọn chuỗi dạng 'Tên trường — [Huyện, Tỉnh]'."""
+        if not name_or_display:
+            return ""
+        s = str(name_or_display).strip()
+        if " — [" in s and s.endswith("]"):
+            return s.split(" — [")[0].strip()
+        elif " - [" in s and s.endswith("]"):
+            return s.split(" - [")[0].strip()
+        return s
+
+    def get_school_details(self, school_identifier: str) -> dict | None:
+        """
+        Tra cứu chi tiết trường học gồm: school_code, unit_code, unit_name,
+        commune, commune_code, district_code, district_name, province_name.
+        Hỗ trợ tìm theo tên trường thuần, tên hiển thị hoặc tìm mờ.
+        """
+        if not school_identifier:
+            return None
+        clean_name = self.parse_school_clean_name(school_identifier).lower()
+        if clean_name in self.school_details_map:
+            return self.school_details_map[clean_name]
+
+        # Khớp mềm (bỏ khoảng trắng và ký tự đặc biệt)
+        s_alphanumeric = re.sub(r'\W+', '', clean_name)
+        for k, info in self.school_details_map.items():
+            if s_alphanumeric == re.sub(r'\W+', '', k):
+                return info
+
+        # Tìm kiếm chuỗi con
+        for k, info in self.school_details_map.items():
+            if k in clean_name or clean_name in k:
+                return info
+
+        return None

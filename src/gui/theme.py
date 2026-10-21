@@ -154,12 +154,24 @@ def configure_ttk_theme(style: ttk.Style, palette: ThemePalette):
     """Cấu hình đồng bộ toàn diện cho các widget ttk theo bảng màu palette."""
     p = palette
 
-    # Thiết lập theme cơ sở: Trên Windows/Linux dùng 'clam' có thể tùy biến 100% màu sắc
-    if sys.platform != "darwin":
-        try:
+    # Thiết lập theme cơ sở: Dùng 'clam' trên mọi hệ điều hành (kể cả macOS) để kiểm soát 100% màu sắc
+    # background và foreground, tránh việc macOS Aqua ép nền tối khi máy ở Dark Mode khiến chữ ở Giao diện Sáng bị chìm đen.
+    try:
+        if style.theme_use() != 'clam':
             style.theme_use('clam')
-        except Exception:
-            pass
+    except Exception:
+        pass
+
+    # Tùy chỉnh danh sách dropdown của TCombobox qua option database
+    try:
+        if hasattr(style, 'master') and style.master:
+            style.master.option_add("*TCombobox*Listbox.background", p.ENTRY_BG)
+            style.master.option_add("*TCombobox*Listbox.foreground", p.ENTRY_FG)
+            style.master.option_add("*TCombobox*Listbox.selectBackground", p.PRIMARY)
+            style.master.option_add("*TCombobox*Listbox.selectForeground", "#FFFFFF")
+            style.master.option_add("*TCombobox*Listbox.font", FONT_LABEL)
+    except Exception:
+        pass
 
     # 1. Cấu hình toàn cục (.)
     style.configure(".",
@@ -242,38 +254,109 @@ def configure_ttk_theme(style: ttk.Style, palette: ThemePalette):
     style.configure("TCheckbutton",
         background=p.CARD_BG,
         foreground=p.TEXT,
+        indicatorbackground=p.ENTRY_BG,
+        indicatorforeground=p.PRIMARY,
+        upperbordercolor=p.CARD_BORDER,
+        lowerbordercolor=p.CARD_BORDER,
         font=FONT_LABEL
     )
     style.map("TCheckbutton",
         background=[('active', p.CARD_BG)],
-        foreground=[('active', p.PRIMARY)]
+        foreground=[('active', p.PRIMARY)],
+        indicatorbackground=[('active', p.ENTRY_BG), ('selected', p.ENTRY_BG)],
+        indicatorforeground=[('selected', p.PRIMARY)]
     )
 
     # 6. Button
     style.configure("TButton",
-        font=FONT_BUTTON_REG,
-        padding=5
+        background=p.BUTTON_BG,
+        foreground=p.BUTTON_FG,
+        bordercolor=p.CARD_BORDER,
+        darkcolor=p.CARD_BORDER,
+        lightcolor=p.CARD_BORDER,
+        relief="raised",
+        font=FONT_BUTTON,
+        padding=[10, 5]
     )
+    style.map("TButton",
+        background=[('pressed', p.PRIMARY), ('active', '#D1D5DB' if not p.is_dark else '#52525B'), ('disabled', p.BUTTON_BG)],
+        foreground=[('pressed', '#FFFFFF'), ('active', p.BUTTON_FG), ('disabled', p.MUTED)],
+        relief=[('pressed', 'sunken')]
+    )
+
+    # Action Button (Xanh hoàng gia / Lam nổi bật)
     style.configure("Action.TButton",
+        background="#2563EB",
+        foreground="#FFFFFF",
+        bordercolor="#1D4ED8",
+        darkcolor="#1D4ED8",
+        lightcolor="#60A5FA",
         font=FONT_BUTTON,
-        padding=6
+        padding=[14, 6]
     )
+    style.map("Action.TButton",
+        background=[('pressed', '#1E40AF'), ('active', '#1D4ED8'), ('disabled', p.BUTTON_BG)],
+        foreground=[('disabled', p.MUTED)]
+    )
+
+    # Module Button (Mô-đun 3)
+    style.configure("Module.TButton",
+        background="#1D4ED8" if not p.is_dark else "#2563EB",
+        foreground="#FFFFFF",
+        bordercolor="#1E40AF" if not p.is_dark else "#1D4ED8",
+        darkcolor="#1E40AF" if not p.is_dark else "#1D4ED8",
+        lightcolor="#3B82F6",
+        font=FONT_BUTTON,
+        padding=[12, 6]
+    )
+    style.map("Module.TButton",
+        background=[('pressed', '#1E3A8A'), ('active', '#1E40AF' if not p.is_dark else '#1D4ED8'), ('disabled', p.BUTTON_BG)],
+        foreground=[('disabled', p.MUTED)]
+    )
+
+    # Inspect Button (Tra cứu & Đối soát)
     style.configure("Inspect.TButton",
-        font=FONT_BUTTON,
+        background=p.BUTTON_BG,
         foreground=p.PRIMARY,
-        padding=6
+        bordercolor=p.CARD_BORDER,
+        darkcolor=p.CARD_BORDER,
+        lightcolor=p.CARD_BORDER,
+        font=FONT_BUTTON,
+        padding=[12, 5]
     )
+    style.map("Inspect.TButton",
+        background=[('pressed', p.PRIMARY), ('active', '#D1D5DB' if not p.is_dark else '#52525B'), ('disabled', p.BUTTON_BG)],
+        foreground=[('pressed', '#FFFFFF'), ('active', p.PRIMARY), ('disabled', p.MUTED)]
+    )
+
+    # Success Button (Thành công / Xanh lá)
     style.configure("Success.TButton",
-        font=FONT_BUTTON,
-        background="#15803D" if not p.is_dark else "#166534",
+        background="#16A34A" if p.is_dark else "#15803D",
         foreground="#FFFFFF",
-        padding=6
+        bordercolor="#15803D" if p.is_dark else "#166534",
+        darkcolor="#15803D" if p.is_dark else "#166534",
+        lightcolor="#4ADE80",
+        font=FONT_BUTTON,
+        padding=[14, 6]
     )
+    style.map("Success.TButton",
+        background=[('pressed', '#14532D'), ('active', '#166534'), ('disabled', p.BUTTON_BG)],
+        foreground=[('disabled', p.MUTED)]
+    )
+
+    # Stop Button (Dừng / Đỏ)
     style.configure("Stop.TButton",
-        font=FONT_BUTTON,
-        background="#B91C1C" if not p.is_dark else "#991B1B",
+        background="#DC2626" if p.is_dark else "#B91C1C",
         foreground="#FFFFFF",
-        padding=6
+        bordercolor="#991B1B",
+        darkcolor="#991B1B",
+        lightcolor="#EF4444",
+        font=FONT_BUTTON,
+        padding=[14, 6]
+    )
+    style.map("Stop.TButton",
+        background=[('pressed', '#7F1D1D'), ('active', '#991B1B'), ('disabled', p.BUTTON_BG)],
+        foreground=[('disabled', p.MUTED)]
     )
 
     # 7. Treeview
@@ -282,7 +365,8 @@ def configure_ttk_theme(style: ttk.Style, palette: ThemePalette):
         foreground=p.TREE_FG,
         fieldbackground=p.TREE_BG,
         font=FONT_TREE,
-        rowheight=26
+        rowheight=26,
+        bordercolor=p.CARD_BORDER
     )
     style.map("Treeview",
         background=[('selected', p.TREE_SELECT_BG)],
@@ -291,19 +375,69 @@ def configure_ttk_theme(style: ttk.Style, palette: ThemePalette):
     style.configure("Treeview.Heading",
         background=p.TREE_HEADING_BG,
         foreground=p.TREE_HEADING_FG,
+        bordercolor=p.CARD_BORDER,
         font=FONT_TREE_HEADING,
-        padding=5
+        padding=6
+    )
+    style.map("Treeview.Heading",
+        background=[('active', p.BUTTON_BG)]
     )
 
     # 8. Entry & Combobox
     style.configure("TEntry",
         fieldbackground=p.ENTRY_BG,
         foreground=p.ENTRY_FG,
-        font=FONT_LABEL
+        insertcolor=p.ENTRY_FG,
+        bordercolor=p.CARD_BORDER,
+        lightcolor=p.CARD_BORDER,
+        darkcolor=p.CARD_BORDER,
+        font=FONT_LABEL,
+        padding=4
     )
     style.configure("TCombobox",
         fieldbackground=p.ENTRY_BG,
         foreground=p.ENTRY_FG,
+        background=p.BUTTON_BG,
+        bordercolor=p.CARD_BORDER,
+        lightcolor=p.CARD_BORDER,
+        darkcolor=p.CARD_BORDER,
+        arrowcolor=p.TEXT,
+        insertcolor=p.ENTRY_FG,
+        font=FONT_LABEL,
+        padding=4
+    )
+    style.map("TCombobox",
+        fieldbackground=[('readonly', p.ENTRY_BG)],
+        foreground=[('readonly', p.ENTRY_FG)],
+        arrowcolor=[('active', p.PRIMARY)]
+    )
+
+    # 9. Notebook (Tabs)
+    style.configure("TNotebook",
         background=p.WINDOW_BG,
-        font=FONT_LABEL
+        bordercolor=p.CARD_BORDER,
+        darkcolor=p.CARD_BORDER,
+        lightcolor=p.CARD_BORDER,
+        borderwidth=1
+    )
+    style.configure("TNotebook.Tab",
+        font=FONT_BUTTON,
+        padding=[14, 6],
+        background=p.BUTTON_BG,
+        foreground=p.TEXT,
+        bordercolor=p.CARD_BORDER
+    )
+    style.map("TNotebook.Tab",
+        background=[('selected', p.CARD_BG), ('active', p.WINDOW_BG)],
+        foreground=[('selected', p.PRIMARY), ('active', p.PRIMARY)],
+        expand=[('selected', [1, 2, 1, 0])]
+    )
+
+    # 10. Progressbar
+    style.configure("Horizontal.TProgressbar",
+        background=p.PRIMARY,
+        troughcolor=p.ENTRY_BG,
+        bordercolor=p.CARD_BORDER,
+        darkcolor=p.PRIMARY,
+        lightcolor=p.PRIMARY
     )

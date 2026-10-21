@@ -1,0 +1,324 @@
+from __future__ import annotations
+
+import sys
+import tkinter as tk
+from tkinter import ttk, messagebox
+from typing import Any
+
+from src.gui.theme import (
+    get_theme_palette, IS_DARK,
+    FONT_TITLE, FONT_SUBTITLE, FONT_CARD_TITLE, FONT_LABEL, FONT_LABEL_BOLD,
+    FONT_BUTTON, FONT_BUTTON_REG, FONT_MUTED
+)
+from src.smart_merger import TARGET_COLUMNS, MappingProfileManager, auto_suggest_mapping
+
+EMPTY_OPTION = "-- Để trống --"
+
+
+class ColumnMappingDialog(tk.Toplevel):
+    """
+    Hộp thoại Cấu hình Ánh xạ Cột thông minh (Ghép & Chuẩn hóa):
+    - Hiển thị 28 cột chuẩn của mẫu Mau_DS_Cap_Bang_THCS.xlsx.
+    - Điền sẵn gợi ý khớp từ khóa & khớp mờ (Fuzzy matching).
+    - Cho phép người dùng kiểm tra, chỉnh sửa từng cột bằng Combobox hoặc chọn để trống.
+    - Cho phép đặt tên Profile và lưu lại vào mapping_profiles.json để tự động hóa cho các lần sau.
+    """
+
+    def __init__(
+        self,
+        parent: tk.Tk | tk.Toplevel,
+        file_name: str,
+        sheet_name: str,
+        raw_headers: list[str],
+        formatted_headers: list[str],
+        suggested_mapping: dict[int, int | None],
+        profile_mgr: MappingProfileManager | None = None,
+        is_dark: bool | None = None
+    ):
+        super().__init__(parent)
+        self.is_dark = IS_DARK if is_dark is None else is_dark
+        self.palette = get_theme_palette(self.is_dark)
+        self.profile_mgr = profile_mgr or MappingProfileManager()
+
+        self.file_name = file_name
+        self.sheet_name = sheet_name
+        self.raw_headers = raw_headers
+        self.formatted_headers = formatted_headers
+        self.suggested_mapping = suggested_mapping
+
+        # Kết quả trả về: (mapping, profile_name, should_skip)
+        self.result: tuple[dict[int, int | None] | None, str | None, bool] = (None, None, True)
+
+        self.title("🧩 Cấu hình Ánh xạ Cột - Ghép & Chuẩn hóa")
+        self.geometry("920x680")
+        self.minsize(800, 550)
+        self.configure(bg=self.palette.WINDOW_BG)
+
+        # Chặn tương tác ngoài dialog (modal)
+        self.transient(parent)
+        self.grab_set()
+
+        # Biến giao diện
+        default_prof_name = f"Mẫu {file_name.rsplit('.', 1)[0]} ({len(raw_headers)} cột)"
+        self.profile_name_var = tk.StringVar(value=default_prof_name)
+        self.saved_profile_var = tk.StringVar()
+
+        # Danh sách combobox và biến cho 28 cột
+        self.target_vars: dict[int, tk.StringVar] = {}
+        self.combo_options = [EMPTY_OPTION] + formatted_headers
+
+        self._build_ui()
+        self._apply_mapping(self.suggested_mapping)
+        self._center_window(parent)
+
+    def _center_window(self, parent):
+        self.update_idletasks()
+        pw = parent.winfo_width()
+        ph = parent.winfo_height()
+        px = parent.winfo_rootx()
+        py = parent.winfo_rooty()
+        w = self.winfo_width()
+        h = self.winfo_height()
+        x = max(0, px + (pw - w) // 2)
+        y = max(0, py + (ph - h) // 2)
+        self.geometry(f"{w}x{h}+{x}+{y}")
+
+    def _build_ui(self):
+        p = self.palette
+
+        # 1. Header Banner
+        hdr_frame = tk.Frame(self, bg=p.HEADER_BANNER_BG, padx=16, pady=10)
+        hdr_frame.pack(fill=tk.X)
+
+        title_lbl = tk.Label(
+            hdr_frame,
+            text="🧩 CẤU HÌNH ÁNH XẠ CỘT VÀO MẪU CHUẨN 28 CỘT",
+            font=FONT_TITLE,
+            bg=p.HEADER_BANNER_BG,
+            fg=p.HEADER_BANNER_FG
+        )
+        title_lbl.pack(anchor=tk.W)
+
+        sub_text = f"Tệp nguồn: {self.file_name}  |  Sheet: '{self.sheet_name}'  |  Tìm thấy: {len(self.raw_headers)} cột"
+        sub_lbl = tk.Label(
+            hdr_frame,
+            text=sub_text,
+            font=FONT_SUBTITLE,
+            bg=p.HEADER_BANNER_BG,
+            fg=p.HEADER_SUB_FG
+        )
+        sub_lbl.pack(anchor=tk.W, pady=(2, 0))
+
+        # 2. Profile Bar (Lưu & Nạp Profile)
+        prof_card = ttk.LabelFrame(self, text="Cấu hình nhận diện Profile", padding=8)
+        prof_card.pack(fill=tk.X, padx=12, pady=(8, 4))
+
+        pr1 = ttk.Frame(prof_card)
+        pr1.pack(fill=tk.X)
+
+        ttk.Label(pr1, text="Tên Profile lưu lại:", font=FONT_LABEL_BOLD).pack(side=tk.LEFT, padx=(0, 6))
+        prof_entry = ttk.Entry(pr1, textvariable=self.profile_name_var, font=FONT_LABEL, width=32)
+        prof_entry.pack(side=tk.LEFT, padx=(0, 16))
+
+        # Danh sách profile đã lưu
+        all_profiles = self.profile_mgr.list_profiles()
+        prof_names = [f"{p_item.get('name', 'Profile')} ({p_item.get('id', '')})" for p_item in all_profiles]
+
+        if prof_names:
+            ttk.Label(pr1, text="Nạp từ Profile cũ:", font=FONT_LABEL).pack(side=tk.LEFT, padx=(0, 6))
+            self.saved_prof_cb = ttk.Combobox(pr1, textvariable=self.saved_profile_var, values=prof_names, state="readonly", width=30)
+            self.saved_prof_cb.pack(side=tk.LEFT, padx=(0, 8))
+            self.saved_prof_cb.bind("<<ComboboxSelected>>", self._on_select_saved_profile)
+
+        # 3. Thanh tác vụ nhanh
+        quick_bar = ttk.Frame(self, padding=(12, 4))
+        quick_bar.pack(fill=tk.X)
+
+        ttk.Label(
+            quick_bar,
+            text="💡 Mẹo: Những cột không có trong file nguồn có thể chọn '-- Để trống --'. Hệ thống sẽ tự điền giá trị mặc định chuẩn.",
+            font=FONT_MUTED,
+            foreground=p.PRIMARY
+        ).pack(side=tk.LEFT)
+
+        ttk.Button(quick_bar, text="🔄 Tự động khớp lại", command=self._on_auto_match).pack(side=tk.RIGHT, padx=(4, 0))
+        ttk.Button(quick_bar, text="🧹 Để trống tất cả", command=self._on_clear_all).pack(side=tk.RIGHT)
+
+        # 4. Bảng ánh xạ cuộn (Scrollable Canvas)
+        table_container = ttk.Frame(self, padding=(12, 4))
+        table_container.pack(fill=tk.BOTH, expand=True)
+
+        # Tiêu đề bảng
+        t_header = tk.Frame(table_container, bg=p.TREE_HEADING_BG, padx=6, pady=6)
+        t_header.pack(fill=tk.X)
+
+        tk.Label(t_header, text="STT", font=FONT_LABEL_BOLD, bg=p.TREE_HEADING_BG, fg=p.TREE_HEADING_FG, width=4, anchor="center").pack(side=tk.LEFT)
+        tk.Label(t_header, text="Cột đích (Mẫu chuẩn 28)", font=FONT_LABEL_BOLD, bg=p.TREE_HEADING_BG, fg=p.TREE_HEADING_FG, width=28, anchor="w").pack(side=tk.LEFT, padx=(6, 0))
+        tk.Label(t_header, text="Yêu cầu", font=FONT_LABEL_BOLD, bg=p.TREE_HEADING_BG, fg=p.TREE_HEADING_FG, width=12, anchor="center").pack(side=tk.LEFT, padx=(6, 0))
+        tk.Label(t_header, text="👉 Cột nguồn tương ứng", font=FONT_LABEL_BOLD, bg=p.TREE_HEADING_BG, fg=p.TREE_HEADING_FG, width=32, anchor="w").pack(side=tk.LEFT, padx=(6, 0))
+        tk.Label(t_header, text="Giá trị mặc định nếu để trống", font=FONT_LABEL_BOLD, bg=p.TREE_HEADING_BG, fg=p.TREE_HEADING_FG, anchor="w").pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(6, 0))
+
+        # Canvas cuộn
+        canvas_frame = ttk.Frame(table_container)
+        canvas_frame.pack(fill=tk.BOTH, expand=True)
+
+        self.canvas = tk.Canvas(canvas_frame, bg=p.WINDOW_BG, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(canvas_frame, orient=tk.VERTICAL, command=self.canvas.yview)
+        self.scrollable_frame = tk.Frame(self.canvas, bg=p.WINDOW_BG)
+
+        self.scrollable_frame.bind(
+            "<Configure>",
+            lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        )
+
+        self.canvas_window = self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        self.canvas.configure(yscrollcommand=scrollbar.set)
+
+        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self.canvas.bind("<Configure>", self._on_canvas_configure)
+        self._bind_mousewheel(self.canvas)
+
+        # Đổ 28 dòng cột vào scrollable_frame
+        for col_def in TARGET_COLUMNS:
+            t_idx = col_def["idx"]
+            t_name = col_def["name"]
+            t_req = col_def["required"]
+            t_def = col_def["default"]
+
+            row_bg = p.CARD_BG if t_idx % 2 == 0 else p.WINDOW_BG
+            r_frame = tk.Frame(self.scrollable_frame, bg=row_bg, padx=6, pady=4)
+            r_frame.pack(fill=tk.X, expand=True)
+
+            # Cột 1: STT
+            tk.Label(r_frame, text=str(t_idx), font=FONT_LABEL, bg=row_bg, fg=p.TEXT, width=4, anchor="center").pack(side=tk.LEFT)
+
+            # Cột 2: Tên cột đích
+            tk.Label(r_frame, text=t_name, font=FONT_LABEL_BOLD if t_req else FONT_LABEL, bg=row_bg, fg=p.TEXT, width=28, anchor="w").pack(side=tk.LEFT, padx=(6, 0))
+
+            # Cột 3: Tính chất
+            req_text = "⭐ Bắt buộc" if t_req else ("Khuyên dùng" if t_idx in (9, 14, 15) else "Tùy chọn")
+            req_fg = p.DANGER if t_req else (p.WARNING if t_idx in (9, 14, 15) else p.MUTED)
+            tk.Label(r_frame, text=req_text, font=FONT_MUTED, bg=row_bg, fg=req_fg, width=12, anchor="center").pack(side=tk.LEFT, padx=(6, 0))
+
+            # Cột 4: Combobox Cột nguồn
+            c_var = tk.StringVar(value=EMPTY_OPTION)
+            self.target_vars[t_idx] = c_var
+
+            cb = ttk.Combobox(r_frame, textvariable=c_var, values=self.combo_options, state="readonly", width=30)
+            cb.pack(side=tk.LEFT, padx=(6, 0))
+
+            # Cột 5: Ghi chú mặc định
+            tk.Label(r_frame, text=t_def, font=FONT_MUTED, bg=row_bg, fg=p.MUTED, anchor="w").pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(6, 0))
+
+        # 5. Thanh nút bấm điều khiển ở đáy
+        btn_bar = ttk.Frame(self, padding=(12, 10))
+        btn_bar.pack(fill=tk.X)
+
+        ttk.Button(btn_bar, text="⏹️ Hủy bỏ toàn bộ", command=self._on_cancel).pack(side=tk.LEFT)
+        ttk.Button(btn_bar, text="⏭️ Bỏ qua Sheet này", command=self._on_skip).pack(side=tk.LEFT, padx=(8, 0))
+
+        save_btn = ttk.Button(btn_bar, text="✅ Xác nhận & Lưu Profile", command=self._on_save_and_confirm)
+        save_btn.pack(side=tk.RIGHT)
+        save_btn.focus_set()
+
+    def _on_canvas_configure(self, event):
+        self.canvas.itemconfig(self.canvas_window, width=event.width)
+
+    def _bind_mousewheel(self, widget):
+        def _on_mousewheel(event):
+            if sys.platform == "darwin":
+                self.canvas.yview_scroll(int(-1 * event.delta), "units")
+            else:
+                self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        widget.bind_all("<MouseWheel>", _on_mousewheel)
+
+    def _apply_mapping(self, mapping: dict[int, int | None]):
+        """Cập nhật giá trị hiển thị trên combobox theo mapping."""
+        for t_idx, s_idx in mapping.items():
+            if t_idx not in self.target_vars:
+                continue
+            if s_idx is not None and 0 <= s_idx < len(self.formatted_headers):
+                self.target_vars[t_idx].set(self.formatted_headers[s_idx])
+            else:
+                self.target_vars[t_idx].set(EMPTY_OPTION)
+
+    def _get_current_mapping(self) -> dict[int, int | None]:
+        """Lấy bản đồ ánh xạ hiện tại từ các combobox."""
+        mapping: dict[int, int | None] = {}
+        for t_idx, c_var in self.target_vars.items():
+            val = c_var.get()
+            if val == EMPTY_OPTION or not val:
+                mapping[t_idx] = None
+            else:
+                try:
+                    s_idx = self.formatted_headers.index(val)
+                    mapping[t_idx] = s_idx
+                except ValueError:
+                    mapping[t_idx] = None
+        return mapping
+
+    def _on_auto_match(self):
+        """Khớp lại tự động bằng thuật toán."""
+        new_map = auto_suggest_mapping(self.raw_headers)
+        self._apply_mapping(new_map)
+
+    def _on_clear_all(self):
+        """Đặt tất cả về Để trống."""
+        for c_var in self.target_vars.values():
+            c_var.set(EMPTY_OPTION)
+
+    def _on_select_saved_profile(self, event):
+        """Khi người dùng chọn một Profile đã lưu."""
+        selected_text = self.saved_profile_var.get()
+        if not selected_text:
+            return
+        all_profiles = self.profile_mgr.list_profiles()
+        for p_item in all_profiles:
+            match_str = f"{p_item.get('name', 'Profile')} ({p_item.get('id', '')})"
+            if match_str == selected_text:
+                str_map = p_item.get("mapping", {})
+                converted_map = {int(k): v for k, v in str_map.items()}
+                self._apply_mapping(converted_map)
+                self.profile_name_var.set(p_item.get("name", self.profile_name_var.get()))
+                break
+
+    def _on_save_and_confirm(self):
+        """Xác nhận cấu hình ánh xạ và lưu profile."""
+        current_map = self._get_current_mapping()
+
+        # Kiểm tra cột bắt buộc Họ và tên (Cột 5)
+        if current_map.get(5) is None:
+            confirm = messagebox.askyesno(
+                "Cảnh báo thiếu Họ và tên",
+                "Bạn chưa chọn cột nguồn cho 'Họ, chữ đệm và tên' (Cột 5).\n\n"
+                "Nếu không có cột Họ tên, hệ thống có thể không phân biệt được dòng học sinh.\n"
+                "Bạn có chắc chắn muốn tiếp tục không?",
+                parent=self
+            )
+            if not confirm:
+                return
+
+        prof_name = self.profile_name_var.get().strip() or f"Mẫu {self.file_name}"
+        self.result = (current_map, prof_name, False)
+        self.grab_release()
+        self.destroy()
+
+    def _on_skip(self):
+        """Bỏ qua sheet này."""
+        self.result = (None, None, True)
+        self.grab_release()
+        self.destroy()
+
+    def _on_cancel(self):
+        """Hủy bỏ toàn bộ quá trình."""
+        confirm = messagebox.askyesno(
+            "Xác nhận hủy",
+            "Bạn có chắc chắn muốn hủy bỏ toàn bộ quá trình ghép không?",
+            parent=self
+        )
+        if confirm:
+            self.result = (None, None, False)
+            self.grab_release()
+            self.destroy()

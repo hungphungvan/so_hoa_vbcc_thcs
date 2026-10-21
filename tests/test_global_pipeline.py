@@ -390,5 +390,34 @@ class TestGlobalPipeline(unittest.TestCase):
         self.assertEqual(students[1]["school"], "THCS Lê Lợi")
         print("--> Test VNI Auto Conversion PASSED successfully!")
 
+    def test_quote_and_date_format_normalization(self):
+        """Kiểm tra chuẩn hóa ngày sinh khi có dấu nháy đơn '04/07/1994, định dạng Date hoặc số serial."""
+        import datetime
+        from src.normalizer import format_date_to_text, check_dob_validity, format_grad_date_to_text
+
+        cases = [
+            ("04/07/1994", "04/07/1994"),
+            ("'04/07/1994", "04/07/1994"),
+            ("'04/07/1994'", "04/07/1994"),
+            ("’04/07/1994", "04/07/1994"),
+            ("'4/7/1994", "04/07/1994"),
+            ("'1994-07-04", "04/07/1994"),
+            (datetime.datetime(1994, 7, 4), "04/07/1994"),
+            (datetime.date(1994, 7, 4), "04/07/1994"),
+            (34519, "04/07/1994"),
+        ]
+
+        for raw_val, expected in cases:
+            res = format_date_to_text(raw_val)
+            self.assertEqual(res, expected)
+            is_valid, err_code, err_desc = check_dob_validity(res)
+            self.assertTrue(is_valid, f"Thất bại với {raw_val}: {err_desc}")
+
+            # Kiểm tra cả hàm format_grad_date_to_text
+            grad_res = format_grad_date_to_text(raw_val)
+            self.assertEqual(grad_res, expected)
+
+        print("--> Test Quote Prefix & Date Format PASSED successfully!")
+
 if __name__ == "__main__":
     unittest.main()

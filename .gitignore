@@ -18,13 +18,26 @@ dist/
 .AppleDouble
 .LSOverride
 
-# Microsoft Excel temp files
+# Microsoft Office temp files
 ~$*.xlsx
 ~$*.xls
+~$*.docx
+~$*.doc
 
 # Thư mục và file dữ liệu xuất ra của chương trình
-Ket_Qua_So_Hoa/
+Ket_Qua_*/
 Da_Chuan_Hoa/
 Tach_Theo_Truong/
 *_TongHop.xlsx
 KetQuaNhap*.xlsx
+test_*.xlsx
+test_*.docx
+*.bak
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+data/backups/
+data/*.db
+data/*.db-wal
+data/*.db-shm

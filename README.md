@@ -65,11 +65,12 @@ so_hoa_vbcc_thcs/
 
 ---
 
-## 📖 CẤU TRÚC 2 MÔ-ĐUN NGHIỆP VỤ CỐT LÕI
+## 📖 CẤU TRÚC 3 MÔ-ĐUN NGHIỆP VỤ
 
-Hệ thống tập trung vào 2 mô-đun nghiệp vụ chuẩn:
+Hệ thống cung cấp 3 mô-đun nghiệp vụ hoàn chỉnh:
 1. **MÔ-ĐUN 1: CHUẨN HOÁ DỮ LIỆU CẤP BẰNG THCS** (Biểu mẫu 28 cột chuẩn theo `data/Mau_DS_Cap_Bang_THCS.xlsx`).
 2. **MÔ-ĐUN 2: XUẤT DANH SÁCH TÀI LIỆU SỐ HÓA** (Biểu mẫu 11 cột chuẩn theo `data/Mau_DS_Tai_Lieu_So_Hoa.xlsx`).
+3. **MÔ-ĐUN 3: TIỆN ÍCH NHẬP & TÁCH EXCEL THEO CỘT TÙY BIẾN** (Xử lý tệp hỗn hợp nhiều đơn vị, gộp/tách linh hoạt theo bất kỳ cột nào có cùng cấu trúc tiêu đề).
 
 ---
 
@@ -167,6 +168,32 @@ Mô-đun 2 tự động tổng hợp hồ sơ số hóa từ kết quả của M
 
 ---
 
+### 🔷 MÔ-ĐUN 3: BỘ TIỆN ÍCH NHẬP & TÁCH EXCEL THEO CỘT TÙY BIẾN
+
+Mô-đun 3 là công cụ tiền xử lý và hậu xử lý dữ liệu mạnh mẽ, giúp giải quyết triệt để các tình huống thực tế:
+- **Tình huống 1:** Nhận được **file hỗn hợp của nhiều đơn vị/phòng GD&ĐT** $\rightarrow$ Tách nhanh thành các file độc lập theo Cột *Đơn vị* để nạp vào Mô-đun 1 & 2.
+- **Tình huống 2:** Có nhiều file Excel lẻ từ các trường/năm cần gộp chung lại thành 1 file tổng $\rightarrow$ Tự động gộp dữ liệu và đánh lại STT.
+
+#### Hai tính năng cốt lõi:
+1. **📤 Tách tệp theo cột tùy chọn (Custom Splitter):**
+   - Cho phép người dùng tự do chọn **bất kỳ cột nào** làm căn cứ tách (ví dụ: *Tên đơn vị, Tên trường, Năm tốt nghiệp, Xếp loại...*).
+   - Có bảng **Xem trước (Preview)**: Thống kê số lượng nhóm và số dòng dữ liệu của từng file con dự kiến trước khi bấm tách.
+   - **Giữ nguyên khối Header & Định dạng:** Toàn bộ banner, tiêu đề, font chữ và độ rộng cột được sao chép nguyên vẹn sang mọi file con.
+   - Tự động đánh lại STT liên tục ($1, 2, 3...$) cho từng file con.
+
+2. **📥 Nhập / Gộp nhiều tệp (Header-matching Merger):**
+   - Hỗ trợ chọn cùng lúc nhiều file hoặc chọn cả thư mục.
+   - **Cơ chế kiểm tra tính tương thích tiêu đề (Header Validation):** So sánh số cột và tên cột của các file với file mẫu để phát hiện kịp thời các file lệch cấu trúc.
+   - Cắt bỏ banner và tiêu đề lặp lại của các file sau, nối tiếp phần thân dữ liệu mượt mà.
+   - Tự động đánh lại STT toàn bảng từ $1 \rightarrow \text{Tổng số dòng}$.
+   - Tùy chọn thêm cột ghi rõ *Tệp nguồn gốc* để dễ dàng truy vết sau này.
+
+#### Thuật toán nhận diện dòng dữ liệu chuẩn xác:
+- **Dòng dữ liệu hợp lệ:** Bắt buộc thỏa mãn đồng thời: **Có STT hợp lệ VÀ Có Họ và tên hợp lệ** (loại bỏ 100% dòng banner, dòng tiêu đề ngắt trang, dòng trắng và dòng chữ ký chân trang).
+- **Cơ chế dừng sớm (Early Exit):** Tự động kết thúc quét ngay khi phát hiện **15 dòng liên tiếp có STT trống**, triệt tiêu tình trạng đơ/chậm do dòng trống ảo cuối file Excel.
+
+---
+
 ## 📦 HỆ THỐNG XUẤT TỆP ĐA DẠNG & BÁO CÁO KIỂM SOÁT
 
 Sau khi chuẩn hóa, toàn bộ tệp kết quả được lưu tại thư mục `Ket_Qua_So_Hoa/`. Giao diện phần mềm cung cấp **4 cột tùy chọn xuất khoa học** cùng **ràng buộc an toàn (Validation Guard)**: người dùng bắt buộc chọn ít nhất 01 tùy chọn trước khi bấm *Bắt đầu xử lý*.
@@ -232,7 +259,7 @@ Giao diện ứng dụng được thiết kế tỉ mỉ, tối ưu hóa công t
 Phần mềm tích hợp mô-đun cập nhật thông minh ([`src/updater.py`](src/updater.py)):
 - **Kiểm tra tự động ngầm**: Mỗi khi mở ứng dụng, một luồng ngầm (`daemon thread`) sẽ truy vấn GitHub Releases API để kiểm tra xem có bản phát hành mới hơn phiên bản hiện tại hay không mà hoàn toàn không làm đơ giật giao diện.
 - **Nút trạng thái thông minh**:
-  - Khi đang ở bản mới nhất: Hiển thị `🔄 Bản v1.0.0` (click vào để kiểm tra thủ công bất kỳ lúc nào).
+  - Khi đang ở bản mới nhất: Hiển thị `🔄 Bản v2.0.0` (click vào để kiểm tra thủ công bất kỳ lúc nào).
   - Khi có bản phát hành mới: Tự động đổi thành `🔥 Có bản mới [vX.X]!` và thông báo nổi bật trên console nhật ký.
 - **Cơ chế SSL Fallback thông minh**: Tự động xử lý chứng chỉ CA trên macOS (vượt qua hoàn toàn lỗi phổ biến `CERTIFICATE_VERIFY_FAILED` trên máy Mac chưa cài chứng chỉ Python hoặc môi trường PyInstaller).
 - **1-Click Cập nhật**: Bấm vào nút cập nhật sẽ hiển thị Release Notes chi tiết và mở trực tiếp trang tải bản mới trên trình duyệt web mặc định.

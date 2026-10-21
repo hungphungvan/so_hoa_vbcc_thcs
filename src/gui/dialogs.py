@@ -197,6 +197,10 @@ class SchoolBlockDialog(tk.Toplevel):
         if not val:
             messagebox.showwarning("Cảnh báo", "Vui lòng chọn Tên trường chuẩn từ danh mục!", parent=self)
             return
+        if " — [" in val and val.endswith("]"):
+            val = val.split(" — [")[0].strip()
+        elif " - [" in val and val.endswith("]"):
+            val = val.split(" - [")[0].strip()
         self.result = val
         self.apply_to_all_similar = self.remember_var.get()
         self.destroy()

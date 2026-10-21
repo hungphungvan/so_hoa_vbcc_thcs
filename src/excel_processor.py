@@ -189,7 +189,7 @@ class ExcelProcessor:
     def extract_students_from_file(
         self,
         file_path: Path,
-        allowed_schools: list[str],
+        allowed_schools: list[str] | None = None,
         log_callback=None,
         check_cancel=None
     ) -> list[dict]:
@@ -204,6 +204,9 @@ class ExcelProcessor:
                 log_callback(msg, level)
             else:
                 print(msg)
+
+        if not allowed_schools and self.lookup_mgr:
+            allowed_schools = self.lookup_mgr.get_all_schools()
 
         try:
             wb_in = openpyxl.load_workbook(file_path, data_only=True)
@@ -388,7 +391,7 @@ class ExcelProcessor:
     def process_all_files(
         self,
         files: list[Path],
-        unit_info: dict | str,
+        unit_info: dict | str | None = None,
         unit_name: str = "",
         allowed_schools: list[str] | None = None,
         output_dir: Path | None = None,
@@ -398,7 +401,8 @@ class ExcelProcessor:
         progress_callback=None,
         check_cancel=None,
         cache_state=None,
-        save_individual_file: bool = False
+        save_individual_file: bool = False,
+        base_input_dir: Path | None = None
     ) -> tuple[list[dict], dict]:
         """
         Quy trình chuẩn hóa toàn cục xuyên suốt tất cả các File & Sheet theo 4 bước tuần tự:
@@ -420,13 +424,23 @@ class ExcelProcessor:
             u_code = unit_info.get("code", "")
             u_name = unit_info.get("name", "")
             u_schools = unit_info.get("schools", [])
-        else:
+        elif unit_info is not None:
             u_code = str(unit_info)
             u_name = unit_name
-            u_schools = allowed_schools or []
-            eff_unit_info = self.lookup_mgr.get_unit_info(u_name) or {
+            u_schools = allowed_schools or (self.lookup_mgr.get_all_schools() if self.lookup_mgr else [])
+            eff_unit_info = (self.lookup_mgr.get_unit_info(u_name) if self.lookup_mgr else None) or {
                 "code": u_code,
                 "name": u_name,
+                "schools": u_schools,
+                "school_map": {}
+            }
+        else:
+            u_code = ""
+            u_name = ""
+            u_schools = allowed_schools or (self.lookup_mgr.get_all_schools() if self.lookup_mgr else [])
+            eff_unit_info = {
+                "code": "",
+                "name": "",
                 "schools": u_schools,
                 "school_map": {}
             }
@@ -672,9 +686,11 @@ class ExcelProcessor:
                         "is_in_block": True
                     } for st in grp[:15]]
                 }
+                dialog_schools = self.lookup_mgr.get_all_schools_display() if self.lookup_mgr else allowed_schools_clean
                 if dialog_callback:
-                    res_sch, rem = dialog_callback("school_block", block_info, allowed_schools_clean, default_ctx_school)
-                    applied_sch = res_sch if res_sch is not None else ""
+                    res_sch, rem = dialog_callback("school_block", block_info, dialog_schools, default_ctx_school)
+                    clean_res = self.lookup_mgr.parse_school_clean_name(res_sch) if self.lookup_mgr else res_sch
+                    applied_sch = clean_res if clean_res is not None else ""
                     if rem and applied_sch:
                         school_cache[empty_file_key] = applied_sch
                 else:
@@ -719,9 +735,11 @@ class ExcelProcessor:
                 } for st in grp[:15]]
             }
 
+            dialog_schools = self.lookup_mgr.get_all_schools_display() if self.lookup_mgr else allowed_schools_clean
             if dialog_callback:
-                res_sch, rem = dialog_callback("school_block", block_info, allowed_schools_clean, default_sugg)
-                applied_sch = res_sch if res_sch is not None else ""
+                res_sch, rem = dialog_callback("school_block", block_info, dialog_schools, default_sugg)
+                clean_res = self.lookup_mgr.parse_school_clean_name(res_sch) if self.lookup_mgr else res_sch
+                applied_sch = clean_res if clean_res is not None else ""
                 if rem and applied_sch:
                     school_cache[raw_sch] = applied_sch
             else:
@@ -948,12 +966,77 @@ class ExcelProcessor:
             row_vals[24] = status_y
             row_vals[25] = reason_z if reason_z else None
 
+            # Truy xuất chi tiết hành chính từ DS_Don_Vi theo Tên trường đã chuẩn hóa
+            sch_details = self.lookup_mgr.get_school_details(st_item.get("school")) if self.lookup_mgr else None
+            if not sch_details and u_name:
+                sch_details = {
+                    "unit_code": u_code,
+                    "unit_name": u_name,
+                    "district_name": eff_unit_info.get("district_name", "") if isinstance(eff_unit_info, dict) else "",
+                    "province_name": eff_unit_info.get("province_name", "") if isinstance(eff_unit_info, dict) else "",
+                    "district_code": eff_unit_info.get("district_code", "") if isinstance(eff_unit_info, dict) else "",
+                    "commune": eff_unit_info.get("commune", "") if isinstance(eff_unit_info, dict) else "",
+                    "commune_code": eff_unit_info.get("commune_code", "") if isinstance(eff_unit_info, dict) else "",
+                    "school_code": self.lookup_mgr.get_school_code(eff_unit_info, st_item.get("school")) if self.lookup_mgr else ""
+                }
+            elif not sch_details:
+                sch_details = {}
+
+            u_code_cur = sch_details.get("unit_code") or u_code or ""
+            u_name_cur = sch_details.get("unit_name") or u_name or ""
+            dist_name = sch_details.get("district_name") or ""
+            prov_name = sch_details.get("province_name") or ""
+            dist_code = sch_details.get("district_code") or ""
+            commune = sch_details.get("commune") or ""
+            commune_code = sch_details.get("commune_code") or ""
+            sch_code = sch_details.get("school_code") or ""
+
+            # Cột R (Index 17): Địa danh nơi cơ quan cấp bằng đặt trụ sở
+            # Fallback: "{Tên huyện cũ}-{Tên tỉnh cũ}" nếu ô bị trống
+            if is_cell_empty(row_vals[17]):
+                if dist_name and prov_name:
+                    row_vals[17] = f"{dist_name}-{prov_name}"
+                elif dist_name or prov_name:
+                    row_vals[17] = dist_name or prov_name
+                else:
+                    row_vals[17] = None
+            else:
+                row_vals[17] = clean_whitespace(str(row_vals[17]))
+
+            # Cột T (Index 19): Tên cơ quan cấp bằng
+            # Fallback: "Phòng GD&ĐT {Tên huyện cũ}" nếu ô bị trống
+            if is_cell_empty(row_vals[19]):
+                if dist_name:
+                    row_vals[19] = f"Phòng GD&ĐT {dist_name}"
+                else:
+                    row_vals[19] = None
+            else:
+                row_vals[19] = clean_whitespace(str(row_vals[19]))
+
             # Cột AA (Index 26): Mã đơn vị
-            row_vals[26] = u_code
+            row_vals[26] = u_code_cur if u_code_cur else None
             # Cột AB (Index 27): Tên đơn vị
-            row_vals[27] = u_name
+            row_vals[27] = u_name_cur if u_name_cur else None
 
             st_item["final_row"] = row_vals
+
+            # Gán thêm thông tin hành chính & nguồn gốc vào đối tượng st_item
+            st_item["school_code"] = sch_code
+            st_item["commune_code"] = commune_code
+            st_item["commune"] = commune
+            st_item["district_code"] = dist_code
+            st_item["district_name"] = dist_name
+            st_item["province_name"] = prov_name
+            st_item["unit_code"] = u_code_cur
+            st_item["unit_name"] = u_name_cur
+
+            f_path_obj = Path(st_item["file_path"])
+            if base_input_dir and f_path_obj.is_relative_to(base_input_dir):
+                st_item["source_file"] = f_path_obj.relative_to(base_input_dir).as_posix()
+            else:
+                st_item["source_file"] = f_path_obj.name
+            st_item["source_sheet"] = st_item.get("sheet_name", "")
+            st_item["source_row"] = st_item.get("row_idx", 0)
 
             if status_y == "Đã số hóa đầy đủ, chính xác":
                 overall_stats["da_so_hoa"] += 1

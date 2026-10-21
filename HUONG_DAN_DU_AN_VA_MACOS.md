@@ -7,9 +7,10 @@
 
 Dự án là phần mềm đồ họa chuyên dụng (**GUI Desktop Application**) phục vụ công tác số hóa, làm sạch và chuẩn hóa dữ liệu cấp bằng tốt nghiệp THCS của các Phòng/Sở Giáo dục và Đào tạo theo đúng chuẩn biểu mẫu của Bộ GD&ĐT.
 
-Toàn bộ hệ thống hiện tại được tối ưu hóa tập trung vào **2 Mô-đun duy nhất**:
+Toàn bộ hệ thống hiện tại gồm **3 Mô-đun nghiệp vụ hoàn chỉnh**:
 1. **MÔ-ĐUN 1: CHUẨN HOÁ DỮ LIỆU CẤP BẰNG THCS** (Biểu mẫu 28 cột theo `data/Mau_DS_Cap_Bang_THCS.xlsx`).
 2. **MÔ-ĐUN 2: XUẤT DANH SÁCH TÀI LIỆU SỐ HÓA** (Biểu mẫu 11 cột theo `data/Mau_DS_Tai_Lieu_So_Hoa.xlsx`).
+3. **MÔ-ĐUN 3: BỘ TIỆN ÍCH NHẬP & TÁCH EXCEL THEO CỘT TÙY BIẾN** (Xử lý tệp hỗn hợp nhiều đơn vị, gộp/tách linh hoạt theo bất kỳ cột nào có cùng cấu trúc tiêu đề).
 
 ---
 
@@ -27,9 +28,11 @@ so_hoa_vbcc_thcs/
 │   ├── normalizer.py                     # Thuật toán chuẩn hóa chuỗi, Title Case, nơi sinh, đảo MM/DD, auto-fill ngày cấp
 │   ├── exporter.py                       # Động cơ xuất file: Gộp, Tách, DS_Lỗi, Dữ liệu gốc, Tài liệu số hóa, ép TEXT (@)
 │   ├── excel_processor.py                # Quét đệ quy 3 cấu trúc thư mục, nhận diện ngữ cảnh, xử lý tương tác khối liên tiếp
+│   ├── custom_excel_manager.py           # [MÔ-ĐUN 3] Động cơ Tách file theo cột tùy chọn & Gộp nhiều file có cùng tiêu đề
 │   └── gui/
 │       ├── app_window.py                 # Giao diện chính Tkinter, quản lý đa luồng (Worker Thread), progress bar, thống kê
-│       └── dialogs.py                    # Hộp thoại đối chiếu khối (Trường, Niên khóa, Ngày cấp, Ngày sinh) & Data Inspector
+│       ├── dialogs.py                    # Hộp thoại đối chiếu khối (Trường, Niên khóa, Ngày cấp, Ngày sinh) & Data Inspector
+│       └── custom_tools_dialog.py        # [MÔ-ĐUN 3] Cửa sổ giao diện 2 Tab Tách và Gộp file Excel theo cột
 │
 ├── main.py                               # Điểm khởi chạy chương trình (Entry Point)
 ├── Chay_Chuong_Trinh.bat                 # File click đúp chạy nhanh trên Windows
@@ -122,6 +125,31 @@ Sử dụng biểu mẫu chuẩn `data/Mau_DS_Tai_Lieu_So_Hoa.xlsx` gồm 11 c�
    - Mã sổ gốc: `[Mã đơn vị]_[Mã trường]_[Năm]`.
    - Tên tài liệu: `"Danh sách cấp bằng THCS trường {Tên trường} năm {Năm}"`.
    - Từ năm = Đến năm = `Năm`.
+
+---
+
+### 🔷 MÔ-ĐUN 3: BỘ TIỆN ÍCH NHẬP & TÁCH EXCEL THEO CỘT TÙY BIẾN
+
+Được mở bằng nút **"🧩 Mô-đun 3: Nhập & Tách theo cột"** trên Header Banner hoặc tại Card 2 của giao diện chính:
+
+1. **Tab 1: 📤 Tách tệp theo cột:**
+   - Dùng khi có **1 tệp hỗn hợp của nhiều đơn vị/trường/năm**.
+   - Tự động nhận diện dòng tiêu đề, cột STT, cột Họ tên và hiển thị danh sách các cột.
+   - Cho phép người dùng chọn **bất kỳ cột nào** làm căn cứ tách (ví dụ: Cột *Tên đơn vị*).
+   - Có bảng **Xem trước (Preview)**: Thống kê số lượng dòng của từng file con dự kiến.
+   - Tự động đánh lại STT $1..N$ cho từng file con.
+   - Toàn bộ khối tiêu đề (dòng 1 đến dòng tiêu đề) và độ rộng cột được sao chép nguyên vẹn sang mọi file con.
+
+2. **Tab 2: 📥 Nhập / Gộp nhiều tệp:**
+   - Dùng khi cần **gộp nhiều tệp Excel có cùng cấu trúc tiêu đề** thành 1 tệp duy nhất.
+   - Kiểm tra đối soát cấu trúc tiêu đề giữa các tệp để cảnh báo nếu có tệp bị lệch cột.
+   - Cắt bỏ banner và tiêu đề lặp lại của các tệp tiếp theo, nối tiếp phần thân dữ liệu mượt mà.
+   - Tự động đánh lại STT từ $1 \rightarrow \text{Tổng số dòng}$.
+   - Tùy chọn thêm cột ghi rõ *Tệp nguồn gốc* để dễ dàng truy vết.
+
+3. **Thuật toán cốt lõi:**
+   - **Dòng dữ liệu hợp lệ:** Bắt buộc có **STT hợp lệ VÀ Họ tên hợp lệ** (loại bỏ hoàn toàn dòng banner, dòng tiêu đề ngắt trang, dòng trắng, dòng tổng kết và chữ ký).
+   - **Cơ chế dừng sớm (Early Exit):** Dừng quét ngay khi gặp **15 dòng liên tiếp có STT trống**, giải phóng bộ nhớ và tăng tốc xử lý tối đa.
 
 ---
 

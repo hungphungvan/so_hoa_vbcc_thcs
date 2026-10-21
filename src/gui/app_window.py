@@ -12,6 +12,7 @@ from tkinter.scrolledtext import ScrolledText
 
 from src.lookup_manager import LookupManager, get_data_dir
 from src.excel_processor import ExcelProcessor
+from src.db_manager import DatabaseManager
 from src.version import APP_VERSION, APP_NAME
 from src.updater import check_for_updates_async, check_for_updates, open_release_page
 from src.gui.dialogs import (
@@ -21,6 +22,8 @@ from src.gui.dialogs import (
     GradDateBlockDialog,
     DataInspectorDialog
 )
+from src.gui.custom_tools_dialog import CustomToolsDialog, CustomToolsView
+from src.gui.data_management_view import DataManagementView
 from src.gui.theme import (
     IS_DARK,
     FONT_FAMILY,
@@ -57,15 +60,15 @@ class MainWindow:
         self.root = root
         self.root.title(f"{APP_NAME} - v{APP_VERSION}")
         
-        # Đặt kích thước và vị trí cửa sổ tối ưu đa nền tảng (rộng rãi, chữ to rõ)
+        # Đặt kích thước và vị trí cửa sổ tối ưu đa nền tảng (rộng rãi, chữ to rõ, không bị tràn màn hình)
         sw = self.root.winfo_screenwidth()
         sh = self.root.winfo_screenheight()
-        win_w = min(1180, max(1020, sw - 60))
-        win_h = min(820, max(720, sh - 80))
+        win_w = min(1280, max(1040, sw - 40))
+        win_h = min(820, max(680, sh - 80))
         x = max(0, (sw - win_w) // 2)
-        y = max(0, (sh - win_h) // 2)
+        y = max(0, (sh - win_h - 40) // 2)
         self.root.geometry(f"{win_w}x{win_h}+{x}+{y}")
-        self.root.minsize(980, 680)
+        self.root.minsize(1000, 620)
 
         # Quản lý giao diện Sáng / Tối (Dark Mode)
         self.is_dark = IS_DARK
@@ -79,6 +82,8 @@ class MainWindow:
         # Biến trạng thái
         self.lookup_mgr = None
         self.processor = None
+        self.db_manager = None
+        self.data_mgmt_view = None
         self.dialog_queue = queue.Queue()
         self.log_queue = queue.Queue()
         self.is_processing = False
@@ -133,8 +138,16 @@ class MainWindow:
             self.hdr_frame.configure(bg=p.HEADER_BANNER_BG)
             self.hdr_title_lbl.configure(bg=p.HEADER_BANNER_BG, fg=p.HEADER_BANNER_FG)
             self.hdr_sub_lbl.configure(bg=p.HEADER_BANNER_BG, fg=p.HEADER_SUB_FG)
+            if hasattr(self, 'hdr_left'):
+                self.hdr_left.configure(bg=p.HEADER_BANNER_BG)
 
         # Labels với màu chuyên biệt
+        if hasattr(self, 'db_path_lbl'):
+            self.db_path_lbl.configure(foreground=p.PRIMARY)
+        if hasattr(self, 'db_schools_lbl'):
+            self.db_schools_lbl.configure(foreground=p.SUCCESS)
+        if hasattr(self, 'db_districts_lbl'):
+            self.db_districts_lbl.configure(foreground=p.ACCENT)
         if hasattr(self, 'unit_code_lbl'):
             self.unit_code_lbl.configure(foreground=p.PRIMARY)
             self.unit_name_lbl.configure(foreground=p.PRIMARY)
@@ -143,6 +156,8 @@ class MainWindow:
             self.schools_display_lbl.configure(foreground=p.MUTED)
             self.files_count_lbl.configure(foreground=p.MUTED)
             self.status_lbl.configure(foreground=p.PRIMARY)
+            if hasattr(self, 'stat_total_lbl'):
+                self.stat_total_lbl.configure(foreground=p.TEXT)
             self.stat_da_so_hoa_lbl.configure(foreground=p.SUCCESS)
             self.stat_chua_day_du_lbl.configure(foreground=p.WARNING)
             self.stat_chua_so_hoa_lbl.configure(foreground=p.DANGER)
@@ -161,17 +176,20 @@ class MainWindow:
 
         # Nút theme
         if hasattr(self, 'theme_btn'):
-            self.theme_btn.configure(text="🌙 Giao diện Tối" if not self.is_dark else "☀️ Giao diện Sáng")
+            self.theme_btn.configure(text="☀️ Chế độ Sáng (Đổi 🌙)" if not self.is_dark else "🌙 Chế độ Tối (Đổi ☀️)")
 
     def _build_ui(self):
         p = self.palette
 
-        # 1. Header Banner
-        self.hdr_frame = tk.Frame(self.root, bg=p.HEADER_BANNER_BG, padx=16, pady=12)
-        self.hdr_frame.pack(fill=tk.X)
+        # 1. Header Banner (TOP)
+        self.hdr_frame = tk.Frame(self.root, bg=p.HEADER_BANNER_BG, padx=16, pady=10)
+        self.hdr_frame.pack(side=tk.TOP, fill=tk.X)
+
+        self.hdr_left = tk.Frame(self.hdr_frame, bg=p.HEADER_BANNER_BG)
+        self.hdr_left.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         self.hdr_title_lbl = tk.Label(
-            self.hdr_frame,
+            self.hdr_left,
             text=f"{APP_NAME} - SỐ HÓA VĂN BẰNG CHỨNG CHỈ THCS",
             bg=p.HEADER_BANNER_BG,
             fg=p.HEADER_BANNER_FG,
@@ -180,7 +198,7 @@ class MainWindow:
         self.hdr_title_lbl.pack(anchor=tk.W)
 
         self.hdr_sub_lbl = tk.Label(
-            self.hdr_frame,
+            self.hdr_left,
             text="Chuẩn hóa dữ liệu cấp bằng và lập hồ sơ số hóa",
             bg=p.HEADER_BANNER_BG,
             fg=p.HEADER_SUB_FG,
@@ -188,56 +206,61 @@ class MainWindow:
         )
         self.hdr_sub_lbl.pack(anchor=tk.W, pady=(2, 0))
 
-        # Main Container
-        main_container = ttk.Frame(self.root, style="Window.TFrame", padding=12)
-        main_container.pack(fill=tk.BOTH, expand=True)
+        # 2. Bottom Bar (GHIM CỐ ĐỊNH Ở ĐÁY CỬA SỔ - LUÔN LUÔN NHÌN THẤY 100%)
+        bottom_frame = ttk.Frame(self.root, style="Window.TFrame", padding=(12, 6))
+        bottom_frame.pack(side=tk.BOTTOM, fill=tk.X)
 
-        # 2. Card 1: Chọn Đơn vị
-        unit_card = ttk.LabelFrame(main_container, text="1. Chọn đơn vị", style="Card.TLabelframe", padding=10)
-        unit_card.pack(fill=tk.X, pady=(0, 6))
+        self.open_output_btn = ttk.Button(bottom_frame, text="📂 Mở thư mục CSDL", command=self._open_data_dir)
+        self.open_output_btn.pack(side=tk.LEFT, padx=(0, 6))
 
-        row1 = ttk.Frame(unit_card)
-        row1.pack(fill=tk.X, pady=2)
-        ttk.Label(row1, text="Tìm kiếm đơn vị: ", font=FONT_LABEL_BOLD).pack(side=tk.LEFT)
+        self.export_btn = ttk.Button(
+            bottom_frame,
+            text="📤 Xuất Báo Cáo Excel...",
+            command=self._open_export_dialog
+        )
+        self.export_btn.pack(side=tk.LEFT, padx=6)
 
-        self.unit_search_var = tk.StringVar()
-        self.unit_search_var.trace_add("write", self._on_search_unit)
-        self.unit_search_entry = ttk.Entry(row1, textvariable=self.unit_search_var, width=22)
-        self.unit_search_entry.pack(side=tk.LEFT, padx=(0, 10))
+        self.theme_btn = ttk.Button(
+            bottom_frame,
+            text="☀️ Chế độ Sáng (Đổi 🌙)" if not self.is_dark else "🌙 Chế độ Tối (Đổi ☀️)",
+            command=self._toggle_theme
+        )
+        self.theme_btn.pack(side=tk.LEFT, padx=6)
 
-        ttk.Label(row1, text="Chọn đơn vị: ", font=FONT_LABEL_BOLD).pack(side=tk.LEFT)
-        self.unit_combo_var = tk.StringVar()
-        self.unit_combo = ttk.Combobox(row1, textvariable=self.unit_combo_var, state="readonly", width=50)
-        self.unit_combo.pack(side=tk.LEFT, padx=6, fill=tk.X, expand=True)
-        self.unit_combo.bind("<<ComboboxSelected>>", self._on_unit_selected)
+        self.update_btn = ttk.Button(
+            bottom_frame,
+            text=f"🔄 Bản {APP_VERSION}",
+            command=self._check_update_manually
+        )
+        self.update_btn.pack(side=tk.LEFT, padx=6)
 
-        row2 = ttk.Frame(unit_card)
-        row2.pack(fill=tk.X, pady=(6, 2))
+        exit_btn = ttk.Button(bottom_frame, text="Thoát", command=self._on_exit)
+        exit_btn.pack(side=tk.RIGHT)
 
-        ttk.Label(row2, text="Mã đơn vị: ", font=FONT_LABEL).pack(side=tk.LEFT)
-        self.unit_code_lbl = ttk.Label(row2, text="---", font=FONT_DATA_BOLD, foreground=p.PRIMARY)
-        self.unit_code_lbl.pack(side=tk.LEFT, padx=(0, 14))
+        # 3. Main Container (Sử dụng ttk.Notebook để điều hướng giữa Phân hệ 1 và Phân hệ 2)
+        main_container = ttk.Frame(self.root, style="Window.TFrame", padding=(10, 4))
+        main_container.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
-        ttk.Label(row2, text="Tên đơn vị: ", font=FONT_LABEL).pack(side=tk.LEFT)
-        self.unit_name_lbl = ttk.Label(row2, text="---", font=FONT_DATA_BOLD, foreground=p.PRIMARY)
-        self.unit_name_lbl.pack(side=tk.LEFT, padx=(0, 14))
+        self.notebook = ttk.Notebook(main_container)
+        self.notebook.pack(fill=tk.BOTH, expand=True)
+        self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
-        ttk.Label(row2, text="Xã/phường: ", font=FONT_LABEL).pack(side=tk.LEFT)
-        self.unit_commune_lbl = ttk.Label(row2, text="---", font=FONT_DATA_BOLD, foreground=p.ACCENT)
-        self.unit_commune_lbl.pack(side=tk.LEFT, padx=(0, 14))
+        # Tab 1: 📥 Nạp & Chuẩn hóa Dữ liệu (Phân hệ 1)
+        tab1_frame = ttk.Frame(self.notebook, style="Window.TFrame", padding=(4, 4))
+        self.notebook.add(tab1_frame, text="  📥 1. Nạp & Chuẩn hóa Dữ liệu  ")
 
-        ttk.Label(row2, text="Số trường trực thuộc: ", font=FONT_LABEL).pack(side=tk.LEFT)
-        self.school_count_lbl = ttk.Label(row2, text="0 trường", font=FONT_DATA_BOLD, foreground=p.SUCCESS)
-        self.school_count_lbl.pack(side=tk.LEFT)
+        # Tab 2: 📊 Quản trị, Lọc & Sửa đổi CSDL (Phân hệ 2)
+        self.tab2_frame = ttk.Frame(self.notebook, style="Window.TFrame", padding=(2, 2))
+        self.notebook.add(self.tab2_frame, text="  📊 2. Quản trị, Lọc & Sửa đổi CSDL  ")
 
-        row3 = ttk.Frame(unit_card)
-        row3.pack(fill=tk.X, pady=(4, 0))
-        ttk.Label(row3, text="Danh sách trường: ", font=FONT_LABEL_BOLD).pack(side=tk.LEFT)
-        self.schools_display_lbl = ttk.Label(row3, text="(Chưa chọn đơn vị)", font=FONT_MUTED, foreground=p.MUTED)
-        self.schools_display_lbl.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        # Tab 3: 🛠️ Công cụ & Tiện ích mở rộng
+        self.tab3_frame = ttk.Frame(self.notebook, style="Window.TFrame", padding=(2, 2))
+        self.notebook.add(self.tab3_frame, text="  🛠️ 3. Công cụ & Tiện ích mở rộng  ")
 
-        # 3. Card 2: Chọn Tệp hoặc Thư mục nguồn
-        file_card = ttk.LabelFrame(main_container, text="2. Tệp hoặc Thư mục nguồn", style="Card.TLabelframe", padding=10)
+        # ==============================================================
+        # Card 1: Nguồn dữ liệu Excel đầu vào (Chọn 1 File hoặc Thư mục)
+        # ==============================================================
+        file_card = ttk.LabelFrame(tab1_frame, text="1. Nguồn dữ liệu Excel (Chọn 1 File hoặc Thư mục)", style="Card.TLabelframe", padding=10)
         file_card.pack(fill=tk.X, pady=(0, 6))
 
         f_row1 = ttk.Frame(file_card)
@@ -250,72 +273,50 @@ class MainWindow:
         browse_file_btn = ttk.Button(f_row1, text="📂 Chọn 1 file...", command=self._browse_file)
         browse_file_btn.pack(side=tk.LEFT, padx=3)
 
-        browse_dir_btn = ttk.Button(f_row1, text="📁 Chọn thư mục đơn vị...", command=self._browse_dir)
+        browse_dir_btn = ttk.Button(f_row1, text="📁 Chọn thư mục...", command=self._browse_dir)
         browse_dir_btn.pack(side=tk.LEFT, padx=3)
+
 
         self.files_count_lbl = ttk.Label(
             file_card,
-            text="Hệ thống tự động quét và nhận diện các trường, niên khóa từ thư mục, tên file hoặc sheet.",
+            text="Hệ thống tự động quét nhận diện các trường, niên khóa; Đơn vị quản lý được tự động suy ra sau khi chuẩn hóa Trường học.",
             font=FONT_MUTED,
             foreground=p.MUTED
         )
         self.files_count_lbl.pack(anchor=tk.W, pady=(4, 0))
 
-        # 4. Card 3: Tùy chọn Xuất file (Export Options)
-        opt_card = ttk.LabelFrame(main_container, text="3. Tùy chọn xuất kết quả", style="Card.TLabelframe", padding=8)
-        opt_card.pack(fill=tk.X, pady=(0, 6))
+        # ==============================================================
+        # Card 2: Quản trị CSDL SQLite tập trung
+        # ==============================================================
+        db_card = ttk.LabelFrame(tab1_frame, text="2. Cơ sở dữ liệu SQLite tập trung", style="Card.TLabelframe", padding=10)
+        db_card.pack(fill=tk.X, pady=(0, 6))
 
-        opt_grid = ttk.Frame(opt_card)
-        opt_grid.pack(fill=tk.X)
+        db_row1 = ttk.Frame(db_card)
+        db_row1.pack(fill=tk.X, pady=2)
 
-        # Cột 1: Tùy chọn Gộp
-        gop_frame = ttk.LabelFrame(opt_grid, text="Gộp dữ liệu", padding=6)
-        gop_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 4))
+        ttk.Label(db_row1, text="Tệp CSDL: ", font=FONT_LABEL_BOLD).pack(side=tk.LEFT)
+        self.db_path_lbl = ttk.Label(db_row1, text="data/vbcc_database.db", font=FONT_DATA_BOLD, foreground=p.PRIMARY)
+        self.db_path_lbl.pack(side=tk.LEFT, padx=(0, 16))
 
-        self.opt_gop_truong = tk.BooleanVar(value=False)
-        ttk.Checkbutton(gop_frame, text="Gộp theo Trường", variable=self.opt_gop_truong).pack(anchor=tk.W, pady=3)
+        self.db_total_lbl = ttk.Label(db_row1, text="Tổng học sinh trong CSDL: 0", font=FONT_LABEL_BOLD)
+        self.db_total_lbl.pack(side=tk.LEFT, padx=(0, 16))
 
-        self.opt_gop_nam = tk.BooleanVar(value=False)
-        ttk.Checkbutton(gop_frame, text="Gộp theo Năm", variable=self.opt_gop_nam).pack(anchor=tk.W, pady=3)
+        self.db_schools_lbl = ttk.Label(db_row1, text="Số trường: 0", font=FONT_LABEL, foreground=p.SUCCESS)
+        self.db_schools_lbl.pack(side=tk.LEFT, padx=(0, 16))
 
-        # Cột 2: Tùy chọn Tách
-        tach_frame = ttk.LabelFrame(opt_grid, text="Tách dữ liệu", padding=6)
-        tach_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=4)
+        self.db_districts_lbl = ttk.Label(db_row1, text="Số huyện: 0", font=FONT_LABEL, foreground=p.ACCENT)
+        self.db_districts_lbl.pack(side=tk.LEFT, padx=(0, 16))
 
-        self.opt_tach_truong = tk.BooleanVar(value=False)
-        ttk.Checkbutton(tach_frame, text="Tách theo Trường", variable=self.opt_tach_truong).pack(anchor=tk.W, pady=2)
+        backup_btn = ttk.Button(db_row1, text="🛡️ Sao lưu CSDL ngay", command=self._manual_backup)
+        backup_btn.pack(side=tk.RIGHT, padx=4)
 
-        self.opt_tach_nam = tk.BooleanVar(value=False)
-        ttk.Checkbutton(tach_frame, text="Tách theo Năm", variable=self.opt_tach_nam).pack(anchor=tk.W, pady=2)
+        open_db_dir_btn = ttk.Button(db_row1, text="📂 Mở thư mục CSDL", command=self._open_data_dir)
+        open_db_dir_btn.pack(side=tk.RIGHT, padx=4)
 
-        self.opt_tach_truong_nam = tk.BooleanVar(value=False)
-        ttk.Checkbutton(tach_frame, text="Tách theo Trường & Năm", variable=self.opt_tach_truong_nam).pack(anchor=tk.W, pady=2)
-
-        # Cột 3: Mô-đun 2: Danh sách tài liệu số hóa
-        doc_frame = ttk.LabelFrame(opt_grid, text="Danh mục hồ sơ số hóa", padding=6)
-        doc_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=4)
-
-        self.opt_doc_truong = tk.BooleanVar(value=False)
-        ttk.Checkbutton(doc_frame, text="Tài liệu số hóa theo Trường", variable=self.opt_doc_truong).pack(anchor=tk.W, pady=2)
-
-        self.opt_doc_nam = tk.BooleanVar(value=False)
-        ttk.Checkbutton(doc_frame, text="Tài liệu số hóa theo Năm", variable=self.opt_doc_nam).pack(anchor=tk.W, pady=2)
-
-        self.opt_doc_truong_nam = tk.BooleanVar(value=False)
-        ttk.Checkbutton(doc_frame, text="Tài liệu số hóa theo Trường & Năm", variable=self.opt_doc_truong_nam).pack(anchor=tk.W, pady=2)
-
-        # Cột 4: Báo cáo & Kiểm soát
-        control_frame = ttk.LabelFrame(opt_grid, text="Báo cáo & Kiểm soát", padding=6)
-        control_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(4, 0))
-
-        self.opt_ds_loi = tk.BooleanVar(value=True)
-        ttk.Checkbutton(control_frame, text="Danh sách lỗi tổng hợp", variable=self.opt_ds_loi).pack(anchor=tk.W, pady=3)
-
-        self.opt_nhat_ky = tk.BooleanVar(value=True)
-        ttk.Checkbutton(control_frame, text="Nhật ký thay đổi (.xlsx)", variable=self.opt_nhat_ky).pack(anchor=tk.W, pady=3)
-
-        # 5. Card 4: Tiến trình & Điều khiển
-        prog_card = ttk.LabelFrame(main_container, text="4. Tiến trình xử lý", style="Card.TLabelframe", padding=8)
+        # ==============================================================
+        # Card 3: Tiến trình chuẩn hóa & Điều khiển
+        # ==============================================================
+        prog_card = ttk.LabelFrame(tab1_frame, text="3. Tiến trình chuẩn hóa & Nạp CSDL", style="Card.TLabelframe", padding=8)
         prog_card.pack(fill=tk.X, pady=(0, 6))
 
         self.progress_bar = ttk.Progressbar(prog_card, orient=tk.HORIZONTAL, mode='determinate')
@@ -330,11 +331,13 @@ class MainWindow:
         self.stop_btn = ttk.Button(ctrl_row, text="⏹ Dừng", state=tk.DISABLED, command=self._stop_processing)
         self.stop_btn.pack(side=tk.RIGHT, padx=4)
 
-        self.start_btn = ttk.Button(ctrl_row, text="▶️ Bắt đầu xử lý", style="Action.TButton", command=self._start_processing)
+        self.start_btn = ttk.Button(ctrl_row, text="▶️ Bắt đầu chuẩn hóa & Nạp CSDL", style="Action.TButton", command=self._start_processing)
         self.start_btn.pack(side=tk.RIGHT, padx=4)
 
-        # 6. Card 5: Thống kê & Log Console
-        log_card = ttk.LabelFrame(main_container, text="5. Thống kê & Nhật ký hoạt động", style="Card.TLabelframe", padding=8)
+        # ==============================================================
+        # Card 4: Thống kê phiên nạp & Nhật ký hoạt động
+        # ==============================================================
+        log_card = ttk.LabelFrame(tab1_frame, text="4. Thống kê phiên nạp & Nhật ký hoạt động", style="Card.TLabelframe", padding=8)
         log_card.pack(fill=tk.BOTH, expand=True, pady=(0, 6))
 
         stat_row = ttk.Frame(log_card)
@@ -355,7 +358,7 @@ class MainWindow:
         # Log text console
         self.log_text = ScrolledText(
             log_card,
-            height=8,
+            height=5,
             font=FONT_LOG,
             wrap=tk.WORD,
             bg=p.LOG_BG,
@@ -369,52 +372,117 @@ class MainWindow:
         self.log_text.tag_config("warning", foreground=p.WARNING)
         self.log_text.tag_config("error", foreground=p.DANGER, font=FONT_LOG)
 
-        # 7. Bottom Bar
-        bottom_frame = ttk.Frame(self.root, style="Window.TFrame", padding=(12, 6))
-        bottom_frame.pack(fill=tk.X)
+    def _refresh_db_stats_ui(self):
+        """Cập nhật các nhãn số liệu thống kê CSDL SQLite lên giao diện."""
+        if not self.db_manager:
+            return
+        try:
+            stats = self.db_manager.get_statistics()
+            self.db_path_lbl.config(text=str(self.db_manager.db_path.name))
+            self.db_total_lbl.config(text=f"Tổng học sinh trong CSDL: {stats['total']:,}")
+            self.db_schools_lbl.config(text=f"Số trường: {stats['total_schools']:,}")
+            self.db_districts_lbl.config(text=f"Số huyện: {stats['total_districts']:,}")
+        except Exception as e:
+            self._log(f"⚠️ Không thể cập nhật số liệu CSDL: {e}", "warning")
 
-        self.open_output_btn = ttk.Button(bottom_frame, text="📂 Mở thư mục kết quả", command=self._open_output_dir)
-        self.open_output_btn.pack(side=tk.LEFT, padx=(0, 6))
+    def _manual_backup(self):
+        """Sao lưu nhanh CSDL SQLite."""
+        if not self.db_manager:
+            return
+        try:
+            b_path = self.db_manager.backup_database()
+            messagebox.showinfo("Sao lưu thành công", f"Đã sao lưu CSDL an toàn tại:\n{b_path.name}", parent=self.root)
+            self._log(f"🛡️ Đã tạo bản sao lưu CSDL an toàn: {b_path.name}", "success")
+        except Exception as e:
+            messagebox.showerror("Lỗi sao lưu", f"Không thể sao lưu CSDL: {e}", parent=self.root)
 
-        self.inspect_btn = ttk.Button(
-            bottom_frame,
-            text="🔍 Tra cứu & Đối soát dữ liệu",
-            command=self._open_data_inspector,
-            state=tk.DISABLED
-        )
-        self.inspect_btn.pack(side=tk.LEFT, padx=6)
-
-        self.theme_btn = ttk.Button(
-            bottom_frame,
-            text="🌙 Giao diện Tối" if not self.is_dark else "☀️ Giao diện Sáng",
-            command=self._toggle_theme
-        )
-        self.theme_btn.pack(side=tk.LEFT, padx=6)
-
-        self.update_btn = ttk.Button(
-            bottom_frame,
-            text=f"🔄 Bản {APP_VERSION}",
-            command=self._check_update_manually
-        )
-        self.update_btn.pack(side=tk.LEFT, padx=6)
-
-        exit_btn = ttk.Button(bottom_frame, text="Thoát", command=self.root.destroy)
-        exit_btn.pack(side=tk.RIGHT)
+    def _open_data_dir(self):
+        """Mở thư mục data chứa CSDL SQLite và các bản sao lưu."""
+        if not self.db_manager:
+            return
+        data_dir = self.db_manager.db_path.parent
+        try:
+            if sys.platform == "win32":
+                os.startfile(str(data_dir))
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", str(data_dir)])
+            else:
+                subprocess.Popen(["xdg-open", str(data_dir)])
+        except Exception as e:
+            messagebox.showerror("Lỗi mở thư mục", f"Không thể mở thư mục CSDL: {e}", parent=self.root)
 
     def _init_data(self):
-        """Khởi tạo LookupManager và nạp danh mục tra cứu."""
+        """Khởi tạo LookupManager, DatabaseManager, nạp danh mục và khởi tạo Giao diện Phân hệ 2."""
         try:
             self.lookup_mgr = LookupManager()
+            self.db_manager = DatabaseManager()
             self.processor = ExcelProcessor(self.lookup_mgr)
-            self._update_unit_combobox(self.lookup_mgr.unit_names_list)
-            self._log(f"📖 Nguồn danh mục: {self.lookup_mgr.excel_path}", "info")
-            self._log(f"✅ Đã nạp thành công danh mục tra cứu: {len(self.lookup_mgr.unit_names_list)} đơn vị (kèm Xã/phường & Mã trường).", "success")
+            self._refresh_db_stats_ui()
+            
+            # Khởi tạo Giao diện Phân hệ 2 tại Tab 2
+            if hasattr(self, 'tab2_frame'):
+                self.data_mgmt_view = DataManagementView(
+                    self.tab2_frame,
+                    db_manager=self.db_manager,
+                    lookup_mgr=self.lookup_mgr
+                )
+                self.data_mgmt_view.pack(fill=tk.BOTH, expand=True)
+
+            # Khởi tạo Giao diện Tab 3: CÔNG CỤ (Tách & Gộp Excel - Nhóm 1)
+            if hasattr(self, 'tab3_frame'):
+                self.custom_tools_view = CustomToolsView(
+                    self.tab3_frame,
+                    is_dark=self.is_dark
+                )
+                self.custom_tools_view.pack(fill=tk.BOTH, expand=True)
+
+            db_stats = self.db_manager.get_statistics()
+            self._log(f"🗄️ CSDL SQLite: {self.db_manager.db_path.name} (Hiện có {db_stats['total']:,} học sinh, {db_stats['total_schools']} trường, {db_stats['total_districts']} huyện).", "info")
+            self._log(f"📖 Nguồn danh mục: {self.lookup_mgr.excel_path.name} ({len(self.lookup_mgr.all_schools_list)} trường học thuộc 3 tỉnh).", "success")
         except Exception as e:
-            self._log(f"❌ Lỗi nạp danh mục Danh_Muc_Tra_Cuu.xlsx: {e}", "error")
-            messagebox.showerror("Lỗi nạp danh mục", f"Không thể đọc file danh mục tra cứu:\n{e}", parent=self.root)
+            self._log(f"❌ Lỗi khởi tạo hệ thống: {e}", "error")
+            messagebox.showerror("Lỗi khởi tạo", f"Không thể khởi tạo CSDL hoặc đọc file danh mục:\n{e}", parent=self.root)
 
         # Kiểm tra phiên bản mới từ GitHub Releases ngầm
         check_for_updates_async(self._on_update_checked, current_version=APP_VERSION)
+
+    def _switch_to_tab(self, tab_idx: int):
+        """Chuyển đổi giữa các tab trên giao diện chính."""
+        if hasattr(self, 'notebook'):
+            self.notebook.select(tab_idx)
+
+    def _open_export_dialog(self):
+        """Mở Hộp thoại Xuất Báo Cáo & Dữ Liệu Excel (Phân hệ 3)."""
+        if not self.db_manager:
+            return
+        initial_filters = {}
+        if hasattr(self, 'data_mgmt_view') and self.data_mgmt_view:
+            initial_filters = {
+                "tinh_cu": self.data_mgmt_view.tinh_cu_var.get(),
+                "huyen_cu": self.data_mgmt_view.huyen_cu_var.get(),
+                "ten_truong": self.data_mgmt_view.ten_truong_var.get(),
+                "nien_khoa": self.data_mgmt_view.nien_khoa_var.get(),
+                "xa_phuong": self.data_mgmt_view.xa_phuong_var.get(),
+                "ten_don_vi": self.data_mgmt_view.ten_don_vi_var.get(),
+            }
+        from src.gui.export_dialog import ExportDialog
+        ExportDialog(
+            parent=self.root,
+            db_manager=self.db_manager,
+            lookup_mgr=self.lookup_mgr,
+            initial_filters=initial_filters
+        )
+
+    def _on_tab_changed(self, event=None):
+        """Khi người dùng chuyển tab, tự động làm mới dữ liệu phù hợp."""
+        if hasattr(self, 'notebook') and hasattr(self, 'data_mgmt_view') and self.data_mgmt_view:
+            try:
+                idx = self.notebook.index(self.notebook.select())
+                if idx == 1:
+                    self.data_mgmt_view.refresh_filter_options()
+                    self.data_mgmt_view.refresh_data(reset_page=False)
+            except Exception:
+                pass
 
     def _on_update_checked(self, res: dict):
         """Callback khi kiểm tra phiên bản trên GitHub hoàn thành."""
@@ -588,16 +656,6 @@ class MainWindow:
         if self.is_processing:
             return
 
-        selected_unit = self.unit_combo_var.get()
-        if not selected_unit or not self.lookup_mgr:
-            messagebox.showwarning("Cảnh báo", "Vui lòng chọn Đơn vị cấp bằng trước khi bắt đầu!", parent=self.root)
-            return
-
-        unit_info = self.lookup_mgr.get_unit_info(selected_unit)
-        if not unit_info:
-            messagebox.showwarning("Cảnh báo", "Đơn vị đã chọn không tồn tại trong danh mục!", parent=self.root)
-            return
-
         raw_path = self.path_var.get().strip().strip("'\"")
         if not raw_path or not Path(raw_path).exists():
             messagebox.showwarning("Cảnh báo", "Vui lòng chọn tệp hoặc thư mục Excel hợp lệ!", parent=self.root)
@@ -606,7 +664,7 @@ class MainWindow:
         target_path = Path(raw_path)
         if target_path.is_file():
             files_to_process = [target_path]
-            output_dir = target_path.parent / "Ket_Qua_So_Hoa"
+            base_dir = target_path.parent
         else:
             files_to_process = sorted(
                 [
@@ -618,42 +676,54 @@ class MainWindow:
                 ],
                 key=lambda x: str(x).lower()
             )
-            output_dir = target_path / "Ket_Qua_So_Hoa"
+            base_dir = target_path
 
         if not files_to_process:
             messagebox.showwarning("Cảnh báo", "Không tìm thấy file Excel (*.xlsx) nào để xử lý!", parent=self.root)
             return
 
-        export_options = {
-            "gop_theo_truong": self.opt_gop_truong.get(),
-            "gop_theo_nam": self.opt_gop_nam.get(),
-            "tach_theo_truong": self.opt_tach_truong.get(),
-            "tach_theo_nam": self.opt_tach_nam.get(),
-            "tach_theo_truong_va_nam": self.opt_tach_truong_nam.get(),
-            "doc_theo_truong": self.opt_doc_truong.get(),
-            "doc_theo_nam": self.opt_doc_nam.get(),
-            "doc_theo_truong_va_nam": self.opt_doc_truong_nam.get(),
-            "ds_loi": self.opt_ds_loi.get(),
-            "nhat_ky": self.opt_nhat_ky.get(),
-        }
+        # Tính relative paths để kiểm tra trùng
+        rel_files = []
+        for f in files_to_process:
+            if f.is_relative_to(base_dir):
+                rel_files.append(f.relative_to(base_dir).as_posix())
+            else:
+                rel_files.append(f.name)
 
-        # Ràng buộc kiểm tra: Phải chọn ít nhất 01 tùy chọn xuất kết quả
-        if not any(export_options.values()):
-            messagebox.showwarning(
-                "Chưa chọn tùy chọn xuất",
-                "Vui lòng chọn ít nhất 01 tùy chọn xuất kết quả trước khi bắt đầu xử lý!",
-                parent=self.root
-            )
-            return
+        # Kiểm tra các sheet đã tồn tại trong CSDL SQLite
+        overwrite_sheets = set()
+        if self.db_manager:
+            existing_sheets = self.db_manager.check_existing_sheets(rel_files)
+            if existing_sheets:
+                total_dup_students = sum(existing_sheets.values())
+                sample_sheets = [f"• {f} [{s}] ({c} HS)" for (f, s), c in list(existing_sheets.items())[:5]]
+                sample_str = "\n".join(sample_sheets)
+                if len(existing_sheets) > 5:
+                    sample_str += f"\n... và {len(existing_sheets) - 5} sheet khác."
+
+                msg = (
+                    f"Phát hiện {len(existing_sheets)} Sheet (khoảng {total_dup_students:,} học sinh) "
+                    f"đã tồn tại trong CSDL SQLite:\n\n{sample_str}\n\n"
+                    f"Bạn muốn xử lý các sheet này như thế nào?\n"
+                    f"• Chọn 'Yes' (Có): GHI ĐÈ (làm mới toàn bộ dữ liệu của các sheet này theo file Excel hiện tại).\n"
+                    f"• Chọn 'No' (Không): BỎ QUA các sheet đã có, chỉ nạp tiếp các sheet/file mới.\n"
+                    f"• Chọn 'Cancel' (Hủy): Dừng lại để kiểm tra."
+                )
+                ans = messagebox.askyesnocancel("Phát hiện dữ liệu trùng lặp trong CSDL", msg, parent=self.root)
+                if ans is None:
+                    return
+                elif ans is True:
+                    overwrite_sheets = set(existing_sheets.keys())
+                    self._log(f"⚠️ Đã chọn GHI ĐÈ cho {len(overwrite_sheets)} sheet đã tồn tại.", "warning")
+                else:
+                    self._log(f"ℹ️ Đã chọn BỎ QUA các sheet đã tồn tại trong CSDL.", "info")
 
         self.is_processing = True
         self.cancel_requested = False
         self.start_btn.config(state=tk.DISABLED)
         self.stop_btn.config(state=tk.NORMAL)
-        self.inspect_btn.config(state=tk.DISABLED)
         self.progress_bar["value"] = 0
         self.progress_bar["maximum"] = len(files_to_process)
-        self.last_output_dir = output_dir
 
         # Reset thống kê
         self.stat_total_lbl.config(text="Tổng học sinh: 0")
@@ -664,7 +734,7 @@ class MainWindow:
         # Khởi chạy worker thread
         t = threading.Thread(
             target=self._worker_thread,
-            args=(files_to_process, unit_info, output_dir, export_options),
+            args=(files_to_process, base_dir, overwrite_sheets),
             daemon=True
         )
         t.start()
@@ -679,23 +749,24 @@ class MainWindow:
     def _worker_thread(
         self,
         files: list[Path],
-        unit_info: dict,
-        output_dir: Path,
-        export_options: dict
+        base_dir: Path,
+        overwrite_sheets: set[tuple[str, str]]
     ):
         try:
-            unit_code = unit_info.get("code", "")
-            unit_name = unit_info.get("name", "")
-            unit_commune = unit_info.get("commune", "")
-            allowed_schools = unit_info.get("schools", [])
-
             self._log("\n" + "=" * 80, "info")
-            self._log(f"🚀 BẮT ĐẦU CHUẨN HÓA DỮ LIỆU ĐƠN VỊ: {unit_name} [Mã: {unit_code}]", "info")
-            if unit_commune:
-                self._log(f"📍 Địa bàn Xã/phường: {unit_commune}", "info")
+            self._log(f"🚀 BẮT ĐẦU CHUẨN HÓA DỮ LIỆU & NẠP VÀO CSDL SQLITE", "info")
             self._log(f"📁 Tổng số file Excel phát hiện: {len(files)} tệp.", "info")
-            self._log(f"🏫 Số trường trực thuộc đơn vị: {len(allowed_schools)} trường.", "info")
+            if self.db_manager:
+                self._log(f"🗄️ CSDL SQLite đích: {self.db_manager.db_path.name}", "info")
             self._log("=" * 80, "info")
+
+            # 1. Tự động sao lưu an toàn CSDL trước khi nạp batch
+            if self.db_manager:
+                try:
+                    backup_f = self.db_manager.backup_database()
+                    self._log(f"🛡️ Đã tự động tạo bản sao lưu an toàn CSDL tại: {backup_f.name}", "success")
+                except Exception as e:
+                    self._log(f"⚠️ Không thể tạo bản sao lưu CSDL: {e}", "warning")
 
             def progress_cb(curr_idx, total_cnt, current_stats, stage_msg=None):
                 self.root.after(0, lambda: self._update_progress_ui(curr_idx, total_cnt, current_stats, stage_msg))
@@ -703,18 +774,35 @@ class MainWindow:
             def check_cancel_cb():
                 return self.cancel_requested
 
+            # 2. Quy trình chuẩn hóa 5 giai đoạn toàn cục
             all_students, overall_stats = self.processor.process_all_files(
                 files=files,
-                unit_info=unit_info,
-                output_dir=output_dir,
-                export_options=export_options,
+                unit_info=None,
                 dialog_callback=self._dialog_callback,
                 log_callback=self._log,
                 progress_callback=progress_cb,
-                check_cancel=check_cancel_cb
+                check_cancel=check_cancel_cb,
+                base_input_dir=base_dir
             )
 
+            if check_cancel_cb():
+                self._log("⏹ Quá trình đã dừng theo yêu cầu. Dữ liệu chưa ghi vào CSDL.", "warning")
+                self.root.after(0, self._on_processing_stopped)
+                return
+
             self.all_unit_students = all_students
+
+            # 3. Nạp danh sách học sinh vào CSDL SQLite
+            db_res = {"inserted": 0, "deleted_old": 0}
+            if self.db_manager:
+                self._log("\n" + "=" * 80, "info")
+                self._log(f"💾 [GHI CSDL] Đang lưu {len(all_students)} học sinh vào CSDL SQLite...", "info")
+                self._log("=" * 80, "info")
+                db_res = self.db_manager.insert_students_batch(
+                    all_students,
+                    overwrite_sheets=overwrite_sheets,
+                    progress_callback=lambda cur, tot, msg: self.root.after(0, lambda: self.status_lbl.config(text=msg))
+                )
 
             total_st = overall_stats["total_students"]
             da_so_hoa = overall_stats["da_so_hoa"]
@@ -722,20 +810,27 @@ class MainWindow:
             chua_so_hoa = overall_stats["chua_so_hoa"]
 
             self._log("\n" + "=" * 80, "info")
-            self._log(f"🎉 HOÀN THÀNH XỬ LÝ {len(files)} TỆP EXCEL CHO ĐƠN VỊ {unit_name}!", "success")
-            self._log(f"✅ Tổng số học sinh: {total_st}", "info")
+            self._log(f"🎉 HOÀN THÀNH XỬ LÝ & NẠP VÀO CSDL SQLITE THÀNH CÔNG!", "success")
+            self._log(f"✅ Đã nạp mới / cập nhật: {db_res['inserted']} học sinh.", "success")
+            if db_res['deleted_old'] > 0:
+                self._log(f"🗑️ Đã làm mới (xóa bản ghi cũ): {db_res['deleted_old']} học sinh.", "info")
             self._log(f"   • Đã số hóa đầy đủ, chính xác: {da_so_hoa}", "success")
             self._log(f"   • Số hoá chưa đầy đủ, chính xác: {chua_day_du}", "warning")
             self._log(f"   • Chưa số hoá: {chua_so_hoa}", "error")
-            self._log(f"📁 Thư mục kết quả: {output_dir.absolute()}", "success")
             self._log("=" * 80, "info")
 
-            self.root.after(0, self._on_processing_finished, total_st, da_so_hoa, chua_day_du, chua_so_hoa, output_dir)
+            self.root.after(0, self._on_processing_finished, total_st, da_so_hoa, chua_day_du, chua_so_hoa, db_res)
         except Exception as e:
             self._log(f"\n❌ LỖI TRONG QUÁ TRÌNH XỬ LÝ: {e}", "error")
             import traceback
             traceback.print_exc()
             self.root.after(0, self._on_processing_error, str(e))
+
+    def _on_processing_stopped(self):
+        self.status_lbl.config(text="Đã dừng xử lý theo yêu cầu.")
+        self.is_processing = False
+        self.start_btn.config(state=tk.NORMAL)
+        self.stop_btn.config(state=tk.DISABLED)
 
     def _on_processing_error(self, err_msg: str):
         self.status_lbl.config(text=f"Lỗi: {err_msg}")
@@ -760,23 +855,36 @@ class MainWindow:
         self.stat_chua_day_du_lbl.config(text=f"⚠️ Số hoá chưa đầy đủ: {stats.get('chua_day_du', 0)}")
         self.stat_chua_so_hoa_lbl.config(text=f"❌ Chưa số hoá: {stats.get('chua_so_hoa', 0)}")
 
-    def _on_processing_finished(self, total_st, da_so_hoa, chua_day_du, chua_so_hoa, output_dir):
-        self.status_lbl.config(text="Hoàn thành chuẩn hóa dữ liệu & xuất danh sách tài liệu số hóa!")
+    def _on_processing_finished(self, total_st, da_so_hoa, chua_day_du, chua_so_hoa, db_res):
+        self.status_lbl.config(text="Hoàn thành nạp dữ liệu vào CSDL SQLite!")
         self.is_processing = False
         self.start_btn.config(state=tk.NORMAL)
         self.stop_btn.config(state=tk.DISABLED)
-        if self.all_unit_students:
-            self.inspect_btn.config(state=tk.NORMAL)
+
+        # Cập nhật số liệu CSDL trên giao diện
+        self._refresh_db_stats_ui()
+
+        # Tự động cập nhật dữ liệu mới nạp sang Phân hệ 2
+        if hasattr(self, 'data_mgmt_view') and self.data_mgmt_view:
+            try:
+                self.data_mgmt_view.refresh_filter_options()
+                self.data_mgmt_view.refresh_data(reset_page=True)
+            except Exception:
+                pass
+
+        ins_count = db_res.get("inserted", total_st)
+        del_count = db_res.get("deleted_old", 0)
+        del_msg = f"\n• Đã làm mới (ghi đè): {del_count:,} bản ghi cũ" if del_count > 0 else ""
 
         messagebox.showinfo(
-            "Hoàn thành",
-            f"Đã hoàn thành chuẩn hóa dữ liệu đơn vị!\n\n"
-            f"• Tổng học sinh: {total_st}\n"
-            f"• Đã số hóa đầy đủ: {da_so_hoa}\n"
-            f"• Số hoá chưa đầy đủ: {chua_day_du}\n"
-            f"• Chưa số hoá: {chua_so_hoa}\n\n"
-            f"Tất cả file kết quả & Danh sách tài liệu số hóa đã xuất tại:\n{output_dir.name}/\n\n"
-            f"Bạn có thể bấm '🔍 Tra cứu & Đối soát dữ liệu' để kiểm tra chi tiết!",
+            "Hoàn thành nạp CSDL",
+            f"Đã hoàn thành chuẩn hóa và nạp dữ liệu vào CSDL SQLite!\n\n"
+            f"• Học sinh đã nạp: {ins_count:,}{del_msg}\n"
+            f"• Đã số hóa đầy đủ: {da_so_hoa:,}\n"
+            f"• Số hoá chưa đầy đủ: {chua_day_du:,}\n"
+            f"• Chưa số hoá: {chua_so_hoa:,}\n\n"
+            f"Dữ liệu đã được lưu trữ an toàn vào {self.db_manager.db_path.name}.\n"
+            f"Bạn có thể chuyển sang Tab '📊 2. Quản trị, Lọc & Sửa đổi CSDL' để tra cứu và chỉnh sửa trực tiếp!",
             parent=self.root
         )
 
@@ -813,6 +921,16 @@ class MainWindow:
                 subprocess.Popen(["xdg-open", str(out_path)])
         except Exception as e:
             messagebox.showerror("Lỗi mở thư mục", f"Không thể mở thư mục: {e}", parent=self.root)
+
+
+    def _on_exit(self):
+        """Xác nhận an toàn trước khi đóng ứng dụng để tránh bấm nhầm."""
+        if self.is_processing:
+            if messagebox.askyesno("Đang xử lý dữ liệu", "Hệ thống đang trong quá trình xử lý dữ liệu. Bạn có chắc chắn muốn dừng và thoát?", parent=self.root):
+                self.root.destroy()
+        else:
+            if messagebox.askyesno("Xác nhận thoát", "Bạn có chắc chắn muốn đóng chương trình?", parent=self.root):
+                self.root.destroy()
 
 def main():
     root = tk.Tk()
