@@ -118,7 +118,8 @@ def remove_accents(input_str: str) -> str:
     if not input_str:
         return ""
     nfkd_form = unicodedata.normalize('NFKD', str(input_str))
-    return "".join([c for c in nfkd_form if not unicodedata.combining(c)])
+    res = "".join([c for c in nfkd_form if not unicodedata.combining(c)])
+    return res.replace('đ', 'd').replace('Đ', 'D')
 
 @functools.lru_cache(maxsize=4096)
 def normalize_text_for_match(s: str) -> str:
@@ -217,21 +218,28 @@ def auto_suggest_mapping(source_headers: list[str]) -> dict[int, int | list[int]
     used_sources = set()
     used_targets = set()
 
-    # Kiểm tra trường hợp đặc biệt: Cột Họ và tên bị tách thành 2 cột (Họ đệm + Tên)
+    # 1. Kiểm tra trường hợp đặc biệt: Cột Họ và tên bị tách thành 2 cột (Họ đệm + Tên)
     has_full_name_col = False
     ho_col_idx = None
     ten_col_idx = None
 
     for s_idx, s_h in enumerate(source_headers):
-        s_norm = normalize_text_for_match(s_h)
-        if any(fn in s_norm for fn in ["ho va ten", "ho ten", "ho, chu dem va ten", "ho va chu dem va ten"]):
-            has_full_name_col = True
-            break
-        if ho_col_idx is None and any(hd == s_norm or hd in s_norm for hd in ["ho va chu dem", "ho va ten dem", "ho dem", "ho lot", "ho"]):
-            if "ten" not in s_norm or "dem" in s_norm or "chu" in s_norm:
+        parts = [p.strip() for p in str(s_h).split(" - ")]
+        sub_norm = normalize_text_for_match(parts[-1])
+        full_norm = normalize_text_for_match(s_h)
+
+        if len(parts) > 1:
+            if ho_col_idx is None and sub_norm in ["ho", "ho dem", "ho va chu dem", "ho va ten dem", "ho lot"]:
                 ho_col_idx = s_idx
-        if ten_col_idx is None and (s_norm in ["ten", "ten hs", "ten hoc sinh", "ten thi sinh"]):
-            ten_col_idx = s_idx
+            elif ten_col_idx is None and sub_norm in ["ten", "ten hs", "ten hoc sinh", "ten thi sinh"]:
+                ten_col_idx = s_idx
+        else:
+            if full_norm in ["ho va ten", "ho ten", "ho chu dem va ten", "ho va chu dem va ten", "ho va ten hoc sinh", "ho ten hoc sinh"]:
+                has_full_name_col = True
+            elif ho_col_idx is None and full_norm in ["ho", "ho dem", "ho va chu dem", "ho va ten dem", "ho lot"]:
+                ho_col_idx = s_idx
+            elif ten_col_idx is None and full_norm in ["ten", "ten hs", "ten hoc sinh", "ten thi sinh"]:
+                ten_col_idx = s_idx
 
     # Nếu không có cột gộp mà có cả cột Họ đệm và Tên riêng biệt
     if not has_full_name_col and ho_col_idx is not None and ten_col_idx is not None and ho_col_idx != ten_col_idx:
@@ -239,6 +247,42 @@ def auto_suggest_mapping(source_headers: list[str]) -> dict[int, int | list[int]
         used_targets.add(5)
         used_sources.add(ho_col_idx)
         used_sources.add(ten_col_idx)
+
+    # 2. Kiểm tra trường hợp đặc biệt: Cột Ngày sinh bị tách thành 3 cột (Ngày, Tháng, Năm)
+    has_full_dob_col = False
+    ngay_col_idx = None
+    thang_col_idx = None
+    nam_col_idx = None
+
+    for s_idx, s_h in enumerate(source_headers):
+        parts = [p.strip() for p in str(s_h).split(" - ")]
+        sub_norm = normalize_text_for_match(parts[-1])
+        full_norm = normalize_text_for_match(s_h)
+
+        if len(parts) > 1:
+            if ngay_col_idx is None and sub_norm in ["ngay", "ngay sinh"]:
+                ngay_col_idx = s_idx
+            elif thang_col_idx is None and sub_norm in ["thang", "thang sinh"]:
+                thang_col_idx = s_idx
+            elif nam_col_idx is None and sub_norm in ["nam", "nam sinh"]:
+                nam_col_idx = s_idx
+        else:
+            if full_norm in ["ngay thang nam sinh", "ngay sinh", "ns"]:
+                has_full_dob_col = True
+            elif ngay_col_idx is None and full_norm in ["ngay"]:
+                ngay_col_idx = s_idx
+            elif thang_col_idx is None and full_norm in ["thang"]:
+                thang_col_idx = s_idx
+            elif nam_col_idx is None and full_norm in ["nam", "nam sinh"]:
+                nam_col_idx = s_idx
+
+    if not has_full_dob_col and ngay_col_idx is not None and thang_col_idx is not None and nam_col_idx is not None:
+        if len({ngay_col_idx, thang_col_idx, nam_col_idx}) == 3:
+            mapping[9] = [ngay_col_idx, thang_col_idx, nam_col_idx]
+            used_targets.add(9)
+            used_sources.add(ngay_col_idx)
+            used_sources.add(thang_col_idx)
+            used_sources.add(nam_col_idx)
 
     # Bảng điểm cho từng cặp (target_idx, source_idx)
     candidates: list[tuple[float, int, int, str]] = [] # (score, target_idx, source_col_idx, match_type)

@@ -317,7 +317,7 @@ class CustomToolsView(ttk.Frame):
                 curr_s = sheets[0]
                 self.split_sheet_var.set(curr_s)
 
-            wb = openpyxl.load_workbook(p, data_only=True, read_only=True)
+            wb = openpyxl.load_workbook(p, data_only=True)
             ws = wb[curr_s]
             info = detect_header_and_columns(ws)
             wb.close()
