@@ -82,31 +82,28 @@ class TestSmartMerger(unittest.TestCase):
         self.assertIsNone(mapping[16])  # Điểm thi
 
     def test_profile_manager(self):
-        """Kiểm tra lưu, nạp, chữ ký và xóa profile."""
+        """Kiểm tra lưu, nạp, named_mapping và xóa profile."""
         headers = ["STT", "Họ tên", "Ngày sinh"]
-        sig = compute_headers_signature(headers)
-        self.assertTrue(len(sig) > 0)
 
         # Lưu profile mới
         prof = self.profile_mgr.save_profile(
             name="Mẫu Test Trường A",
-            signature=sig,
             raw_headers=headers,
             mapping={1: 0, 5: 1, 9: 2}
         )
         self.assertEqual(prof["name"], "Mẫu Test Trường A")
-        self.assertEqual(prof["signature"], sig)
+        self.assertEqual(prof["named_mapping"]["5"], "Họ tên")
 
-        # Tìm theo chữ ký
-        found = self.profile_mgr.get_profile_by_signature(sig)
+        # Tìm theo id
+        p_id = prof["id"]
+        found = self.profile_mgr.get_profile_by_id(p_id)
         self.assertIsNotNone(found)
-        self.assertEqual(found["mapping"]["5"], 1)
+        self.assertEqual(found["named_mapping"]["5"], "Họ tên")
 
         # Xóa profile
-        p_id = found["id"]
         deleted = self.profile_mgr.delete_profile(p_id)
         self.assertTrue(deleted)
-        self.assertIsNone(self.profile_mgr.get_profile_by_signature(sig))
+        self.assertIsNone(self.profile_mgr.get_profile_by_id(p_id))
 
     def test_smart_merger_end_to_end(self):
         """Kiểm tra quy trình Ghép & Chuẩn hóa thực tế từ file Excel nguồn."""
@@ -414,21 +411,86 @@ class TestSmartMerger(unittest.TestCase):
     def test_profile_with_combined_columns(self):
         """Kiểm tra lưu và nạp lại Profile chứa cấu hình ghép nhiều cột."""
         headers = ["STT", "Họ và chữ đệm", "Tên", "Ngày sinh"]
-        sig = compute_headers_signature(headers)
 
         # Lưu profile với mapping Cột 5 = [1, 2]
         prof = self.profile_mgr.save_profile(
             name="Mẫu Tách Cột Test",
-            signature=sig,
             raw_headers=headers,
             mapping={1: 0, 5: [1, 2], 9: 3}
         )
-        self.assertEqual(prof["mapping"]["5"], [1, 2])
+        self.assertEqual(prof["named_mapping"]["5"], ["Họ và chữ đệm", "Tên"])
 
-        # Tìm lại theo signature
-        found = self.profile_mgr.get_profile_by_signature(sig)
+        # Tìm lại theo id
+        found = self.profile_mgr.get_profile_by_id(prof["id"])
         self.assertIsNotNone(found)
-        self.assertEqual(found["mapping"]["5"], [1, 2])
+        self.assertEqual(found["named_mapping"]["5"], ["Họ và chữ đệm", "Tên"])
+
+    def test_find_exact_matching_profile_reordered_columns(self):
+        """Kiểm tra nhận diện 100% khớp tên cột dù các cột bị đảo thứ tự hoặc có thêm cột rác."""
+        prof_headers = ["STT", "Họ và tên", "Ngày sinh", "Nơi sinh", "Số hiệu bằng"]
+        sig = compute_headers_signature(prof_headers)
+        self.profile_mgr.save_profile(
+            name="Profile Trường Lê Quý Đôn",
+            signature=sig,
+            raw_headers=prof_headers,
+            mapping={1: 0, 5: 1, 9: 2, 13: 3, 2: 4},
+            default_values={14: "THCS Lê Quý Đôn", 12: "Việt Nam"}
+        )
+
+        # File mới bị đảo lộn thứ tự các cột và có thêm cột "Ghi chú thừa" ở cuối
+        reordered_headers = ["Số hiệu bằng", "Nơi sinh", "STT", "Ghi chú thừa", "Họ và tên", "Ngày sinh"]
+        matched_prof, resolved_map = self.profile_mgr.find_exact_matching_profile(reordered_headers)
+
+        self.assertIsNotNone(matched_prof)
+        self.assertEqual(matched_prof["name"], "Profile Trường Lê Quý Đôn")
+        # Kiểm tra resolved_map lấy đúng chỉ số cột mới:
+        self.assertEqual(resolved_map[2], 0)   # "Số hiệu bằng" ở vị trí 0
+        self.assertEqual(resolved_map[13], 1)  # "Nơi sinh" ở vị trí 1
+        self.assertEqual(resolved_map[1], 2)   # "STT" ở vị trí 2
+        self.assertEqual(resolved_map[5], 4)   # "Họ và tên" ở vị trí 4
+        self.assertEqual(resolved_map[9], 5)   # "Ngày sinh" ở vị trí 5
+
+    def test_find_exact_profile_refuses_when_missing_mapped_column(self):
+        """Kiểm tra từ chối tự động áp dụng khi thiếu dù chỉ 1 cột nghiệp vụ đã map trong profile."""
+        prof_headers = ["STT", "Họ và tên", "Ngày sinh", "Nơi sinh"]
+        sig = compute_headers_signature(prof_headers)
+        self.profile_mgr.save_profile(
+            name="Profile Nghiệp Vụ Đầy Đủ",
+            signature=sig,
+            raw_headers=prof_headers,
+            mapping={1: 0, 5: 1, 9: 2, 13: 3}
+        )
+
+        # File mới thiếu mất cột "Nơi sinh"
+        lacking_headers = ["STT", "Họ và tên", "Ngày sinh", "Ghi chú"]
+        matched_prof, resolved_map = self.profile_mgr.find_exact_matching_profile(lacking_headers)
+        self.assertIsNone(matched_prof)
+        self.assertIsNone(resolved_map)
+
+    def test_two_tier_auto_suggest_mapping(self):
+        """Kiểm tra thuật toán gợi ý 2 tầng: Tầng 1 khớp mờ tên profile + thừa hưởng defaults, Tầng 2 theo từ khóa."""
+        from src.smart_merger import auto_suggest_mapping_with_details
+
+        prof_headers = ["Số thứ tự", "Họ và tên học sinh", "Ngày tháng năm sinh", "Quê quán"]
+        sig = compute_headers_signature(prof_headers)
+        self.profile_mgr.save_profile(
+            name="Profile Mẫu Sở 2021",
+            signature=sig,
+            raw_headers=prof_headers,
+            mapping={1: 0, 5: 1, 9: 2, 13: 3},
+            default_values={14: "Trường THCS Thực Nghiệm", 12: "Việt Nam"}
+        )
+
+        # File mới có tên cột hơi khác (khớp mờ) và có thêm cột "CCCD" (chưa có trong profile)
+        new_headers = ["Số TT", "Họ và tên học sinh", "Ngày sinh", "Quê quán", "Số CCCD"]
+        mapping, defaults, matched_pname = auto_suggest_mapping_with_details(new_headers, self.profile_mgr)
+
+        self.assertEqual(matched_pname, "Profile Mẫu Sở 2021")
+        # Thừa hưởng giá trị mặc định từ Profile
+        self.assertEqual(defaults.get(14), "Trường THCS Thực Nghiệm")
+        self.assertEqual(defaults.get(12), "Việt Nam")
+        # Khớp được cột CCCD (Cột 7) nhờ Tầng 2 (từ điển từ khóa)
+        self.assertEqual(mapping.get(7), 4)
 
 
 if __name__ == '__main__':

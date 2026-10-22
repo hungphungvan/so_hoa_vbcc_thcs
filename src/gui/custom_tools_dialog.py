@@ -1306,7 +1306,9 @@ class CustomToolsView(ttk.Frame):
                         formatted_headers=payload["formatted_headers"],
                         suggested_mapping=payload["suggested_mapping"],
                         profile_mgr=self.smart_merger.profile_mgr,
-                        is_dark=self.is_dark
+                        is_dark=self.is_dark,
+                        suggested_defaults=payload.get("suggested_defaults"),
+                        matched_profile_name=payload.get("matched_profile_name")
                     )
                     dlg.wait_window()
                     resp_holder["result"] = dlg.result
@@ -1450,18 +1452,18 @@ class ManageProfilesDialog(tk.Toplevel):
         tree_card = ttk.Frame(self, padding=8)
         tree_card.pack(fill=tk.BOTH, expand=True)
 
-        cols = ("stt", "name", "cols", "sig", "date")
+        cols = ("stt", "name", "cols", "mapped", "date")
         self.tree = ttk.Treeview(tree_card, columns=cols, show="headings")
         self.tree.heading("stt", text="STT")
         self.tree.heading("name", text="Tên Profile")
         self.tree.heading("cols", text="Số cột nguồn")
-        self.tree.heading("sig", text="Chữ ký nhận diện")
+        self.tree.heading("mapped", text="Cột đã ánh xạ")
         self.tree.heading("date", text="Ngày cập nhật")
 
         self.tree.column("stt", width=45, anchor=tk.CENTER)
         self.tree.column("name", width=280, anchor=tk.W)
         self.tree.column("cols", width=95, anchor=tk.CENTER)
-        self.tree.column("sig", width=140, anchor=tk.CENTER)
+        self.tree.column("mapped", width=140, anchor=tk.CENTER)
         self.tree.column("date", width=160, anchor=tk.CENTER)
 
         sb = ttk.Scrollbar(tree_card, orient=tk.VERTICAL, command=self.tree.yview)
@@ -1481,11 +1483,13 @@ class ManageProfilesDialog(tk.Toplevel):
         profiles = self.profile_mgr.list_profiles()
         for idx, p in enumerate(profiles, start=1):
             raw_h = p.get("raw_headers", [])
+            named_m = self.profile_mgr.get_named_mapping(p)
+            mapped_count = sum(1 for v in named_m.values() if v is not None)
             self.tree.insert("", tk.END, iid=p.get("id"), values=(
                 idx,
                 p.get("name", "Không tên"),
                 f"{len(raw_h)} cột",
-                p.get("signature", "")[:12] + "...",
+                f"{mapped_count}/28 cột",
                 p.get("updated_at", p.get("created_at", ""))
             ))
 

@@ -10,7 +10,11 @@ from src.gui.theme import (
     FONT_TITLE, FONT_SUBTITLE, FONT_LABEL, FONT_LABEL_BOLD,
     FONT_MUTED
 )
-from src.smart_merger import TARGET_COLUMNS, MappingProfileManager, auto_suggest_mapping, parse_column_expression
+from src.smart_merger import (
+    TARGET_COLUMNS, MappingProfileManager,
+    auto_suggest_mapping, auto_suggest_mapping_with_details,
+    parse_column_expression, normalize_text_for_match, compute_similarity
+)
 
 EMPTY_OPTION = "-- Để trống --"
 
@@ -19,9 +23,9 @@ class ColumnMappingDialog(tk.Toplevel):
     """
     Hộp thoại Cấu hình Ánh xạ Cột thông minh (Ghép & Chuẩn hóa):
     - Hiển thị 28 cột chuẩn của mẫu Mau_DS_Cap_Bang_THCS.xlsx.
-    - Điền sẵn gợi ý khớp từ khóa & khớp mờ (Fuzzy matching).
+    - Điền sẵn gợi ý qua 2 tầng: Profile tương đồng trước -> Từ khóa & Khớp mờ sau.
     - Cho phép người dùng kiểm tra, chỉnh sửa từng cột bằng Combobox hoặc chọn để trống.
-    - Cho phép đặt tên Profile và lưu lại vào mapping_profiles.json để tự động hóa cho các lần sau.
+    - Cho phép đặt tên Profile và lưu lại theo tên cột để tự động hóa an toàn cho các lần sau.
     """
 
     def __init__(
@@ -33,7 +37,9 @@ class ColumnMappingDialog(tk.Toplevel):
         formatted_headers: list[str],
         suggested_mapping: dict[int, int | None],
         profile_mgr: MappingProfileManager | None = None,
-        is_dark: bool | None = None
+        is_dark: bool | None = None,
+        suggested_defaults: dict[int, str] | None = None,
+        matched_profile_name: str | None = None
     ):
         super().__init__(parent)
         self.is_dark = IS_DARK if is_dark is None else is_dark
@@ -45,6 +51,8 @@ class ColumnMappingDialog(tk.Toplevel):
         self.raw_headers = raw_headers
         self.formatted_headers = formatted_headers
         self.suggested_mapping = suggested_mapping
+        self.suggested_defaults = suggested_defaults or {}
+        self.matched_profile_name = matched_profile_name
 
         # Kết quả trả về: (mapping, profile_name, default_values, should_skip)
         self.result: tuple[dict[int, int | list[int] | None] | None, str | None, dict[int, str], bool] = (None, None, {}, True)
@@ -59,7 +67,10 @@ class ColumnMappingDialog(tk.Toplevel):
         self.grab_set()
 
         # Biến giao diện
-        default_prof_name = f"Mẫu {file_name.rsplit('.', 1)[0]} ({len(raw_headers)} cột)"
+        if self.matched_profile_name:
+            default_prof_name = f"Mẫu {self.matched_profile_name} ({len(raw_headers)} cột)"
+        else:
+            default_prof_name = f"Mẫu {file_name.rsplit('.', 1)[0]} ({len(raw_headers)} cột)"
         self.profile_name_var = tk.StringVar(value=default_prof_name)
         self.saved_profile_var = tk.StringVar()
 
@@ -70,6 +81,8 @@ class ColumnMappingDialog(tk.Toplevel):
 
         self._build_ui()
         self._apply_mapping(self.suggested_mapping)
+        if self.suggested_defaults:
+            self._apply_defaults(self.suggested_defaults)
         self._center_window(parent)
 
     def _center_window(self, parent):
@@ -309,10 +322,37 @@ class ColumnMappingDialog(tk.Toplevel):
                 else:
                     d_var.set("")
 
+    def _find_best_header_match(self, name: str) -> int | None:
+        """Tìm cột trong raw_headers khớp chính xác hoặc khớp mờ nhất với name."""
+        if not name:
+            return None
+        norm_target = normalize_text_for_match(name)
+        if not norm_target:
+            return None
+        # 1. Khớp chính xác
+        for idx, rh in enumerate(self.raw_headers):
+            if normalize_text_for_match(rh) == norm_target:
+                return idx
+        # 2. Khớp mờ
+        best_idx = None
+        best_sc = 0.0
+        for idx, rh in enumerate(self.raw_headers):
+            sc, _ = compute_similarity(name, [name], rh)
+            if sc > best_sc:
+                best_sc = sc
+                best_idx = idx
+        if best_idx is not None and best_sc >= 0.65:
+            return best_idx
+        return None
+
     def _on_auto_match(self):
-        """Khớp lại tự động bằng thuật toán."""
-        new_map = auto_suggest_mapping(self.raw_headers)
+        """Khớp lại tự động bằng thuật toán 2 tầng (Profile tương đồng trước, Từ khóa sau)."""
+        new_map, new_defs, matched_pname = auto_suggest_mapping_with_details(self.raw_headers, self.profile_mgr)
         self._apply_mapping(new_map)
+        if new_defs:
+            self._apply_defaults(new_defs)
+        if matched_pname:
+            self.profile_name_var.set(f"Theo {matched_pname} ({len(self.raw_headers)} cột)")
 
     def _on_clear_all(self):
         """Đặt tất cả về Để trống."""
@@ -320,7 +360,7 @@ class ColumnMappingDialog(tk.Toplevel):
             c_var.set(EMPTY_OPTION)
 
     def _on_select_saved_profile(self, event):
-        """Khi người dùng chọn một Profile đã lưu."""
+        """Khi người dùng chọn một Profile đã lưu: Ánh xạ linh hoạt theo TÊN CỘT thay vì index."""
         selected_text = self.saved_profile_var.get()
         if not selected_text:
             return
@@ -328,9 +368,24 @@ class ColumnMappingDialog(tk.Toplevel):
         for p_item in all_profiles:
             match_str = f"{p_item.get('name', 'Profile')} ({p_item.get('id', '')})"
             if match_str == selected_text:
-                str_map = p_item.get("mapping", {})
-                converted_map = {int(k): v for k, v in str_map.items()}
-                self._apply_mapping(converted_map)
+                named_map = self.profile_mgr.get_named_mapping(p_item)
+                # Chuyển đổi named_map sang index thực tế của file hiện tại
+                resolved_map: dict[int, int | list[int] | None] = {}
+                for t_idx_str, col_val in named_map.items():
+                    t_idx = int(t_idx_str)
+                    if col_val is None:
+                        resolved_map[t_idx] = None
+                    elif isinstance(col_val, list):
+                        sub_indices = []
+                        for sub_name in col_val:
+                            f_idx = self._find_best_header_match(sub_name)
+                            if f_idx is not None and f_idx not in sub_indices:
+                                sub_indices.append(f_idx)
+                        resolved_map[t_idx] = sub_indices if sub_indices else None
+                    else:
+                        resolved_map[t_idx] = self._find_best_header_match(col_val)
+
+                self._apply_mapping(resolved_map)
 
                 saved_defaults = p_item.get("default_values", {})
                 self._apply_defaults(saved_defaults)

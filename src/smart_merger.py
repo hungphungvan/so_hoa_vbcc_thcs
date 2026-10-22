@@ -166,6 +166,7 @@ def compute_similarity(target_name: str, synonyms: list[str], source_header: str
     all_candidates = [tgt_norm] + syn_norms
     for cand in all_candidates:
         cand_tokens = set(cand.split())
+        inter = set()
         if src_tokens and cand_tokens:
             inter = src_tokens.intersection(cand_tokens)
             if inter:
@@ -173,7 +174,11 @@ def compute_similarity(target_name: str, synonyms: list[str], source_header: str
                 best_fuzzy = max(best_fuzzy, jaccard * 0.9)
 
         seq_score = difflib.SequenceMatcher(None, src_norm, cand).ratio()
-        best_fuzzy = max(best_fuzzy, seq_score)
+        if len(src_tokens) > 1 and len(cand_tokens) > 1 and not inter:
+            # Hai cụm từ đều có nhiều hơn 1 từ nhưng không có từ chung nào -> giảm điểm để tránh khớp nhầm vần
+            best_fuzzy = max(best_fuzzy, seq_score * 0.75)
+        else:
+            best_fuzzy = max(best_fuzzy, seq_score)
 
     if best_fuzzy >= 0.60:
         return round(best_fuzzy, 3), "fuzzy"
@@ -198,27 +203,34 @@ def is_standard_28_headers(headers: list[str]) -> bool:
                 matches += 1
     return matches >= 20
 
-def auto_suggest_mapping(source_headers: list[str]) -> dict[int, int | list[int] | None]:
+def auto_suggest_mapping_with_details(
+    source_headers: list[str],
+    profile_mgr: Any = None
+) -> tuple[dict[int, int | list[int] | None], dict[int, str], str | None]:
     """
-    Gợi ý ánh xạ thông minh từ 28 cột đích sang chỉ số cột nguồn (0-based) hoặc None.
-    Hỗ trợ nhận diện tự động trường hợp cột Họ và tên bị tách thành 2 cột (Họ đệm + Tên).
-    Thuật toán đa tầng kết hợp từ điển đồng nghĩa và so khớp mờ, chống gán trùng lặp.
+    Gợi ý ánh xạ thông minh qua 2 tầng ưu tiên:
+    - Tầng 1: Khớp mờ theo Tên cột từ Profile đã lưu (nếu có Profile tương đồng >= 0.55).
+    - Tầng 2: Điền tiếp các cột còn thiếu theo Bộ từ khóa nghiệp vụ & so khớp mờ 28 cột chuẩn.
+    Trả về: (suggested_mapping, suggested_defaults, matched_profile_name)
     """
     mapping: dict[int, int | list[int] | None] = {col["idx"]: None for col in TARGET_COLUMNS}
-    if not source_headers:
-        return mapping
+    suggested_defaults: dict[int, str] = {}
+    matched_profile_name: str | None = None
 
-    # Nếu file nguồn đã là chuẩn 28 cột, ánh xạ 1:1 trực tiếp
+    if not source_headers:
+        return mapping, suggested_defaults, matched_profile_name
+
+    # Nếu nguồn là chuẩn 28 cột
     if is_standard_28_headers(source_headers):
         for idx, col in enumerate(TARGET_COLUMNS):
             if idx < len(source_headers):
                 mapping[col["idx"]] = idx
-        return mapping
+        return mapping, suggested_defaults, "Chuẩn 28 cột gốc"
 
     used_sources = set()
     used_targets = set()
 
-    # 1. Kiểm tra trường hợp đặc biệt: Cột Họ và tên bị tách thành 2 cột (Họ đệm + Tên)
+    # 1. Phát hiện trường hợp đặc biệt: Cột Họ và tên bị tách thành 2 cột (Họ đệm + Tên)
     has_full_name_col = False
     ho_col_idx = None
     ten_col_idx = None
@@ -241,20 +253,21 @@ def auto_suggest_mapping(source_headers: list[str]) -> dict[int, int | list[int]
             elif ten_col_idx is None and full_norm in ["ten", "ten hs", "ten hoc sinh", "ten thi sinh"]:
                 ten_col_idx = s_idx
 
-    # Nếu không có cột gộp mà có cả cột Họ đệm và Tên riêng biệt
     if not has_full_name_col and ho_col_idx is not None and ten_col_idx is not None and ho_col_idx != ten_col_idx:
         mapping[5] = [ho_col_idx, ten_col_idx]
         used_targets.add(5)
         used_sources.add(ho_col_idx)
         used_sources.add(ten_col_idx)
 
-    # 2. Kiểm tra trường hợp đặc biệt: Cột Ngày sinh bị tách thành 3 cột (Ngày, Tháng, Năm)
+    # 2. Phát hiện trường hợp đặc biệt: Cột Ngày sinh bị tách thành 3 cột (Ngày, Tháng, Năm)
     has_full_dob_col = False
     ngay_col_idx = None
     thang_col_idx = None
     nam_col_idx = None
 
     for s_idx, s_h in enumerate(source_headers):
+        if s_idx in used_sources:
+            continue
         parts = [p.strip() for p in str(s_h).split(" - ")]
         sub_norm = normalize_text_for_match(parts[-1])
         full_norm = normalize_text_for_match(s_h)
@@ -284,9 +297,107 @@ def auto_suggest_mapping(source_headers: list[str]) -> dict[int, int | list[int]
             used_sources.add(thang_col_idx)
             used_sources.add(nam_col_idx)
 
-    # Bảng điểm cho từng cặp (target_idx, source_idx)
-    candidates: list[tuple[float, int, int, str]] = [] # (score, target_idx, source_col_idx, match_type)
+    # =========================================================================
+    # TẦNG 1: KHỚP MỜ THEO TÊN CỘT TỪ PROFILE ĐÃ LƯU
+    # =========================================================================
+    if profile_mgr and hasattr(profile_mgr, "list_profiles"):
+        profiles = profile_mgr.list_profiles()
+        best_prof = None
+        best_prof_score = 0.0
 
+        for p in profiles:
+            named_map = profile_mgr.get_named_mapping(p) if hasattr(profile_mgr, "get_named_mapping") else {}
+            active_items = [(int(k), v) for k, v in named_map.items() if v is not None and int(k) not in used_targets]
+            if not active_items:
+                continue
+
+            total_sim = 0.0
+            for t_idx, col_val in active_items:
+                if isinstance(col_val, list):
+                    sub_sims = []
+                    for name in col_val:
+                        best_s = max(
+                            (compute_similarity(name, [name], sh)[0] for s_i, sh in enumerate(source_headers) if s_i not in used_sources),
+                            default=0.0
+                        )
+                        sub_sims.append(best_s)
+                    total_sim += (sum(sub_sims) / len(sub_sims)) if sub_sims else 0.0
+                else:
+                    best_s = max(
+                        (compute_similarity(col_val, [col_val], sh)[0] for s_i, sh in enumerate(source_headers) if s_i not in used_sources),
+                        default=0.0
+                    )
+                    total_sim += best_s
+
+            avg_sim = total_sim / len(active_items)
+            if avg_sim > best_prof_score:
+                best_prof_score = avg_sim
+                best_prof = p
+
+        # Nếu tìm được profile có độ tương thích cao (>= 0.55)
+        if best_prof and best_prof_score >= 0.55:
+            matched_profile_name = best_prof.get("name")
+            p_named_map = profile_mgr.get_named_mapping(best_prof) if hasattr(profile_mgr, "get_named_mapping") else {}
+            # Thừa hưởng default values của profile
+            for k, v in best_prof.get("default_values", {}).items():
+                if str(v).strip():
+                    suggested_defaults[int(k)] = str(v).strip()
+
+            p_candidates: list[tuple[float, int, int | list[int]]] = []
+            for t_idx_str, col_val in p_named_map.items():
+                t_idx = int(t_idx_str)
+                if col_val is None or t_idx in used_targets:
+                    continue
+
+                if isinstance(col_val, list):
+                    matched_indices = []
+                    sub_scores = []
+                    for name in col_val:
+                        best_idx = None
+                        best_score = 0.0
+                        for s_idx, sh in enumerate(source_headers):
+                            sc, _ = compute_similarity(name, [name], sh)
+                            if sc > best_score:
+                                best_score = sc
+                                best_idx = s_idx
+                        if best_idx is not None and best_score >= 0.75:
+                            matched_indices.append(best_idx)
+                            sub_scores.append(best_score)
+                    if len(matched_indices) == len(col_val):
+                        avg_sub = sum(sub_scores) / len(sub_scores)
+                        p_candidates.append((avg_sub, t_idx, matched_indices))
+                else:
+                    best_idx = None
+                    best_score = 0.0
+                    for s_idx, sh in enumerate(source_headers):
+                        sc, _ = compute_similarity(col_val, [col_val], sh)
+                        if sc > best_score:
+                            best_score = sc
+                            best_idx = s_idx
+                    if best_idx is not None and best_score >= 0.75:
+                        p_candidates.append((best_score, t_idx, best_idx))
+
+            # Sắp xếp candidate theo điểm số giảm dần để ưu tiên gán các cặp chắc chắn nhất trước
+            p_candidates.sort(key=lambda x: x[0], reverse=True)
+            for sc, t_idx, s_val in p_candidates:
+                if t_idx in used_targets:
+                    continue
+                if isinstance(s_val, list):
+                    if not any(i in used_sources for i in s_val):
+                        mapping[t_idx] = s_val
+                        used_targets.add(t_idx)
+                        for i in s_val:
+                            used_sources.add(i)
+                else:
+                    if s_val not in used_sources:
+                        mapping[t_idx] = s_val
+                        used_targets.add(t_idx)
+                        used_sources.add(s_val)
+
+    # =========================================================================
+    # TẦNG 2: BỔ SUNG CÁC CỘT CÒN LẠI THEO TỪ KHÓA & SO KHỚP MỜ 28 CỘT CHUẨN
+    # =========================================================================
+    candidates: list[tuple[float, int, int, str]] = []
     for col in TARGET_COLUMNS:
         t_idx = col["idx"]
         if t_idx in used_targets:
@@ -301,7 +412,6 @@ def auto_suggest_mapping(source_headers: list[str]) -> dict[int, int | list[int]
             if score >= 0.62:
                 candidates.append((score, t_idx, s_idx, match_type))
 
-    # Sắp xếp theo điểm số giảm dần để ưu tiên gán các cặp có độ tin cậy cao nhất trước
     candidates.sort(key=lambda x: x[0], reverse=True)
 
     for score, t_idx, s_idx, match_type in candidates:
@@ -310,6 +420,18 @@ def auto_suggest_mapping(source_headers: list[str]) -> dict[int, int | list[int]
             used_targets.add(t_idx)
             used_sources.add(s_idx)
 
+    return mapping, suggested_defaults, matched_profile_name
+
+
+def auto_suggest_mapping(
+    source_headers: list[str],
+    profile_mgr: Any = None
+) -> dict[int, int | list[int] | None]:
+    """
+    Gợi ý ánh xạ từ 28 cột đích sang chỉ số cột nguồn (0-based) hoặc None.
+    Đảm bảo tương thích 100% với các mã nguồn cũ và các bài kiểm tra.
+    """
+    mapping, _, _ = auto_suggest_mapping_with_details(source_headers, profile_mgr)
     return mapping
 
 
@@ -433,65 +555,162 @@ class MappingProfileManager:
         """Lấy toàn bộ danh sách các Profile đang lưu."""
         return self._load_raw().get("profiles", [])
 
-    def get_profile_by_signature(self, signature: str) -> dict | None:
-        """Tìm Profile tương ứng với chữ ký header."""
-        if not signature:
-            return None
-        for p in self.list_profiles():
-            if p.get("signature") == signature:
-                return p
-        return None
-
     def get_profile_by_id(self, profile_id: str) -> dict | None:
         for p in self.list_profiles():
             if p.get("id") == profile_id:
                 return p
         return None
 
+    def get_named_mapping(self, profile: dict) -> dict[str, str | list[str] | None]:
+        """Lấy mapping theo tên cột của Profile."""
+        return profile.get("named_mapping", {})
+
+    def find_exact_matching_profile(
+        self,
+        current_raw_headers: list[str]
+    ) -> tuple[dict | None, dict[int, int | list[int] | None] | None]:
+        """
+        Tìm Profile khớp 100% theo tên cột (không phụ thuộc thứ tự vị trí cột hay index).
+        Yêu cầu:
+        - 100% các cột nguồn được mapping trong Profile phải tồn tại trong current_raw_headers
+          (so sánh tên cột sau khi chuẩn hóa chữ thường, bỏ dấu tiếng Việt).
+        - Trả về: (profile, resolved_mapping) với mapping đã chuyển sang index thực tế của file hiện tại.
+        - Nếu không có profile nào đạt 100%, trả về (None, None).
+        """
+        if not current_raw_headers:
+            return None, None
+
+        curr_norm_map: dict[str, list[int]] = {}
+        for idx, h in enumerate(current_raw_headers):
+            norm = normalize_text_for_match(h)
+            if norm:
+                curr_norm_map.setdefault(norm, []).append(idx)
+
+        profiles = self.list_profiles()
+        best_candidate = None
+        best_score = -1.0
+        best_resolved_map = None
+
+        for p in profiles:
+            named_map = self.get_named_mapping(p)
+            active_mappings = {int(k): v for k, v in named_map.items() if v is not None}
+            if not active_mappings:
+                continue
+
+            all_matched = True
+            resolved_map: dict[int, int | list[int] | None] = {col["idx"]: None for col in TARGET_COLUMNS}
+            used_sources: set[int] = set()
+
+            for t_idx, col_val in active_mappings.items():
+                if isinstance(col_val, list):
+                    resolved_list = []
+                    for name in col_val:
+                        norm_c = normalize_text_for_match(name)
+                        if norm_c in curr_norm_map:
+                            candidates = curr_norm_map[norm_c]
+                            chosen = next((i for i in candidates if i not in used_sources), candidates[0])
+                            resolved_list.append(chosen)
+                            used_sources.add(chosen)
+                        else:
+                            all_matched = False
+                            break
+                    if not all_matched:
+                        break
+                    resolved_map[t_idx] = resolved_list
+                else:
+                    norm_c = normalize_text_for_match(col_val)
+                    if norm_c in curr_norm_map:
+                        candidates = curr_norm_map[norm_c]
+                        chosen = next((i for i in candidates if i not in used_sources), candidates[0])
+                        resolved_map[t_idx] = chosen
+                        used_sources.add(chosen)
+                    else:
+                        all_matched = False
+                        break
+
+            if all_matched:
+                # Tính điểm đặc hiệu để ưu tiên Profile tốt nhất:
+                # 1. Số lượng cột mapping thành công (nhiều hơn = tốt hơn)
+                # 2. Độ trùng khớp tổng thể tập hợp headers (Jaccard similarity)
+                prof_headers = [normalize_text_for_match(h) for h in p.get("raw_headers", []) if h]
+                set_prof = set(prof_headers)
+                set_curr = set(curr_norm_map.keys())
+                jaccard = len(set_prof.intersection(set_curr)) / max(1, len(set_prof.union(set_curr)))
+                score = len(active_mappings) * 10.0 + jaccard
+
+                if score > best_score:
+                    best_score = score
+                    best_candidate = p
+                    best_resolved_map = resolved_map
+
+        if best_candidate and best_resolved_map:
+            return best_candidate, best_resolved_map
+        return None, None
+
     def save_profile(
         self,
         name: str,
-        signature: str,
         raw_headers: list[str],
-        mapping: dict[int, int | None],
-        default_values: dict[int | str, str] | None = None
+        mapping: dict[int, int | list[int] | None] | None = None,
+        named_mapping: dict[str, str | list[str] | None] | None = None,
+        default_values: dict[int | str, str] | None = None,
+        signature: str | None = None
     ) -> dict:
         """
-        Lưu hoặc cập nhật một Profile.
-        mapping: {1: 0, 5: 1, 9: None, ...}
-        default_values: {4: "Bằng tốt nghiệp THCS", 12: "Việt Nam", 14: "THCS A", ...}
+        Lưu hoặc cập nhật Profile theo Tên cột (named_mapping).
+        Quản lý và định danh profile theo Tên profile.
         """
         data = self._load_raw()
         profiles = data.get("profiles", [])
 
-        # Chuyển key mapping và default_values thành string để lưu JSON chuẩn
-        str_mapping = {str(k): v for k, v in mapping.items()}
         str_defaults = {str(k): str(v).strip() for k, v in (default_values or {}).items() if str(v).strip()}
 
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # Xây dựng named_mapping (Ánh xạ theo tên cột nguồn)
+        final_named_map: dict[str, str | list[str] | None] = {}
+        if named_mapping:
+            final_named_map = {str(k): v for k, v in named_mapping.items()}
+        elif mapping:
+            for k, v in mapping.items():
+                str_k = str(k)
+                if v is None:
+                    final_named_map[str_k] = None
+                elif isinstance(v, list):
+                    final_named_map[str_k] = [
+                        raw_headers[idx] for idx in v if isinstance(idx, int) and 0 <= idx < len(raw_headers)
+                    ]
+                elif isinstance(v, int):
+                    if 0 <= v < len(raw_headers):
+                        final_named_map[str_k] = raw_headers[v]
+                    else:
+                        final_named_map[str_k] = None
+                else:
+                    final_named_map[str_k] = None
 
-        # Kiểm tra xem signature đã tồn tại chưa
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        prof_name = name.strip() if name else f"Mẫu {len(raw_headers)} cột ({now_str[:10]})"
+        norm_name = prof_name.lower()
+
+        # Kiểm tra xem Profile cùng tên đã tồn tại chưa
         existing = None
         for p in profiles:
-            if p.get("signature") == signature:
+            if p.get("name", "").strip().lower() == norm_name:
                 existing = p
                 break
 
         if existing:
-            existing["name"] = name or existing.get("name", "Profile Không tên")
+            existing["name"] = prof_name
             existing["raw_headers"] = raw_headers
-            existing["mapping"] = str_mapping
+            existing["named_mapping"] = final_named_map
             existing["default_values"] = str_defaults
             existing["updated_at"] = now_str
             ret_profile = existing
         else:
-            profile_id = f"prof_{signature[:8]}_{int(datetime.now().timestamp())}"
+            profile_id = f"prof_{int(datetime.now().timestamp())}_{abs(hash(prof_name)) % 10000}"
             new_profile = {
                 "id": profile_id,
-                "name": name or f"Mẫu cột {len(raw_headers)} cột ({now_str[:10]})",
-                "signature": signature,
+                "name": prof_name,
                 "raw_headers": raw_headers,
-                "mapping": str_mapping,
+                "named_mapping": final_named_map,
                 "default_values": str_defaults,
                 "created_at": now_str,
                 "updated_at": now_str
@@ -657,26 +876,28 @@ class SmartMerger:
                 current_defaults: dict[int, str] = {}
                 profile_used_name: str = ""
 
-                # Kiểm tra xem có khớp chuẩn 28 cột không
+                # 1. Kiểm tra xem có khớp chuẩn 28 cột không
                 if is_standard_28_headers(raw_headers):
                     mapping = {col["idx"]: idx for idx, col in enumerate(TARGET_COLUMNS) if idx < len(raw_headers)}
                     current_defaults = {}
                     profile_used_name = "Chuẩn 28 cột gốc"
                     log(f"  ⚡ Sheet '{ws_curr.title}': Cấu trúc chuẩn 28 cột $\\rightarrow$ Ánh xạ tự động 1:1.", "info")
                 else:
-                    # Kiểm tra trong kho Profile đã lưu
-                    saved_prof = self.profile_mgr.get_profile_by_signature(sig)
-                    if saved_prof:
-                        # Áp dụng Profile đã lưu tự động mà KHÔNG cần hỏi lại
-                        str_map = saved_prof.get("mapping", {})
-                        mapping = {int(k): v for k, v in str_map.items()}
-                        str_defs = saved_prof.get("default_values", {})
+                    # 2. Tìm Profile khớp 100% theo TÊN CỘT (không phụ thuộc thứ tự index)
+                    exact_prof, resolved_map = self.profile_mgr.find_exact_matching_profile(raw_headers)
+                    if exact_prof and resolved_map:
+                        mapping = resolved_map
+                        str_defs = exact_prof.get("default_values", {})
                         current_defaults = {int(k): str(v).strip() for k, v in str_defs.items() if str(v).strip()}
-                        profile_used_name = saved_prof.get("name", "Profile đã lưu")
-                        log(f"  ⚡ Sheet '{ws_curr.title}': Áp dụng Profile đã nhớ: '{profile_used_name}'.", "info")
+                        profile_used_name = exact_prof.get("name", "Profile đã lưu")
+                        log(f"  ⚡ Sheet '{ws_curr.title}': Tự động áp dụng Profile '{profile_used_name}' (Khớp 100% tên cột).", "info")
                     else:
-                        # Chưa có Profile -> Gợi ý tự động & Kích hoạt giao diện hỏi người dùng
-                        suggested_map = auto_suggest_mapping(raw_headers)
+                        # 3. Chưa có Profile khớp 100% tên cột -> Gợi ý thông minh 2 tầng:
+                        #    Tầng 1: Khớp mờ theo Profile gần nhất
+                        #    Tầng 2: Điền tiếp theo từ điển đồng nghĩa 28 cột
+                        suggested_map, suggested_defs, matched_pname = auto_suggest_mapping_with_details(
+                            raw_headers, profile_mgr=self.profile_mgr
+                        )
                         formatted_headers = header_info.get("formatted_headers", [])
 
                         callback_payload = {
@@ -687,7 +908,9 @@ class SmartMerger:
                             "raw_headers": raw_headers,
                             "formatted_headers": formatted_headers,
                             "signature": sig,
-                            "suggested_mapping": suggested_map
+                            "suggested_mapping": suggested_map,
+                            "suggested_defaults": suggested_defs,
+                            "matched_profile_name": matched_pname
                         }
 
                         if mapping_callback:
@@ -709,10 +932,9 @@ class SmartMerger:
                             current_defaults = {int(k): str(v).strip() for k, v in (custom_defs or {}).items() if str(v).strip()}
                             profile_used_name = prof_name or f"Profile_{p.stem}_{ws_curr.title}"
 
-                            # Lưu Profile này vào bộ nhớ cho những lần sau
+                            # Lưu Profile này vào bộ nhớ cho những lần sau (bao gồm cả Tên cột và Index)
                             self.profile_mgr.save_profile(
                                 name=profile_used_name,
-                                signature=sig,
                                 raw_headers=raw_headers,
                                 mapping=mapping,
                                 default_values=current_defaults
@@ -721,8 +943,8 @@ class SmartMerger:
                         else:
                             # Không có UI callback -> sử dụng luôn gợi ý tự động
                             mapping = suggested_map
-                            current_defaults = {}
-                            profile_used_name = "Tự động suy luận"
+                            current_defaults = suggested_defs
+                            profile_used_name = matched_pname or "Tự động suy luận"
 
                 if not mapping:
                     continue
