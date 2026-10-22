@@ -35,14 +35,14 @@ if %errorlevel% equ 0 (
 
 where py >nul 2>nul
 if %errorlevel% equ 0 (
-    py -m pip install openpyxl certifi -q >nul 2>nul
+    py -m pip install openpyxl certifi pywin32 -q >nul 2>nul
     py main.py
     goto end
 )
 
 where python >nul 2>nul
 if %errorlevel% equ 0 (
-    python -m pip install openpyxl certifi -q >nul 2>nul
+    python -m pip install openpyxl certifi pywin32 -q >nul 2>nul
     python main.py
     goto end
 )

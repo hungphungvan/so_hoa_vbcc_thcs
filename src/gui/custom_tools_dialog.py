@@ -1167,7 +1167,10 @@ class CustomToolsView(ttk.Frame):
                 try:
                     def prog_cb(cur, tot, msg):
                         val = (cur / tot * 100) if tot > 0 else 0
-                        self.msg_queue.put(("convert_prog", val, f"[{cur}/{tot}] {msg}"))
+                        self.msg_queue.put(("convert_prog", val, msg))
+
+                    def file_st_cb(f_path, status):
+                        self.msg_queue.put(("convert_file_status", f_path, status))
 
                     res = FileFormatConverter.batch_convert(
                         files=self.convert_files_list,
@@ -1175,6 +1178,7 @@ class CustomToolsView(ttk.Frame):
                         delete_source=delete_src,
                         skip_existing=skip_ex,
                         progress_callback=prog_cb,
+                        file_status_callback=file_st_cb,
                         log_callback=lambda m, l: self._log(m, l)
                     )
 
@@ -1343,7 +1347,23 @@ class CustomToolsView(ttk.Frame):
             elif msg_type == "convert_prog":
                 val, msg = item[1], item[2]
                 self.convert_prog["value"] = val
+                self.convert_status_lbl.config(text=f"⏳ {msg}...", foreground=self.palette.WARNING)
                 self._log(f"  {msg}", "info")
+            elif msg_type == "convert_file_status":
+                f_p, st = item[1], item[2]
+                for child in self.convert_tree.get_children():
+                    vals = list(self.convert_tree.item(child, "values"))
+                    if str(f_p) in vals:
+                        if "Thành công" in st:
+                            icon_st = f"✅ {st}"
+                        elif "Bỏ qua" in st:
+                            icon_st = f"⏭️ {st}"
+                        elif "Đang" in st:
+                            icon_st = f"⏳ {st}"
+                        else:
+                            icon_st = f"❌ {st}"
+                        vals[4] = icon_st
+                        self.convert_tree.item(child, values=vals)
             elif msg_type == "convert_done":
                 res, target_dir = item[1], item[2]
                 self.convert_prog["value"] = 100

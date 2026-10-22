@@ -28,7 +28,7 @@ jobs:
         if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
           VERSION="${GITHUB_REF_NAME#v}"
         else
-          VERSION="2.0.${{ github.run_number }}"
+          VERSION="2.1.${{ github.run_number }}"
         fi
         echo "APP_VERSION = '${VERSION}'" > src/version.py
         echo "APP_NAME = 'SohoaTHCS'" >> src/version.py
@@ -37,11 +37,11 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install openpyxl pyinstaller certifi xlrd python-docx
+        pip install openpyxl pyinstaller certifi xlrd python-docx pywin32
 
     - name: Build .exe with PyInstaller
       run: |
-        pyinstaller --noconfirm --onefile --windowed --name "SohoaTHCS" --add-data "data;data" --hidden-import xlrd --hidden-import docx --collect-all certifi main.py
+        pyinstaller --noconfirm --onefile --windowed --name "SohoaTHCS" --add-data "data;data" --hidden-import xlrd --hidden-import docx --hidden-import win32com --collect-all certifi main.py
 
     - name: Upload Windows Artifact
       uses: actions/upload-artifact@v4
@@ -67,7 +67,7 @@ jobs:
         if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
           VERSION="${GITHUB_REF_NAME#v}"
         else
-          VERSION="2.0.${{ github.run_number }}"
+          VERSION="2.1.${{ github.run_number }}"
         fi
         echo "APP_VERSION = '${VERSION}'" > src/version.py
         echo "APP_NAME = 'SohoaTHCS'" >> src/version.py
@@ -125,11 +125,11 @@ jobs:
     - name: Publish to GitHub Release
       uses: softprops/action-gh-release@v2
       with:
-        tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v2.0.{0}', github.run_number) }}
-        name: "SohoaTHCS ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v2.0.{0}', github.run_number) }} - Bản phát hành Windows & macOS"
+        tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v2.1.{0}', github.run_number) }}
+        name: "SohoaTHCS ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v2.1.{0}', github.run_number) }} - Bản phát hành Windows & macOS"
         make_latest: true
         body: |
-          ### 🚀 Tải về ứng dụng chạy trực tiếp (Không cần cài đặt Python) - Phiên bản ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v2.0.{0}', github.run_number) }}
+          ### 🚀 Tải về ứng dụng chạy trực tiếp (Không cần cài đặt Python) - Phiên bản ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v2.1.{0}', github.run_number) }}
 
           | Hệ điều hành | Tệp tải về | Hướng dẫn sử dụng |
           | :--- | :--- | :--- |

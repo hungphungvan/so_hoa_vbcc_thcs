@@ -11,6 +11,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from datetime import datetime
 from typing import Callable, Any
+import base64
 
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -22,6 +23,12 @@ try:
 except ImportError:
     HAS_XLRD = False
 
+try:
+    import win32com.client
+    HAS_WIN32COM = True
+except ImportError:
+    HAS_WIN32COM = False
+
 
 class FileFormatConverter:
     """
@@ -30,6 +37,58 @@ class FileFormatConverter:
     - .xls  -> .xlsx (Excel 97-2003 -> Excel OpenXML)
     Hỗ trợ đa nền tảng (macOS và Windows).
     """
+    _excel_app = None
+    _word_app = None
+
+    @classmethod
+    def get_excel_app(cls):
+        """Lấy hoặc khởi tạo phiên Microsoft Excel qua win32com (tái sử dụng instance)."""
+        if cls._excel_app is None and HAS_WIN32COM:
+            try:
+                cls._excel_app = win32com.client.Dispatch("Excel.Application")
+                cls._excel_app.Visible = False
+                cls._excel_app.DisplayAlerts = False
+                cls._excel_app.ScreenUpdating = False
+                cls._excel_app.EnableEvents = False
+            except Exception:
+                cls._excel_app = None
+        return cls._excel_app
+
+    @classmethod
+    def get_word_app(cls):
+        """Lấy hoặc khởi tạo phiên Microsoft Word qua win32com (tái sử dụng instance)."""
+        if cls._word_app is None and HAS_WIN32COM:
+            try:
+                cls._word_app = win32com.client.Dispatch("Word.Application")
+                cls._word_app.Visible = False
+                cls._word_app.DisplayAlerts = 0
+                cls._word_app.ScreenUpdating = False
+            except Exception:
+                cls._word_app = None
+        return cls._word_app
+
+    @staticmethod
+    def _run_powershell(script: str, timeout: int = 120) -> tuple[int, str, str]:
+        """
+        Thực thi script PowerShell ẩn dưới nền, hỗ trợ 100% đường dẫn Unicode tiếng Việt
+        thông qua chuẩn mã hóa UTF-16LE Base64 (-EncodedCommand).
+        """
+        full_script = f'''
+        $OutputEncoding = [System.Text.Encoding]::UTF8
+        [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+        {script}
+        '''
+        enc = base64.b64encode(full_script.encode('utf-16le')).decode('ascii')
+        cmd = ["powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-EncodedCommand", enc]
+        res = subprocess.run(
+            cmd,
+            capture_output=True,
+            timeout=timeout,
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+        )
+        stdout = res.stdout.decode('utf-8', errors='replace').strip()
+        stderr = res.stderr.decode('utf-8', errors='replace').strip()
+        return res.returncode, stdout, stderr
 
     @staticmethod
     def scan_files(paths: list[Path | str], recursive: bool = True) -> list[dict]:
@@ -255,12 +314,12 @@ class FileFormatConverter:
         except Exception:
             return False
 
-    @staticmethod
-    def close_office_apps(apps: tuple[str, ...] = ("word", "excel")) -> None:
+    @classmethod
+    def close_office_apps(cls, apps: tuple[str, ...] = ("word", "excel")) -> None:
         """
         Đóng an toàn và dọn sạch các tệp/tiến trình Microsoft Word và Microsoft Excel.
         - Trên macOS: Sử dụng AppleScript đóng các file đã mở và thoát ứng dụng.
-        - Trên Windows: Thu dọn COM và thu hồi rác bộ nhớ.
+        - Trên Windows: Thu dọn COM (win32com & PowerShell) và thu hồi rác bộ nhớ.
         """
         if sys.platform == "darwin":
             script_parts = []
@@ -295,6 +354,18 @@ class FileFormatConverter:
                 except Exception:
                     pass
         elif sys.platform == "win32":
+            if "excel" in apps and cls._excel_app is not None:
+                try:
+                    cls._excel_app.Quit()
+                except Exception:
+                    pass
+                cls._excel_app = None
+            if "word" in apps and cls._word_app is not None:
+                try:
+                    cls._word_app.Quit()
+                except Exception:
+                    pass
+                cls._word_app = None
             import gc
             gc.collect()
 
@@ -365,16 +436,15 @@ class FileFormatConverter:
         except Exception as e:
             return False, str(e)
 
-    @staticmethod
-    def _convert_doc_via_word_windows(src_p: Path, out_p: Path) -> tuple[bool, str]:
+    @classmethod
+    def _convert_doc_via_word_windows(cls, src_p: Path, out_p: Path, auto_quit: bool = True) -> tuple[bool, str]:
         """
-        Chuyển đổi .doc sang .docx thông qua PowerShell COM Automation trên Windows:
-        - Mở trực tiếp file .doc bằng Word
-        - Lưu sang .docx chuẩn mã 16 (wdFormatXMLDocument)
-        - Đóng file và giải phóng sạch tiến trình WINWORD.EXE
+        Chuyển đổi .doc sang .docx thông qua Microsoft Word trên Windows:
+        - Ưu tiên win32com native (in-process, tốc độ cực nhanh ~0.2s - 0.5s/file).
+        - Dự phòng qua PowerShell COM nếu win32com không khả dụng.
         """
-        src_abs = str(src_p.resolve()).replace("'", "''")
-        out_abs = str(out_p.resolve()).replace("'", "''")
+        src_abs = str(src_p.resolve())
+        out_abs = str(out_p.resolve())
 
         # Xóa tệp đích trước để không bị hỏi ghi đè
         if out_p.exists():
@@ -383,18 +453,55 @@ class FileFormatConverter:
             except Exception:
                 pass
 
+        # 1. Ưu tiên win32com native (In-process, không mở process phụ)
+        if HAS_WIN32COM:
+            try:
+                word = cls.get_word_app()
+                if word is None:
+                    word = win32com.client.Dispatch("Word.Application")
+                    word.Visible = False
+                    word.DisplayAlerts = 0
+                    word.ScreenUpdating = False
+
+                # ConfirmConversions=False, ReadOnly=True, AddToRecentFiles=False
+                doc = word.Documents.Open(src_abs, False, True, False)
+                # wdFormatXMLDocument = 16
+                doc.SaveAs2(out_abs, 16)
+                doc.Close(0)
+
+                if auto_quit:
+                    cls.close_office_apps(apps=("word",))
+
+                if out_p.exists() and out_p.stat().st_size > 0:
+                    return True, "Thành công qua Microsoft Word (Native COM)"
+            except Exception:
+                if auto_quit:
+                    cls.close_office_apps(apps=("word",))
+
+        # 2. Phương án dự phòng qua PowerShell COM
+        src_abs_ps = src_abs.replace("'", "''")
+        out_abs_ps = out_abs.replace("'", "''")
+        quit_clause = """
+            if ($word -ne $null) {
+                try { $word.Quit() } catch {}
+                try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($word) | Out-Null } catch {}
+            }
+        """ if auto_quit else ""
+
         ps_script = f'''
         $ErrorActionPreference = 'Stop'
+        $ProgressPreference = 'SilentlyContinue'
         $word = $null
         $doc = $null
         try {{
             $word = New-Object -ComObject Word.Application
             $word.Visible = $false
             $word.DisplayAlerts = 0
+            $word.ScreenUpdating = $false
             try {{ $word.AutomationSecurity = 3 }} catch {{}}
 
-            $doc = $word.Documents.Open('{src_abs}', $false, $true, $false)
-            $doc.SaveAs2('{out_abs}', 16)
+            $doc = $word.Documents.Open('{src_abs_ps}', $false, $true, $false)
+            $doc.SaveAs2('{out_abs_ps}', 16)
             $doc.Close(0)
             $doc = $null
             Write-Output "OK"
@@ -404,24 +511,16 @@ class FileFormatConverter:
             if ($doc -ne $null) {{
                 try {{ $doc.Close(0) }} catch {{}}
             }}
-            if ($word -ne $null) {{
-                try {{ $word.Quit() }} catch {{}}
-                try {{ [System.Runtime.InteropServices.Marshal]::ReleaseComObject($word) | Out-Null }} catch {{}}
-            }}
+            {quit_clause}
             [System.GC]::Collect()
             [System.GC]::WaitForPendingFinalizers()
         }}
         '''
         try:
-            res = subprocess.run(
-                ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script],
-                capture_output=True,
-                text=True,
-                timeout=120
-            )
-            if "OK" in (res.stdout or "") and out_p.exists() and out_p.stat().st_size > 0:
+            code, stdout, stderr = FileFormatConverter._run_powershell(ps_script, timeout=120)
+            if "OK" in stdout and out_p.exists() and out_p.stat().st_size > 0:
                 return True, "Thành công qua Microsoft Word (Windows)"
-            return False, res.stderr.strip() or "Lỗi PowerShell COM Word"
+            return False, stderr or stdout or "Lỗi PowerShell COM Word"
         except subprocess.TimeoutExpired:
             return False, "Quá thời gian chờ (120s) khi gọi Word COM trên Windows."
         except Exception as e:
@@ -431,6 +530,10 @@ class FileFormatConverter:
     def _convert_doc_via_libreoffice(soffice_path: str, src_p: Path, out_p: Path) -> tuple[bool, str]:
         """Chuyển đổi thông qua LibreOffice headless CLI."""
         try:
+            extra_kwargs: dict[str, Any] = {}
+            if sys.platform == "win32":
+                extra_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+
             cmd = [
                 soffice_path,
                 "--headless",
@@ -438,7 +541,7 @@ class FileFormatConverter:
                 "--outdir", str(out_p.parent),
                 str(src_p.resolve())
             ]
-            subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            subprocess.run(cmd, capture_output=True, text=True, timeout=60, **extra_kwargs)
             gen_file = out_p.parent / f"{src_p.stem}.docx"
             if gen_file.exists():
                 if gen_file.resolve() != out_p.resolve():
@@ -455,7 +558,7 @@ class FileFormatConverter:
                 "--outdir", str(out_p.parent),
                 str(src_p.resolve())
             ]
-            subprocess.run(cmd_simple, capture_output=True, text=True, timeout=60)
+            subprocess.run(cmd_simple, capture_output=True, text=True, timeout=60, **extra_kwargs)
             if gen_file.exists():
                 if gen_file.resolve() != out_p.resolve():
                     if out_p.exists():
@@ -526,7 +629,7 @@ class FileFormatConverter:
             ok, msg = FileFormatConverter._convert_doc_via_word_macos(p, out_p, auto_quit=auto_quit)
             method_used = "Microsoft Word (macOS)"
         elif sys.platform == "win32":
-            ok, msg = FileFormatConverter._convert_doc_via_word_windows(p, out_p)
+            ok, msg = FileFormatConverter._convert_doc_via_word_windows(p, out_p, auto_quit=auto_quit)
             method_used = "Microsoft Word (Windows)"
         else:
             return False, None, "Hệ điều hành hiện tại không hỗ trợ Microsoft Word."
@@ -625,16 +728,16 @@ class FileFormatConverter:
         except Exception as e:
             return False, str(e)
 
-    @staticmethod
-    def _convert_xls_via_excel_windows(src_p: Path, out_p: Path) -> tuple[bool, str]:
+    @classmethod
+    def _convert_xls_via_excel_windows(cls, src_p: Path, out_p: Path, auto_quit: bool = True) -> tuple[bool, str]:
         """
-        Chuyển đổi .xls sang .xlsx thông qua PowerShell COM Automation trên Windows:
-        - Mở trực tiếp file .xls bằng Excel
-        - Lưu sang .xlsx chuẩn mã 51 (xlOpenXMLWorkbook)
-        - Đóng file và giải phóng sạch tiến trình EXCEL.EXE
+        Chuyển đổi .xls sang .xlsx thông qua Microsoft Excel trên Windows:
+        - Ưu tiên win32com native (in-process, tốc độ cực nhanh ~0.2s - 0.5s/file).
+        - Tự động tái sử dụng phiên Excel khi chuyển đổi nhiều tệp liên tiếp.
+        - Dự phòng qua PowerShell COM (-EncodedCommand UTF-16LE) nếu win32com không khả dụng.
         """
-        src_abs = str(src_p.resolve()).replace("'", "''")
-        out_abs = str(out_p.resolve()).replace("'", "''")
+        src_abs = str(src_p.resolve())
+        out_abs = str(out_p.resolve())
 
         # Xóa tệp đích trước để không bị hỏi ghi đè
         if out_p.exists():
@@ -643,8 +746,45 @@ class FileFormatConverter:
             except Exception:
                 pass
 
+        # 1. Ưu tiên win32com native (In-process, siêu tốc)
+        if HAS_WIN32COM:
+            try:
+                excel = cls.get_excel_app()
+                if excel is None:
+                    excel = win32com.client.Dispatch("Excel.Application")
+                    excel.Visible = False
+                    excel.DisplayAlerts = False
+                    excel.ScreenUpdating = False
+                    excel.EnableEvents = False
+
+                # UpdateLinks=0, ReadOnly=True
+                wb = excel.Workbooks.Open(src_abs, 0, True)
+                # xlOpenXMLWorkbook = 51
+                wb.SaveAs(out_abs, 51)
+                wb.Close(False)
+
+                if auto_quit:
+                    cls.close_office_apps(apps=("excel",))
+
+                if out_p.exists() and out_p.stat().st_size > 0:
+                    return True, "Thành công qua Microsoft Excel (Native COM)"
+            except Exception:
+                if auto_quit:
+                    cls.close_office_apps(apps=("excel",))
+
+        # 2. Phương án dự phòng qua PowerShell COM
+        src_abs_ps = src_abs.replace("'", "''")
+        out_abs_ps = out_abs.replace("'", "''")
+        quit_clause = """
+            if ($excel -ne $null) {
+                try { $excel.Quit() } catch {}
+                try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($excel) | Out-Null } catch {}
+            }
+        """ if auto_quit else ""
+
         ps_script = f'''
         $ErrorActionPreference = 'Stop'
+        $ProgressPreference = 'SilentlyContinue'
         $excel = $null
         $wb = $null
         try {{
@@ -652,10 +792,12 @@ class FileFormatConverter:
             $excel.Visible = $false
             $excel.DisplayAlerts = $false
             $excel.AskToUpdateLinks = $false
+            $excel.ScreenUpdating = $false
+            $excel.EnableEvents = $false
             try {{ $excel.AutomationSecurity = 3 }} catch {{}}
 
-            $wb = $excel.Workbooks.Open('{src_abs}', $false, $true)
-            $wb.SaveAs('{out_abs}', 51)
+            $wb = $excel.Workbooks.Open('{src_abs_ps}', 0, $true)
+            $wb.SaveAs('{out_abs_ps}', 51)
             $wb.Close($false)
             $wb = $null
             Write-Output "OK"
@@ -665,24 +807,16 @@ class FileFormatConverter:
             if ($wb -ne $null) {{
                 try {{ $wb.Close($false) }} catch {{}}
             }}
-            if ($excel -ne $null) {{
-                try {{ $excel.Quit() }} catch {{}}
-                try {{ [System.Runtime.InteropServices.Marshal]::ReleaseComObject($excel) | Out-Null }} catch {{}}
-            }}
+            {quit_clause}
             [System.GC]::Collect()
             [System.GC]::WaitForPendingFinalizers()
         }}
         '''
         try:
-            res = subprocess.run(
-                ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script],
-                capture_output=True,
-                text=True,
-                timeout=120
-            )
-            if "OK" in (res.stdout or "") and out_p.exists() and out_p.stat().st_size > 0:
+            code, stdout, stderr = FileFormatConverter._run_powershell(ps_script, timeout=120)
+            if "OK" in stdout and out_p.exists() and out_p.stat().st_size > 0:
                 return True, "Thành công qua Microsoft Excel (Windows)"
-            return False, res.stderr.strip() or "Lỗi PowerShell COM Excel"
+            return False, stderr or stdout or "Lỗi PowerShell COM Excel"
         except subprocess.TimeoutExpired:
             return False, "Quá thời gian chờ (120s) khi gọi Excel COM trên Windows."
         except Exception as e:
@@ -692,6 +826,10 @@ class FileFormatConverter:
     def _convert_xls_via_libreoffice(soffice_path: str, src_p: Path, out_p: Path) -> tuple[bool, str]:
         """Chuyển đổi .xls sang .xlsx thông qua LibreOffice Calc headless CLI."""
         try:
+            extra_kwargs: dict[str, Any] = {}
+            if sys.platform == "win32":
+                extra_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+
             cmd = [
                 soffice_path,
                 "--headless",
@@ -699,7 +837,7 @@ class FileFormatConverter:
                 "--outdir", str(out_p.parent),
                 str(src_p.resolve())
             ]
-            subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            subprocess.run(cmd, capture_output=True, text=True, timeout=60, **extra_kwargs)
             gen_file = out_p.parent / f"{src_p.stem}.xlsx"
             if gen_file.exists():
                 if gen_file.resolve() != out_p.resolve():
@@ -715,7 +853,7 @@ class FileFormatConverter:
                 "--outdir", str(out_p.parent),
                 str(src_p.resolve())
             ]
-            subprocess.run(cmd_simple, capture_output=True, text=True, timeout=60)
+            subprocess.run(cmd_simple, capture_output=True, text=True, timeout=60, **extra_kwargs)
             if gen_file.exists():
                 if gen_file.resolve() != out_p.resolve():
                     if out_p.exists():
@@ -880,7 +1018,7 @@ class FileFormatConverter:
             ok, msg = FileFormatConverter._convert_xls_via_excel_macos(p, out_p, auto_quit=auto_quit)
             method_used = "Microsoft Excel (macOS)"
         elif sys.platform == "win32":
-            ok, msg = FileFormatConverter._convert_xls_via_excel_windows(p, out_p)
+            ok, msg = FileFormatConverter._convert_xls_via_excel_windows(p, out_p, auto_quit=auto_quit)
             method_used = "Microsoft Excel (Windows)"
         else:
             return False, None, "Hệ điều hành hiện tại không hỗ trợ Microsoft Excel."
@@ -920,12 +1058,14 @@ class FileFormatConverter:
         skip_existing: bool = True,
         progress_callback: Callable[[int, int, str], None] | None = None,
         log_callback: Callable[[str, str], None] | None = None,
-        check_cancel: Callable[[], bool] | None = None
+        check_cancel: Callable[[], bool] | None = None,
+        file_status_callback: Callable[[Path, str], None] | None = None
     ) -> dict[str, Any]:
         """
         Chuyển đổi hàng loạt danh sách các file .doc và .xls:
         - Báo cáo tiến trình thời gian thực
         - Hỗ trợ dừng giữa chừng qua check_cancel
+        - Cập nhật trạng thái từng file qua file_status_callback
         """
         def log(msg, level="info"):
             if log_callback:
@@ -953,6 +1093,12 @@ class FileFormatConverter:
                     log("⏹ Đã dừng tiến trình chuyển đổi theo yêu cầu người dùng.", "warning")
                     break
 
+                # Cập nhật tiến trình ngay khi bắt đầu xử lý file này
+                if progress_callback:
+                    progress_callback(idx - 1, total, f"Đang chuyển [{idx}/{total}]: {f.name}")
+                if file_status_callback:
+                    file_status_callback(f, "Đang chuyển...")
+
                 ext = f.suffix.lower()
                 target_ext = ".docx" if ext == ".doc" else ".xlsx"
 
@@ -965,6 +1111,8 @@ class FileFormatConverter:
                     log(f"  ⏭️ [{idx}/{total}] Đã tồn tại: {dest_file.name}, bỏ qua.", "info")
                     skipped_count += 1
                     results.append({"path": f, "out": dest_file, "status": "Bỏ qua (đã có)"})
+                    if file_status_callback:
+                        file_status_callback(f, "Bỏ qua (đã có)")
                     if progress_callback:
                         progress_callback(idx, total, f"Bỏ qua: {f.name}")
                     continue
@@ -990,13 +1138,17 @@ class FileFormatConverter:
                     success_count += 1
                     log(f"  ✅ [{idx}/{total}] Chuyển thành công: {f.name} $\\rightarrow$ {dest_file.name}", "success")
                     results.append({"path": f, "out": dest_file, "status": "Thành công"})
+                    if file_status_callback:
+                        file_status_callback(f, "Thành công")
                 else:
                     failed_count += 1
                     log(f"  ❌ [{idx}/{total}] Lỗi chuyển đổi {f.name}: {msg}", "error")
                     results.append({"path": f, "out": None, "status": f"Lỗi: {msg}"})
+                    if file_status_callback:
+                        file_status_callback(f, f"Lỗi: {msg}")
 
                 if progress_callback:
-                    progress_callback(idx, total, f"Đang chuyển: {f.name}")
+                    progress_callback(idx, total, f"Đã xong: {f.name}")
         finally:
             # Tự động đóng Word & Excel khi kết thúc hoặc huỷ
             FileFormatConverter.close_office_apps()
