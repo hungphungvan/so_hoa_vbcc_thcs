@@ -14,8 +14,8 @@ import openpyxl
 
 from src.gui.theme import (
     get_theme_palette, IS_DARK,
-    FONT_TITLE, FONT_SUBTITLE, FONT_CARD_TITLE, FONT_LABEL, FONT_LABEL_BOLD,
-    FONT_BUTTON, FONT_BUTTON_REG, FONT_LOG, FONT_MUTED
+    FONT_TITLE, FONT_SUBTITLE, FONT_LABEL, FONT_LABEL_BOLD,
+    FONT_LOG, FONT_MUTED
 )
 from src.exporter import sanitize_filename
 from src.custom_excel_manager import (
@@ -25,8 +25,7 @@ from src.custom_excel_manager import (
 )
 from src.smart_merger import (
     SmartMerger,
-    MappingProfileManager,
-    TARGET_COLUMNS
+    MappingProfileManager
 )
 from src.gui.column_mapping_dialog import ColumnMappingDialog
 from src.file_converter import FileFormatConverter

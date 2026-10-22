@@ -7,7 +7,6 @@ from typing import Any, Callable
 from src.gui.theme import (
     FONT_LABEL,
     FONT_LABEL_BOLD,
-    FONT_BUTTON,
     FONT_TITLE,
     CLR_PRIMARY,
     CLR_SUCCESS,

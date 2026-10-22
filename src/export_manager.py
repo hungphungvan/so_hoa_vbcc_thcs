@@ -9,11 +9,10 @@ from pathlib import Path
 from typing import Any, Callable
 
 import openpyxl
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from openpyxl.utils import get_column_letter
+from openpyxl.styles import Font
 
 from src.lookup_manager import find_data_file
-from src.normalizer import parse_nien_khoa, clean_whitespace, is_cell_empty
+from src.normalizer import parse_nien_khoa
 
 TEXT_COLS_STUDENT = {2, 3, 6, 7, 8, 9, 19, 24, 27}
 TEXT_COLS_DOC = {2, 4, 6, 7, 8}

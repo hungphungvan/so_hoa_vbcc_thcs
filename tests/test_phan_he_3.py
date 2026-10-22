@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import shutil
 import tempfile
 import unittest
@@ -10,9 +9,7 @@ import openpyxl
 from src.db_manager import DatabaseManager
 from src.export_manager import (
     ExportManager,
-    analyze_cohorts,
-    parse_cohort_grad_year,
-    sanitize_filename
+    analyze_cohorts
 )
 
 class TestPhanHe3Export(unittest.TestCase):

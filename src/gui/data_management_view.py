@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import tkinter as tk
 from tkinter import ttk, messagebox
-from typing import Any, Callable
+from typing import Any
 
 from src.gui.student_edit_dialog import StudentEditDialog, BatchEditDialog
 from src.gui.export_dialog import ExportDialog
@@ -10,19 +10,12 @@ from src.gui.theme import (
     FONT_LABEL,
     FONT_LABEL_BOLD,
     FONT_DATA_BOLD,
-    FONT_BUTTON,
-    FONT_BUTTON_REG,
-    FONT_TREE,
     FONT_TREE_BOLD,
-    FONT_TREE_HEADING,
     CLR_PRIMARY,
-    CLR_SUCCESS,
     CLR_WARNING,
     CLR_DANGER,
     CLR_MUTED,
-    CLR_TEXT,
-    CLR_ENTRY_BG,
-    CLR_ENTRY_FG
+    CLR_TEXT
 )
 
 class DataManagementView(ttk.Frame):

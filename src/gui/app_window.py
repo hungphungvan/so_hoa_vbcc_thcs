@@ -10,7 +10,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from tkinter.scrolledtext import ScrolledText
 
-from src.lookup_manager import LookupManager, get_data_dir
+from src.lookup_manager import LookupManager
 from src.excel_processor import ExcelProcessor
 from src.db_manager import DatabaseManager
 from src.version import APP_VERSION, APP_NAME
@@ -22,37 +22,19 @@ from src.gui.dialogs import (
     GradDateBlockDialog,
     DataInspectorDialog
 )
-from src.gui.custom_tools_dialog import CustomToolsDialog, CustomToolsView
+from src.gui.custom_tools_dialog import CustomToolsView
 from src.gui.data_management_view import DataManagementView
 from src.gui.theme import (
     IS_DARK,
-    FONT_FAMILY,
-    FONT_FAMILY_MONO,
     FONT_TITLE,
     FONT_SUBTITLE,
-    FONT_CARD_TITLE,
     FONT_LABEL,
     FONT_LABEL_BOLD,
     FONT_DATA_BOLD,
     FONT_MUTED,
-    FONT_BUTTON,
-    FONT_BUTTON_REG,
     FONT_LOG,
-    FONT_TREE,
-    FONT_TREE_HEADING,
     get_theme_palette,
     configure_ttk_theme,
-    ThemePalette,
-    CLR_PRIMARY,
-    CLR_ACCENT,
-    CLR_SUCCESS,
-    CLR_WARNING,
-    CLR_DANGER,
-    CLR_MUTED,
-    CLR_TEXT,
-    CLR_WINDOW_BG,
-    CLR_LOG_BG,
-    CLR_LOG_FG,
 )
 
 class MainWindow:

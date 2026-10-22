@@ -1,10 +1,9 @@
 import unittest
 import tkinter as tk
-from src.gui.dialogs import DateFixDialog, SchoolBlockDialog, CohortBlockDialog, GradDateBlockDialog
+from src.gui.dialogs import DateFixDialog
 from src.gui.custom_tools_dialog import CustomToolsDialog, CustomToolsView, ManageProfilesDialog
 from src.gui.column_mapping_dialog import ColumnMappingDialog
 from src.smart_merger import MappingProfileManager
-from src.gui.student_edit_dialog import StudentEditDialog, BatchEditDialog
 from src.gui.export_dialog import ExportDialog
 from src.gui.data_management_view import DataManagementView
 from src.db_manager import DatabaseManager

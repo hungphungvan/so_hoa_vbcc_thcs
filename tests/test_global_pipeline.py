@@ -10,7 +10,7 @@ if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
     except Exception:
         pass
 
-from src.lookup_manager import LookupManager, find_data_file
+from src.lookup_manager import LookupManager
 from src.excel_processor import ExcelProcessor
 
 TEMP_DIR = Path(tempfile.gettempdir())

@@ -7,13 +7,12 @@ import subprocess
 from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
-from typing import Any, Callable
+from typing import Any
 
-from src.export_manager import ExportManager, analyze_cohorts, parse_cohort_grad_year
+from src.export_manager import ExportManager, analyze_cohorts
 from src.gui.theme import (
     FONT_LABEL,
     FONT_LABEL_BOLD,
-    FONT_BUTTON,
     FONT_TITLE,
     FONT_SUBTITLE,
     CLR_PRIMARY,

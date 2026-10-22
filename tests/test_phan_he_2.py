@@ -1,4 +1,3 @@
-import os
 import sys
 import tempfile
 import unittest
@@ -10,7 +9,6 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from src.db_manager import DatabaseManager
-from src.lookup_manager import LookupManager
 
 class TestPhanHe2(unittest.TestCase):
     def setUp(self):

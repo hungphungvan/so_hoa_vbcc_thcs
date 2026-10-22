@@ -1,4 +1,3 @@
-import sys
 import unittest
 import tempfile
 from pathlib import Path
@@ -8,7 +7,6 @@ from src.custom_excel_manager import (
     is_valid_stt,
     is_valid_name,
     is_header_duplicate_row,
-    detect_header_and_columns,
     ExcelSplitter,
     ExcelMerger
 )

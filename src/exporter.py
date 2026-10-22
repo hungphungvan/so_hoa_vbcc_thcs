@@ -10,9 +10,8 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
-from src.lookup_manager import get_data_dir, find_data_file
+from src.lookup_manager import find_data_file
 from src.normalizer import (
-    clean_whitespace,
     is_cell_empty,
     parse_nien_khoa,
     extract_birth_year_from_dob

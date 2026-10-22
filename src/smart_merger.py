@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import sys
 import re
 import json
@@ -11,17 +10,15 @@ import functools
 import io
 from pathlib import Path
 from typing import Any, Callable
-from copy import copy
 from datetime import datetime
 
 import openpyxl
 from openpyxl.styles import Font
-from openpyxl.utils import get_column_letter, column_index_from_string
+from openpyxl.utils import column_index_from_string
 
-from src.lookup_manager import find_data_file, get_data_dir, get_persistent_data_dir
+from src.lookup_manager import find_data_file, get_persistent_data_dir
 from src.normalizer import (
     clean_whitespace,
-    is_cell_empty,
     vietnamese_title_case,
     format_date_to_text,
     auto_convert_legacy_encoding
@@ -34,7 +31,6 @@ from src.custom_excel_manager import (
     find_best_data_sheet
 )
 from src.excel_processor import is_summary_or_footer_row
-from src.exporter import sanitize_filename
 
 # ==============================================================================
 # DANH SÁCH 28 CỘT CHUẨN CỦA MẪU CẤP BẰNG THCS (Mau_DS_Cap_Bang_THCS.xlsx)

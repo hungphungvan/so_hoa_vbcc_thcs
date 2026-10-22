@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-import io
 import re
 import math
 from pathlib import Path
-from copy import copy
 import openpyxl
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
 from src.normalizer import auto_convert_legacy_encoding, clean_whitespace

@@ -7,8 +7,8 @@ from typing import Any
 
 from src.gui.theme import (
     get_theme_palette, IS_DARK,
-    FONT_TITLE, FONT_SUBTITLE, FONT_CARD_TITLE, FONT_LABEL, FONT_LABEL_BOLD,
-    FONT_BUTTON, FONT_BUTTON_REG, FONT_MUTED
+    FONT_TITLE, FONT_SUBTITLE, FONT_LABEL, FONT_LABEL_BOLD,
+    FONT_MUTED
 )
 from src.smart_merger import TARGET_COLUMNS, MappingProfileManager, auto_suggest_mapping, parse_column_expression
 

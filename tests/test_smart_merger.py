@@ -9,11 +9,8 @@ import openpyxl
 from src.smart_merger import (
     TARGET_COLUMNS,
     SYNONYMS_MAP,
-    remove_accents,
-    normalize_text_for_match,
     compute_similarity,
     compute_headers_signature,
-    is_standard_28_headers,
     auto_suggest_mapping,
     parse_column_expression,
     MappingProfileManager,

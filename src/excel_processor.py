@@ -1,17 +1,13 @@
 from __future__ import annotations
 
-import os
-import sys
 import io
 import re
-import copy
 import unicodedata
 from pathlib import Path
 import openpyxl
 from openpyxl.styles import Font, PatternFill
-from openpyxl.utils import get_column_letter
 
-from src.lookup_manager import LookupManager, get_data_dir, find_data_file
+from src.lookup_manager import LookupManager, find_data_file
 from src.normalizer import (
     clean_whitespace,
     is_cell_empty,
@@ -23,16 +19,11 @@ from src.normalizer import (
     format_grad_date_to_text,
     check_dob_validity,
     parse_nien_khoa,
-    infer_cohort_from_birth_year,
     find_mode_birth_year,
     fuzzy_match_school,
     auto_fill_graduation_dates_by_school_and_cohort,
     determine_status_and_reason,
-    auto_convert_legacy_encoding,
-    is_tcvn3,
-    tcvn3_to_unicode,
-    is_vni,
-    vni_to_unicode
+    auto_convert_legacy_encoding
 )
 from src.exporter import DataExporter
 

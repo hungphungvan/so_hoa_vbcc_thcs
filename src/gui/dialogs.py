@@ -1,33 +1,19 @@
 from __future__ import annotations
 
 import re
-import sys
 import tkinter as tk
 from tkinter import ttk, messagebox
-from tkinter.scrolledtext import ScrolledText
 
 from src.gui.theme import (
-    IS_DARK,
-    FONT_FAMILY,
-    FONT_FAMILY_MONO,
-    FONT_TITLE,
     FONT_CARD_TITLE,
     FONT_LABEL,
     FONT_LABEL_BOLD,
     FONT_DATA_BOLD,
-    FONT_MUTED,
-    FONT_BUTTON,
-    FONT_LOG,
-    FONT_TREE,
     FONT_TREE_BOLD,
-    FONT_TREE_HEADING,
     CLR_PRIMARY,
-    CLR_ACCENT,
     CLR_SUCCESS,
     CLR_WARNING,
     CLR_DANGER,
-    CLR_MUTED,
-    CLR_TEXT,
     CLR_WINDOW_BG,
     CLR_HIGHLIGHT_BG,
     CLR_HIGHLIGHT_FG,
