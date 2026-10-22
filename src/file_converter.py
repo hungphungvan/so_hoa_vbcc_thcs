@@ -256,13 +256,53 @@ class FileFormatConverter:
             return False
 
     @staticmethod
-    def _convert_doc_via_word_macos(src_p: Path, out_p: Path) -> tuple[bool, str]:
+    def close_office_apps(apps: tuple[str, ...] = ("word", "excel")) -> None:
+        """
+        Đóng an toàn các ứng dụng Microsoft Word và Microsoft Excel nếu không còn tài liệu nào khác đang mở.
+        - Trên macOS: Sử dụng AppleScript kiểm tra (count of documents/workbooks) is 0 để quit.
+        - Trên Windows: Thu dọn COM và thu hồi rác bộ nhớ.
+        """
+        if sys.platform == "darwin":
+            script_parts = []
+            if "word" in apps:
+                script_parts.append('''
+                if application "Microsoft Word" is running then
+                    tell application "Microsoft Word"
+                        if (count of documents) is 0 then
+                            quit saving no
+                        end if
+                    end tell
+                end if
+                ''')
+            if "excel" in apps:
+                script_parts.append('''
+                if application "Microsoft Excel" is running then
+                    tell application "Microsoft Excel"
+                        if (count of workbooks) is 0 then
+                            quit
+                        end if
+                    end tell
+                end if
+                ''')
+            if script_parts:
+                full_script = "\n".join(script_parts)
+                try:
+                    subprocess.run(["osascript", "-e", full_script], capture_output=True, timeout=10)
+                except Exception:
+                    pass
+        elif sys.platform == "win32":
+            import gc
+            gc.collect()
+
+    @staticmethod
+    def _convert_doc_via_word_macos(src_p: Path, out_p: Path, auto_quit: bool = True) -> tuple[bool, str]:
         """Chuyển đổi .doc sang .docx thông qua Microsoft Word trên macOS bằng AppleScript."""
         if not Path("/Applications/Microsoft Word.app").exists():
             return False, "Microsoft Word không được cài đặt trong /Applications."
 
         src_abs = str(src_p.resolve())
         out_abs = str(out_p.resolve())
+        quit_clause = "if (count of documents) is 0 then quit saving no" if auto_quit else ""
 
         as_script = f'''
         tell application "Microsoft Word"
@@ -273,11 +313,13 @@ class FileFormatConverter:
                 save as theDoc file name (POSIX file "{out_abs}" as text) file format format document default
                 close theDoc saving no
                 set display alerts to origAlerts
+                {quit_clause}
                 return "OK"
             on error errMsg
                 try
                     set display alerts to origAlerts
                 end try
+                {quit_clause}
                 return "ERR:" & errMsg
             end try
         end tell
@@ -401,7 +443,8 @@ class FileFormatConverter:
     def convert_doc_to_docx(
         doc_path: Path | str,
         output_path: Path | str | None = None,
-        delete_source: bool = False
+        delete_source: bool = False,
+        auto_quit: bool = True
     ) -> tuple[bool, Path | None, str]:
         """
         Chuyển đổi một tệp .doc sang .docx theo chiến lược đa tầng:
@@ -445,7 +488,7 @@ class FileFormatConverter:
 
         # TẦNG 1: Microsoft Word Native (chính xác tuyệt đối)
         if sys.platform == "darwin":
-            ok, msg = FileFormatConverter._convert_doc_via_word_macos(p, out_p)
+            ok, msg = FileFormatConverter._convert_doc_via_word_macos(p, out_p, auto_quit=auto_quit)
             if ok:
                 valid, val_err = FileFormatConverter.validate_docx_integrity(out_p)
                 if valid:
@@ -527,13 +570,14 @@ class FileFormatConverter:
         return False, None, f"Lỗi chuyển đổi .doc: {err_summary}.{advice}"
 
     @staticmethod
-    def _convert_xls_via_excel_macos(src_p: Path, out_p: Path) -> tuple[bool, str]:
+    def _convert_xls_via_excel_macos(src_p: Path, out_p: Path, auto_quit: bool = True) -> tuple[bool, str]:
         """Chuyển đổi .xls sang .xlsx thông qua Microsoft Excel trên macOS bằng AppleScript."""
         if not Path("/Applications/Microsoft Excel.app").exists():
             return False, "Microsoft Excel không được cài đặt trong /Applications."
 
         src_abs = str(src_p.resolve())
         out_abs = str(out_p.resolve())
+        quit_clause = "if (count of workbooks) is 0 then quit" if auto_quit else ""
 
         as_script = f'''
         tell application "Microsoft Excel"
@@ -544,11 +588,13 @@ class FileFormatConverter:
                 save workbook as theWb filename (POSIX file "{out_abs}" as text) file format open XML workbook file format
                 close theWb saving no
                 set display alerts to origAlerts
+                {quit_clause}
                 return "OK"
             on error errMsg
                 try
                     set display alerts to origAlerts
                 end try
+                {quit_clause}
                 return "ERR:" & errMsg
             end try
         end tell
@@ -766,7 +812,8 @@ class FileFormatConverter:
     def convert_xls_to_xlsx(
         xls_path: Path | str,
         output_path: Path | str | None = None,
-        delete_source: bool = False
+        delete_source: bool = False,
+        auto_quit: bool = True
     ) -> tuple[bool, Path | None, str]:
         """
         Chuyển đổi một tệp .xls (Excel 97-2003) sang .xlsx theo chiến lược đa tầng:
@@ -811,7 +858,7 @@ class FileFormatConverter:
 
         # TẦNG 1: Microsoft Excel Native (Bảo toàn 100% định dạng)
         if sys.platform == "darwin":
-            ok, msg = FileFormatConverter._convert_xls_via_excel_macos(p, out_p)
+            ok, msg = FileFormatConverter._convert_xls_via_excel_macos(p, out_p, auto_quit=auto_quit)
             if ok:
                 valid, val_err = FileFormatConverter.validate_xlsx_integrity(out_p)
                 if valid:
@@ -918,55 +965,62 @@ class FileFormatConverter:
 
         log(f"🚀 BẮT ĐẦU CHUYỂN ĐỔI HÀNG LOẠT {total} TỆP ĐỊNH DẠNG CŨ...", "info")
 
-        for idx, f in enumerate(files, start=1):
-            if check_cancel and check_cancel():
-                log("⏹ Đã dừng tiến trình chuyển đổi theo yêu cầu người dùng.", "warning")
-                break
+        try:
+            for idx, f in enumerate(files, start=1):
+                if check_cancel and check_cancel():
+                    log("⏹ Đã dừng tiến trình chuyển đổi theo yêu cầu người dùng.", "warning")
+                    break
 
-            ext = f.suffix.lower()
-            target_ext = ".docx" if ext == ".doc" else ".xlsx"
+                ext = f.suffix.lower()
+                target_ext = ".docx" if ext == ".doc" else ".xlsx"
 
-            if output_dir:
-                dest_file = output_dir / f"{f.stem}{target_ext}"
-            else:
-                dest_file = f.with_suffix(target_ext)
+                if output_dir:
+                    dest_file = output_dir / f"{f.stem}{target_ext}"
+                else:
+                    dest_file = f.with_suffix(target_ext)
 
-            if skip_existing and dest_file.exists() and dest_file.stat().st_size > 0:
-                log(f"  ⏭️ [{idx}/{total}] Đã tồn tại: {dest_file.name}, bỏ qua.", "info")
-                skipped_count += 1
-                results.append({"path": f, "out": dest_file, "status": "Bỏ qua (đã có)"})
+                if skip_existing and dest_file.exists() and dest_file.stat().st_size > 0:
+                    log(f"  ⏭️ [{idx}/{total}] Đã tồn tại: {dest_file.name}, bỏ qua.", "info")
+                    skipped_count += 1
+                    results.append({"path": f, "out": dest_file, "status": "Bỏ qua (đã có)"})
+                    if progress_callback:
+                        progress_callback(idx, total, f"Bỏ qua: {f.name}")
+                    continue
+
+                if ext == ".doc":
+                    ok, out_p, msg = FileFormatConverter.convert_doc_to_docx(
+                        doc_path=f,
+                        output_path=dest_file,
+                        delete_source=delete_source,
+                        auto_quit=False
+                    )
+                elif ext == ".xls":
+                    ok, out_p, msg = FileFormatConverter.convert_xls_to_xlsx(
+                        xls_path=f,
+                        output_path=dest_file,
+                        delete_source=delete_source,
+                        auto_quit=False
+                    )
+                else:
+                    ok, out_p, msg = False, None, "Định dạng không được hỗ trợ"
+
+                if ok:
+                    success_count += 1
+                    log(f"  ✅ [{idx}/{total}] Chuyển thành công: {f.name} $\\rightarrow$ {dest_file.name}", "success")
+                    results.append({"path": f, "out": dest_file, "status": "Thành công"})
+                else:
+                    failed_count += 1
+                    log(f"  ❌ [{idx}/{total}] Lỗi chuyển đổi {f.name}: {msg}", "error")
+                    results.append({"path": f, "out": None, "status": f"Lỗi: {msg}"})
+
                 if progress_callback:
-                    progress_callback(idx, total, f"Bỏ qua: {f.name}")
-                continue
-
-            if ext == ".doc":
-                ok, out_p, msg = FileFormatConverter.convert_doc_to_docx(
-                    doc_path=f,
-                    output_path=dest_file,
-                    delete_source=delete_source
-                )
-            elif ext == ".xls":
-                ok, out_p, msg = FileFormatConverter.convert_xls_to_xlsx(
-                    xls_path=f,
-                    output_path=dest_file,
-                    delete_source=delete_source
-                )
-            else:
-                ok, out_p, msg = False, None, "Định dạng không được hỗ trợ"
-
-            if ok:
-                success_count += 1
-                log(f"  ✅ [{idx}/{total}] Chuyển thành công: {f.name} $\\rightarrow$ {dest_file.name}", "success")
-                results.append({"path": f, "out": dest_file, "status": "Thành công"})
-            else:
-                failed_count += 1
-                log(f"  ❌ [{idx}/{total}] Lỗi chuyển đổi {f.name}: {msg}", "error")
-                results.append({"path": f, "out": None, "status": f"Lỗi: {msg}"})
-
-            if progress_callback:
-                progress_callback(idx, total, f"Đang chuyển: {f.name}")
+                    progress_callback(idx, total, f"Đang chuyển: {f.name}")
+        finally:
+            # Tự động đóng Word & Excel khi kết thúc hoặc huỷ
+            FileFormatConverter.close_office_apps()
 
         log(f"🎉 HOÀN TẤT CHUYỂN ĐỔI: {success_count} thành công, {skipped_count} bỏ qua, {failed_count} lỗi.", "success" if failed_count == 0 else "warning")
+        log("🧹 Đã tự động đóng và giải phóng tiến trình Microsoft Word & Excel.", "info")
 
         return {
             "status": "success",
