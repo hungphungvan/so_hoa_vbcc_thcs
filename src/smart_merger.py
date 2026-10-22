@@ -558,7 +558,7 @@ class SmartMerger:
 
                 # 3. Trích xuất và chuẩn hóa dòng dữ liệu học sinh từ Sheet
                 sheet_rows_extracted = 0
-                empty_stt_consecutive = 0
+                empty_name_consecutive = 0
 
                 s_src_idx = mapping.get(1) # Cột STT nguồn
                 n_src_idx = mapping.get(5) # Cột Họ tên nguồn
@@ -570,20 +570,7 @@ class SmartMerger:
                     if check_cancel and check_cancel():
                         break
 
-                    # Kiểm tra ô STT nguồn
-                    cell_stt = None
-                    if s_src_idx is not None and 0 <= s_src_idx < len(row):
-                        cell_stt = row[s_src_idx]
-
-                    # Điều kiện ngắt: 15 dòng liên tiếp trống STT
-                    if cell_stt is None or is_cell_empty(cell_stt):
-                        empty_stt_consecutive += 1
-                        if empty_stt_consecutive >= 15:
-                            break
-                    else:
-                        empty_stt_consecutive = 0
-
-                    # Kiểm tra dòng tiêu đề lặp lại
+                    # Kiểm tra dòng tiêu đề lặp lại (ví dụ ngắt trang lặp lại dòng tiêu đề)
                     if is_header_duplicate_row(row, header_row_vals, s_src_idx if s_src_idx is not None else -1, n_src_idx if n_src_idx is not None else -1):
                         continue
 
@@ -591,25 +578,38 @@ class SmartMerger:
                     if is_summary_or_footer_row(row):
                         continue
 
-                    # Kiểm tra tính hợp lệ của dòng học sinh
-                    cell_name = row[n_src_idx] if (n_src_idx is not None and 0 <= n_src_idx < len(row)) else None
-                    stt_ok = is_valid_stt(cell_stt) if s_src_idx is not None else True
-                    name_ok = is_valid_name(cell_name) if n_src_idx is not None else True
+                    # Kiểm tra tính hợp lệ của dòng học sinh: CHỈ CẦN CÓ HỌ VÀ TÊN HỢP LỆ
+                    if n_src_idx is not None:
+                        cell_name = row[n_src_idx] if (0 <= n_src_idx < len(row)) else None
+                        name_ok = is_valid_name(cell_name)
 
-                    # Dòng học sinh thật sự phải có Họ tên hoặc STT hợp lệ (nếu cả 2 được map thì cả 2 phải thỏa mãn)
-                    if s_src_idx is not None and n_src_idx is not None:
-                        if not (stt_ok and name_ok):
-                            continue
-                    elif n_src_idx is not None:
+                        # Điều kiện ngắt: Nếu 20 dòng liên tiếp không có Họ tên hợp lệ -> kết thúc bảng dữ liệu
                         if not name_ok:
+                            empty_name_consecutive += 1
+                            if empty_name_consecutive >= 20:
+                                break
                             continue
-                    elif s_src_idx is not None:
-                        if not stt_ok:
-                            continue
+                        else:
+                            empty_name_consecutive = 0
                     else:
-                        # Nếu không map cả STT lẫn Họ tên -> bỏ qua dòng trống
-                        if not any(row):
-                            continue
+                        # Dự phòng trường hợp hy hữu không map cột Họ tên: kiểm tra STT hoặc dòng không rỗng
+                        cell_stt = row[s_src_idx] if (s_src_idx is not None and 0 <= s_src_idx < len(row)) else None
+                        if s_src_idx is not None:
+                            if not is_valid_stt(cell_stt):
+                                empty_name_consecutive += 1
+                                if empty_name_consecutive >= 20:
+                                    break
+                                continue
+                            else:
+                                empty_name_consecutive = 0
+                        else:
+                            if not any(row):
+                                empty_name_consecutive += 1
+                                if empty_name_consecutive >= 20:
+                                    break
+                                continue
+                            else:
+                                empty_name_consecutive = 0
 
                     # Dòng hợp lệ -> Tiến hành ánh xạ sang 28 cột chuẩn
                     sheet_rows_extracted += 1
@@ -649,8 +649,8 @@ class SmartMerger:
                             elif t_idx == 12: # Quốc tịch
                                 row_28[t_col_0] = "Việt Nam"
 
-                    # Đánh lại STT tăng dần 1..N
-                    if renumber_stt:
+                    # Đánh lại STT tăng dần 1..N (hoặc tự điền nếu sheet nguồn không có STT)
+                    if renumber_stt or row_28[0] is None or row_28[0] == "":
                         row_28[0] = total_extracted_rows
 
                     # Ghi vào worksheet đích

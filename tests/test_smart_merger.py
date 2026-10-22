@@ -192,6 +192,48 @@ class TestSmartMerger(unittest.TestCase):
 
         wb_res.close()
 
+    def test_smart_merger_without_stt_column(self):
+        """Kiểm tra trích xuất học sinh từ sheet hoàn toàn KHÔNG CÓ cột STT (chỉ cần có Họ và tên)."""
+        file_no_stt = self.tmp_dir / "src_no_stt.xlsx"
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "KhongCoSTT"
+        ws.append(["DANH SÁCH KHÔNG CỘT STT"])
+        # Tiêu đề không hề có cột STT
+        ws.append(["Họ và tên", "Ngày sinh", "Giới tính", "Nơi sinh"])
+        ws.append(["Phạm Nhật Minh", "12/03/2005", "Nam", "Hà Nội"])
+        ws.append(["Hoàng Thu Trang", "25/11/2005", "Nữ", "Hải Dương"])
+        ws.append(["Vũ Đức Đam", "09/08/2005", "Nam", "Quảng Ninh"])
+        ws.append(["Tổng số: 3 học sinh", None, None, None]) # Dòng footer
+        wb.save(file_no_stt)
+        wb.close()
+
+        output_file = self.tmp_dir / "Out_No_STT.xlsx"
+
+        merger = SmartMerger(profile_mgr=self.profile_mgr)
+        res = merger.process_merge_and_standardize(
+            source_files=[file_no_stt],
+            output_file_path=output_file,
+            mapping_callback=None, # Tự động nhận diện
+            renumber_stt=True,
+            fill_defaults=True,
+            merge_all_sheets=True
+        )
+
+        self.assertEqual(res["status"], "success")
+        self.assertEqual(res["total_rows"], 3) # Phải trích xuất đủ cả 3 học sinh
+
+        wb_res = openpyxl.load_workbook(output_file, data_only=True)
+        ws_res = wb_res.active
+
+        # Kiểm tra 3 học sinh đều có STT tự đánh 1, 2, 3
+        stt_list = [ws_res.cell(r, 1).value for r in [3, 4, 5]]
+        name_list = [ws_res.cell(r, 5).value for r in [3, 4, 5]]
+        self.assertEqual(stt_list, [1, 2, 3])
+        self.assertEqual(name_list, ["Phạm Nhật Minh", "Hoàng Thu Trang", "Vũ Đức Đam"])
+
+        wb_res.close()
+
 
 if __name__ == '__main__':
     unittest.main()
