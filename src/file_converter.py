@@ -300,12 +300,26 @@ class FileFormatConverter:
 
     @staticmethod
     def _convert_doc_via_word_macos(src_p: Path, out_p: Path, auto_quit: bool = True) -> tuple[bool, str]:
-        """Chuyển đổi .doc sang .docx thông qua Microsoft Word trên macOS bằng AppleScript."""
+        """
+        Chuyển đổi .doc sang .docx thông qua Microsoft Word trên macOS bằng AppleScript:
+        - Tự động mở file .doc trong Microsoft Word
+        - Lưu sang .docx chuẩn native bằng engine Word (bảo toàn 100% định dạng, font chữ, bảng biểu, layout)
+        - Đóng file .doc ngay sau khi lưu để không bị kẹt cửa sổ
+        - Chờ người dùng cấp phép truy cập thư mục nếu macOS hiển thị hộp thoại
+        """
         if not Path("/Applications/Microsoft Word.app").exists():
             return False, "Microsoft Word không được cài đặt trong /Applications."
 
         src_abs = str(src_p.resolve())
         out_abs = str(out_p.resolve())
+
+        # Nếu tệp đích đã tồn tại, xóa trước để Word không hiển thị hộp thoại hỏi ghi đè
+        if out_p.exists():
+            try:
+                out_p.unlink()
+            except Exception:
+                pass
+
         quit_clause = "if (count of documents) is 0 then quit saving no" if auto_quit else ""
 
         as_script = f'''
@@ -313,13 +327,20 @@ class FileFormatConverter:
             set origAlerts to display alerts
             set display alerts to none
             try
-                set theDoc to open (POSIX file "{src_abs}")
-                save as theDoc file name (POSIX file "{out_abs}" as text) file format format document default
-                close theDoc saving no
-                set display alerts to origAlerts
+                open file name "{src_abs}"
+                set theDoc to active document
+                set hfsOut to (POSIX file "{out_abs}") as text
+                save as theDoc file name hfsOut file format format document default
+                close active document saving no
+                try
+                    set display alerts to origAlerts
+                end try
                 {quit_clause}
                 return "OK"
             on error errMsg
+                try
+                    close active document saving no
+                end try
                 try
                     set display alerts to origAlerts
                 end try
@@ -333,20 +354,34 @@ class FileFormatConverter:
                 ["osascript", "-e", as_script],
                 capture_output=True,
                 text=True,
-                timeout=45
+                timeout=120
             )
             out_str = (res.stdout or "").strip()
             if "OK" in out_str and out_p.exists() and out_p.stat().st_size > 0:
                 return True, "Thành công qua Microsoft Word (macOS)"
             return False, res.stderr.strip() or out_str
+        except subprocess.TimeoutExpired:
+            return False, "Quá thời gian chờ (120s) khi chuyển đổi bằng Microsoft Word."
         except Exception as e:
             return False, str(e)
 
     @staticmethod
     def _convert_doc_via_word_windows(src_p: Path, out_p: Path) -> tuple[bool, str]:
-        """Chuyển đổi .doc sang .docx thông qua PowerShell COM Automation trên Windows."""
+        """
+        Chuyển đổi .doc sang .docx thông qua PowerShell COM Automation trên Windows:
+        - Mở trực tiếp file .doc bằng Word
+        - Lưu sang .docx chuẩn mã 16 (wdFormatXMLDocument)
+        - Đóng file và giải phóng sạch tiến trình WINWORD.EXE
+        """
         src_abs = str(src_p.resolve()).replace("'", "''")
         out_abs = str(out_p.resolve()).replace("'", "''")
+
+        # Xóa tệp đích trước để không bị hỏi ghi đè
+        if out_p.exists():
+            try:
+                out_p.unlink()
+            except Exception:
+                pass
 
         ps_script = f'''
         $ErrorActionPreference = 'Stop'
@@ -382,11 +417,13 @@ class FileFormatConverter:
                 ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script],
                 capture_output=True,
                 text=True,
-                timeout=45
+                timeout=120
             )
             if "OK" in (res.stdout or "") and out_p.exists() and out_p.stat().st_size > 0:
                 return True, "Thành công qua Microsoft Word (Windows)"
             return False, res.stderr.strip() or "Lỗi PowerShell COM Word"
+        except subprocess.TimeoutExpired:
+            return False, "Quá thời gian chờ (120s) khi gọi Word COM trên Windows."
         except Exception as e:
             return False, str(e)
 
@@ -451,12 +488,12 @@ class FileFormatConverter:
         auto_quit: bool = True
     ) -> tuple[bool, Path | None, str]:
         """
-        Chuyển đổi một tệp .doc sang .docx theo chiến lược đa tầng:
-        1. Kiểm tra định dạng thực tế (xử lý tệp .docx bị đổi tên nhầm thành .doc).
-        2. Tầng 1: Sử dụng Microsoft Word Native (macOS AppleScript hoặc Windows COM) - bảo toàn 100% bảng biểu.
-        3. Tầng 2: Sử dụng LibreOffice / soffice CLI (chuẩn mực nguồn mở).
-        4. Tầng 3: Sử dụng textutil trên macOS (tự động khử lỗi XML w:sz-cs và file rác).
-        5. Tầng 4: Kiểm tra tính toàn vẹn (Validation) của tệp .docx sinh ra. Tự động xóa file hỏng nếu phát hiện lỗi.
+        Chuyển đổi một tệp .doc (Word 97-2003) sang .docx trực tiếp bằng Microsoft Word:
+        - Mở trực tiếp bằng Microsoft Word (AppleScript trên macOS, COM trên Windows).
+        - Lưu sang .docx chuẩn Native để giữ nguyên 100% định dạng, font chữ, bảng biểu, layout.
+        - Tự động đóng tệp .doc cũ ngay sau khi lưu để không lưu lại bất kỳ cửa sổ nào.
+        - Chờ người dùng cấp phép truy cập thư mục nếu cần (hỗ trợ timeout lên đến 120s).
+        - Thực hiện nghiêm ngặt qua Microsoft Word, không sử dụng các phương án dự phòng làm sai lệch định dạng.
         """
         p = Path(doc_path)
         if not p.exists() or p.suffix.lower() != ".doc":
@@ -465,10 +502,8 @@ class FileFormatConverter:
         out_p = Path(output_path) if output_path else p.with_suffix(".docx")
         out_p.parent.mkdir(parents=True, exist_ok=True)
 
-        # 0. Nhận diện định dạng thực tế
+        # 0. Nhận diện định dạng thực tế (trường hợp tệp thực chất là .docx bị đổi đuôi nhầm thành .doc)
         real_type = FileFormatConverter.detect_file_type(p)
-
-        # Trường hợp tệp thực chất là .docx bị đổi đuôi nhầm thành .doc
         if real_type == "docx_zip":
             try:
                 shutil.copy2(p, out_p)
@@ -486,92 +521,42 @@ class FileFormatConverter:
             except Exception:
                 pass
 
-        success = False
-        method_used = ""
-        attempt_errors: list[str] = []
-
-        # TẦNG 1: Microsoft Word Native (chính xác tuyệt đối)
+        # Chuyển đổi trực tiếp bằng Microsoft Word Native theo yêu cầu (không dùng phương án dự phòng khác)
         if sys.platform == "darwin":
             ok, msg = FileFormatConverter._convert_doc_via_word_macos(p, out_p, auto_quit=auto_quit)
-            if ok:
-                valid, val_err = FileFormatConverter.validate_docx_integrity(out_p)
-                if valid:
-                    success = True
-                    method_used = "Microsoft Word (macOS)"
-                else:
-                    attempt_errors.append(f"Word Mac: {val_err}")
-            else:
-                attempt_errors.append(f"Word Mac: {msg}")
-
+            method_used = "Microsoft Word (macOS)"
         elif sys.platform == "win32":
             ok, msg = FileFormatConverter._convert_doc_via_word_windows(p, out_p)
-            if ok:
-                valid, val_err = FileFormatConverter.validate_docx_integrity(out_p)
-                if valid:
-                    success = True
-                    method_used = "Microsoft Word (Windows)"
-                else:
-                    attempt_errors.append(f"Word Win: {val_err}")
-            else:
-                attempt_errors.append(f"Word Win: {msg}")
+            method_used = "Microsoft Word (Windows)"
+        else:
+            return False, None, "Hệ điều hành hiện tại không hỗ trợ Microsoft Word."
 
-        # TẦNG 2: LibreOffice CLI (chất lượng mã nguồn mở cao cấp)
-        if not success:
-            soffice_bin = FileFormatConverter.find_libreoffice()
-            if soffice_bin:
-                ok, msg = FileFormatConverter._convert_doc_via_libreoffice(soffice_bin, p, out_p)
-                if ok:
-                    valid, val_err = FileFormatConverter.validate_docx_integrity(out_p)
-                    if valid:
-                        success = True
-                        method_used = "LibreOffice"
-                    else:
-                        attempt_errors.append(f"LibreOffice: {val_err}")
-                else:
-                    attempt_errors.append(f"LibreOffice: {msg}")
-
-        # TẦNG 3: macOS textutil (chỉ chạy trên macOS khi không có Word/LibreOffice)
-        if not success and sys.platform == "darwin":
-            ok, msg = FileFormatConverter._convert_doc_via_textutil_macos(p, out_p)
-            if ok:
-                valid, val_err = FileFormatConverter.validate_docx_integrity(out_p)
-                if valid:
-                    success = True
-                    method_used = "textutil (macOS)"
-                else:
-                    attempt_errors.append(f"textutil: {val_err}")
-            else:
-                attempt_errors.append(f"textutil: {msg}")
-
-        # TẦNG 4: Thẩm định và Xử lý kết quả cuối cùng
-        if success and out_p.exists():
-            final_valid, final_val_msg = FileFormatConverter.validate_docx_integrity(out_p)
-            if not final_valid:
-                # XÓA BỎ NGAY FILE HỎNG để tránh người dùng mở ra gặp lỗi
+        if not ok:
+            if out_p.exists():
                 try:
                     out_p.unlink()
                 except Exception:
                     pass
-                success = False
-                err_detail = f"Tệp .docx sinh ra không hợp lệ: {final_val_msg}"
-            else:
-                if delete_source:
-                    try:
-                        p.unlink()
-                    except Exception:
-                        pass
-                return True, out_p, f"Thành công ({method_used})"
+            return False, None, f"Lỗi chuyển đổi qua Microsoft Word: {msg}"
 
-        # Nếu thất bại hoàn toàn
+        # Kiểm tra tính toàn vẹn của tệp .docx sinh ra
         if out_p.exists():
-            try:
-                out_p.unlink()
-            except Exception:
-                pass
+            final_valid, final_val_msg = FileFormatConverter.validate_docx_integrity(out_p)
+            if not final_valid:
+                try:
+                    out_p.unlink()
+                except Exception:
+                    pass
+                return False, None, f"Tệp .docx sinh ra không hợp lệ: {final_val_msg}"
 
-        err_summary = " | ".join(attempt_errors) if attempt_errors else "Không tìm thấy công cụ chuyển đổi tương thích."
-        advice = " Khuyến nghị: Cài đặt LibreOffice (miễn phí) hoặc Microsoft Word để chuyển đổi tệp .doc phức tạp."
-        return False, None, f"Lỗi chuyển đổi .doc: {err_summary}.{advice}"
+            if delete_source:
+                try:
+                    p.unlink()
+                except Exception:
+                    pass
+            return True, out_p, f"Thành công ({method_used})"
+
+        return False, None, "Microsoft Word không tạo được tệp .docx đích."
 
     @staticmethod
     def _convert_xls_via_excel_macos(src_p: Path, out_p: Path, auto_quit: bool = True) -> tuple[bool, str]:
