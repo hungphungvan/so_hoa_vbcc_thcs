@@ -258,8 +258,8 @@ class FileFormatConverter:
     @staticmethod
     def close_office_apps(apps: tuple[str, ...] = ("word", "excel")) -> None:
         """
-        Đóng an toàn các ứng dụng Microsoft Word và Microsoft Excel nếu không còn tài liệu nào khác đang mở.
-        - Trên macOS: Sử dụng AppleScript kiểm tra (count of documents/workbooks) is 0 để quit.
+        Đóng an toàn và dọn sạch các tệp/tiến trình Microsoft Word và Microsoft Excel.
+        - Trên macOS: Sử dụng AppleScript đóng các file đã mở và thoát ứng dụng.
         - Trên Windows: Thu dọn COM và thu hồi rác bộ nhớ.
         """
         if sys.platform == "darwin":
@@ -268,9 +268,11 @@ class FileFormatConverter:
                 script_parts.append('''
                 if application "Microsoft Word" is running then
                     tell application "Microsoft Word"
-                        if (count of documents) is 0 then
-                            quit saving no
-                        end if
+                        set origAlerts to display alerts
+                        set display alerts to none
+                        close every document saving no
+                        set display alerts to origAlerts
+                        quit saving no
                     end tell
                 end if
                 ''')
@@ -278,9 +280,11 @@ class FileFormatConverter:
                 script_parts.append('''
                 if application "Microsoft Excel" is running then
                     tell application "Microsoft Excel"
-                        if (count of workbooks) is 0 then
-                            quit
-                        end if
+                        set origAlerts to display alerts
+                        set display alerts to false
+                        close every workbook saving no
+                        set display alerts to origAlerts
+                        quit
                     end tell
                 end if
                 ''')
@@ -584,13 +588,18 @@ class FileFormatConverter:
             set origAlerts to display alerts
             set display alerts to false
             try
-                set theWb to open workbook workbook file name (POSIX file "{src_abs}")
-                save workbook as theWb filename (POSIX file "{out_abs}" as text) file format open XML workbook file format
-                close theWb saving no
+                open (POSIX file "{src_abs}")
+                set theWb to active workbook
+                set hfsOut to (POSIX file "{out_abs}") as text
+                save workbook as theWb filename hfsOut file format Excel XML file format
+                close active workbook saving no
                 set display alerts to origAlerts
                 {quit_clause}
                 return "OK"
             on error errMsg
+                try
+                    close active workbook saving no
+                end try
                 try
                     set display alerts to origAlerts
                 end try
@@ -856,32 +865,20 @@ class FileFormatConverter:
         method_used = ""
         attempt_errors: list[str] = []
 
-        # TẦNG 1: Microsoft Excel Native (Bảo toàn 100% định dạng)
-        if sys.platform == "darwin":
-            ok, msg = FileFormatConverter._convert_xls_via_excel_macos(p, out_p, auto_quit=auto_quit)
+        # TẦNG 1: xlrd + openpyxl nâng cao (Ưu tiên số 1: thuần Python, 100% headless, bảo toàn ô gộp & viền, KHÔNG mở cửa sổ Excel)
+        if HAS_XLRD:
+            ok, msg = FileFormatConverter._convert_xls_via_openpyxl_enhanced(p, out_p)
             if ok:
                 valid, val_err = FileFormatConverter.validate_xlsx_integrity(out_p)
                 if valid:
                     success = True
-                    method_used = "Microsoft Excel (macOS)"
+                    method_used = "xlrd + openpyxl (Enhanced)"
                 else:
-                    attempt_errors.append(f"Excel Mac: {val_err}")
+                    attempt_errors.append(f"openpyxl: {val_err}")
             else:
-                attempt_errors.append(f"Excel Mac: {msg}")
+                attempt_errors.append(f"openpyxl: {msg}")
 
-        elif sys.platform == "win32":
-            ok, msg = FileFormatConverter._convert_xls_via_excel_windows(p, out_p)
-            if ok:
-                valid, val_err = FileFormatConverter.validate_xlsx_integrity(out_p)
-                if valid:
-                    success = True
-                    method_used = "Microsoft Excel (Windows)"
-                else:
-                    attempt_errors.append(f"Excel Win: {val_err}")
-            else:
-                attempt_errors.append(f"Excel Win: {msg}")
-
-        # TẦNG 2: LibreOffice Calc CLI (chuẩn mực nguồn mở)
+        # TẦNG 2: LibreOffice Calc CLI (chất lượng mã nguồn mở, chạy headless hoàn toàn không mở cửa sổ)
         if not success:
             soffice_bin = FileFormatConverter.find_libreoffice()
             if soffice_bin:
@@ -896,18 +893,31 @@ class FileFormatConverter:
                 else:
                     attempt_errors.append(f"LibreOffice: {msg}")
 
-        # TẦNG 3: xlrd + openpyxl nâng cao (Dự phòng độc lập, khôi phục ô gộp, kẻ viền & auto-fit cột)
-        if not success and HAS_XLRD:
-            ok, msg = FileFormatConverter._convert_xls_via_openpyxl_enhanced(p, out_p)
-            if ok:
-                valid, val_err = FileFormatConverter.validate_xlsx_integrity(out_p)
-                if valid:
-                    success = True
-                    method_used = "xlrd + openpyxl (Enhanced)"
+        # TẦNG 3: Microsoft Excel Native (Dự phòng cuối cùng khi các bộ lọc trên không khả dụng)
+        if not success:
+            if sys.platform == "darwin":
+                ok, msg = FileFormatConverter._convert_xls_via_excel_macos(p, out_p, auto_quit=auto_quit)
+                if ok:
+                    valid, val_err = FileFormatConverter.validate_xlsx_integrity(out_p)
+                    if valid:
+                        success = True
+                        method_used = "Microsoft Excel (macOS)"
+                    else:
+                        attempt_errors.append(f"Excel Mac: {val_err}")
                 else:
-                    attempt_errors.append(f"openpyxl: {val_err}")
-            else:
-                attempt_errors.append(f"openpyxl: {msg}")
+                    attempt_errors.append(f"Excel Mac: {msg}")
+
+            elif sys.platform == "win32":
+                ok, msg = FileFormatConverter._convert_xls_via_excel_windows(p, out_p)
+                if ok:
+                    valid, val_err = FileFormatConverter.validate_xlsx_integrity(out_p)
+                    if valid:
+                        success = True
+                        method_used = "Microsoft Excel (Windows)"
+                    else:
+                        attempt_errors.append(f"Excel Win: {val_err}")
+                else:
+                    attempt_errors.append(f"Excel Win: {msg}")
 
         # TẦNG 4: Thẩm định và Xử lý kết quả cuối cùng
         if success and out_p.exists():
@@ -964,6 +974,12 @@ class FileFormatConverter:
         results = []
 
         log(f"🚀 BẮT ĐẦU CHUYỂN ĐỔI HÀNG LOẠT {total} TỆP ĐỊNH DẠNG CŨ...", "info")
+
+        # Đảm bảo đóng sạch các tiến trình cũ trước khi bắt đầu
+        try:
+            FileFormatConverter.close_office_apps()
+        except Exception:
+            pass
 
         try:
             for idx, f in enumerate(files, start=1):
