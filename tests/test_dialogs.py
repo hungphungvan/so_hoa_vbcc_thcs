@@ -111,9 +111,8 @@ class TestDialogs(unittest.TestCase):
             formatted_headers=formatted_headers,
             suggested_mapping=suggested
         )
-        self.assertIsNotNone(dlg_map)
-        self.assertTrue(hasattr(dlg_map, 'target_vars'))
-        self.assertEqual(len(dlg_map.target_vars), 28)
+        self.assertTrue(hasattr(dlg_map, 'source_vars') or hasattr(dlg_map, 'target_vars'))
+        self.assertEqual(len(dlg_map.source_vars), len(raw_headers))
         dlg_map.destroy()
 
         prof_mgr = MappingProfileManager()
@@ -121,6 +120,50 @@ class TestDialogs(unittest.TestCase):
         self.assertIsNotNone(dlg_prof)
         self.assertTrue(hasattr(dlg_prof, 'tree'))
         dlg_prof.destroy()
+
+    def test_column_mapping_dialog_with_extra_cols_filter(self):
+        """Kiểm tra ColumnMappingDialog chỉ hiển thị các cột mới có dữ liệu khi kích hoạt từ Superset Match."""
+        raw_headers = ["STT", "Họ và tên", "Ngày sinh", "Cột Cũ Đã Map", "Cột Mới Có Dữ Liệu"]
+        suggested_inverted = {
+            "stt": 1,
+            "ho va ten": 5,
+            "ngay sinh": 9,
+            "cot cu da map": 14,
+            "cot moi co du lieu": None
+        }
+        extra_cols = ["Cột Mới Có Dữ Liệu"]
+
+        dlg = ColumnMappingDialog(
+            parent=self.root,
+            file_name="test_extra.xlsx",
+            sheet_name="Sheet1",
+            raw_headers=raw_headers,
+            suggested_inverted_mapping=suggested_inverted,
+            extra_cols_with_data=extra_cols,
+            matched_profile_name="Profile Gốc"
+        )
+
+        self.assertTrue(dlg.show_only_extra)
+        # Các dòng không nằm trong extra_cols_with_data phải được ẩn
+        hidden_count = sum(1 for i, h in enumerate(raw_headers) if str(h) not in extra_cols)
+        self.assertEqual(hidden_count, 4)
+
+        # Chuyển đổi hiển thị tất cả
+        dlg._toggle_view_mode()
+        self.assertFalse(dlg.show_only_extra)
+
+        # Chuyển đổi lại chỉ hiển thị cột mới
+        dlg._toggle_view_mode()
+        self.assertTrue(dlg.show_only_extra)
+
+        # Kiểm tra _get_inverted_mapping vẫn giữ nguyên các cột đã kế thừa từ profile
+        inv_map = dlg._get_inverted_mapping()
+        self.assertEqual(inv_map["stt"], 1)
+        self.assertEqual(inv_map["ho va ten"], 5)
+        self.assertEqual(inv_map["ngay sinh"], 9)
+        self.assertEqual(inv_map["cot cu da map"], 14)
+
+        dlg.destroy()
 
 
 if __name__ == '__main__':

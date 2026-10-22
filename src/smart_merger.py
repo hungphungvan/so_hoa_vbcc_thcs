@@ -8,6 +8,7 @@ import unicodedata
 import difflib
 import functools
 import io
+import uuid
 from pathlib import Path
 from typing import Any, Callable
 from datetime import datetime
@@ -289,6 +290,9 @@ def auto_suggest_mapping_with_details(
             sub_norms = [normalize_text_for_match(p) for p in parts]
 
             if full_norm in ["ho va ten", "ho ten", "ho chu dem va ten", "ho va chu dem va ten"]:
+                mapping[5] = s_idx
+                used_targets.add(5)
+                used_sources.add(s_idx)
                 has_full_name_col = True
                 break
 
@@ -327,6 +331,9 @@ def auto_suggest_mapping_with_details(
             sub_norms = [normalize_text_for_match(p) for p in parts]
 
             if full_norm in ["ngay thang nam sinh", "ngay sinh", "ns"] and len(parts) == 1:
+                mapping[9] = s_idx
+                used_targets.add(9)
+                used_sources.add(s_idx)
                 has_full_dob_col = True
                 break
 
@@ -456,6 +463,24 @@ def auto_suggest_mapping_with_details(
             used_targets.add(t_idx)
             used_sources.add(s_idx)
 
+    # =========================================================================
+    # TẦNG 3: ÁP DỤNG QUY TẮC DỰ PHÒNG (FALLBACK RULES)
+    # Ví dụ: Cột 17 (Hội đồng thi) dự phòng lấy từ Cột 14 (Tên trường đã học)
+    # khi trong file không có cột Hội đồng thi riêng biệt.
+    # =========================================================================
+    fallback_rules = {}
+    if profile_mgr and hasattr(profile_mgr, "get_fallback_columns"):
+        fallback_rules = profile_mgr.get_fallback_columns()
+    else:
+        fallback_rules = {17: 14}
+
+    for t_idx, fb_target in fallback_rules.items():
+        if t_idx not in used_targets and fb_target in used_targets:
+            fb_val = mapping.get(fb_target)
+            if fb_val is not None:
+                mapping[t_idx] = fb_val
+                used_targets.add(t_idx)
+
     return mapping, suggested_defaults, matched_profile_name
 
 
@@ -549,7 +574,12 @@ def parse_column_expression(expr: str, formatted_headers: list[str]) -> int | li
 # ==============================================================================
 
 class MappingProfileManager:
-    """Quản lý Kho tri thức ánh xạ tập trung theo 28 cột trong data/mapping_profiles.json."""
+    """
+    Quản lý các Profile ánh xạ cột theo triết lý đảo ngược (Inverted Profile):
+    - Profile lưu theo danh sách tiêu đề file Excel nguồn (source_headers) -> ánh xạ sang 28 cột mẫu.
+    - Hỗ trợ so khớp tập hợp: Trùng khớp 100% (Exact), Tập con (Subset), Tập mẹ (Superset).
+    - Hỗ trợ xóa đơn lẻ, xóa hàng loạt (nhiều profile cùng lúc) và xóa tất cả profile.
+    """
 
     def __init__(self, storage_path: Path | str | None = None):
         if storage_path:
@@ -569,56 +599,507 @@ class MappingProfileManager:
                     return
             except Exception:
                 pass
-            self._save_raw({"version": "2.0", "columns": {}, "updated_at": ""})
+            self._save_raw({
+                "version": "3.0",
+                "profiles": [],
+                "columns": {},
+                "fallback_columns": {"17": 14},
+                "updated_at": ""
+            })
 
     def _load_raw(self) -> dict:
         try:
             if not self.storage_path.exists():
-                return {"version": "2.0", "columns": {}}
+                return {"version": "3.0", "profiles": [], "columns": {}, "fallback_columns": {"17": 14}}
             with open(self.storage_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 if not isinstance(data, dict):
-                    return {"version": "2.0", "columns": {}}
-                if "columns" not in data and "profiles" in data:
-                    migrated = {"version": "2.0", "columns": {}}
-                    for p in data["profiles"]:
-                        named_m = p.get("named_mapping", {})
-                        for t_str, val in named_m.items():
-                            if val:
-                                migrated["columns"].setdefault(t_str, []).append(val)
-                    return migrated
+                    return {"version": "3.0", "profiles": [], "columns": {}, "fallback_columns": {"17": 14}}
+                if "profiles" not in data:
+                    data["profiles"] = []
+                if "version" not in data:
+                    data["version"] = "3.0"
                 return data
         except Exception:
-            return {"version": "2.0", "columns": {}}
+            return {"version": "3.0", "profiles": [], "columns": {}, "fallback_columns": {"17": 14}}
 
     def _save_raw(self, data: dict):
         with open(self.storage_path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
+    DEFAULT_FALLBACK_COLUMNS: dict[str, int] = {
+        "17": 14  # Cột 17 (Hội đồng thi) dự phòng lấy từ Cột 14 (Tên trường đã học) khi không có cột riêng
+    }
+
+    def get_fallback_columns(self) -> dict[int, int]:
+        """Lấy các quy tắc dự phòng cột đích (ví dụ: Cột 17 lấy theo Cột 14 khi không có cột riêng)."""
+        data = self._load_raw()
+        fbs = data.get("fallback_columns")
+        if fbs is None:
+            fbs = self.DEFAULT_FALLBACK_COLUMNS
+        return {int(k): int(v) for k, v in fbs.items()}
+
+    def get_fallback_for_column(self, t_idx: int) -> int | None:
+        """Lấy chỉ số cột dự phòng cho cột t_idx nếu có cấu hình."""
+        return self.get_fallback_columns().get(t_idx)
+
+    def set_fallback_columns(self, fallbacks: dict[int | str, int]):
+        """Lưu cấu hình quy tắc dự phòng cột đích."""
+        data = self._load_raw()
+        data["fallback_columns"] = {str(k): int(v) for k, v in fallbacks.items()}
+        data["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self._save_raw(data)
+
+    def add_fallback_column(self, target_idx: int, fallback_idx: int) -> None:
+        """Thêm hoặc cập nhật một quy tắc dự phòng cột đích."""
+        fbs = self.get_fallback_columns()
+        fbs[int(target_idx)] = int(fallback_idx)
+        self.set_fallback_columns(fbs)
+
+    def delete_fallback_column(self, target_idx: int) -> bool:
+        """Xóa quy tắc dự phòng của một cột đích."""
+        fbs = self.get_fallback_columns()
+        if int(target_idx) in fbs:
+            del fbs[int(target_idx)]
+            self.set_fallback_columns(fbs)
+            return True
+        return False
+
+    # -------------------------------------------------------------------------
+    # QUẢN LÝ DANH SÁCH PROFILES ĐẢO NGƯỢC (Inverted Profiles)
+    # -------------------------------------------------------------------------
+
+    def get_all_profiles(self) -> list[dict]:
+        """Lấy danh sách tất cả các Profile đã lưu."""
+        data = self._load_raw()
+        return data.get("profiles", [])
+
+    def list_profiles(self) -> list[dict]:
+        """Bí danh cho get_all_profiles(), tương thích UI."""
+        return self.get_all_profiles()
+
+    def get_profile_by_id(self, profile_id: str) -> dict | None:
+        """Tìm Profile theo ID."""
+        for p in self.get_all_profiles():
+            if p.get("id") == profile_id:
+                return p
+        return None
+
+    def save_profile(
+        self,
+        name: str,
+        source_headers: list[str],
+        mapping: dict[str, int | list[int] | None] | dict[int, int | list[int] | None],
+        profile_id: str | None = None,
+        default_values: dict[int | str, str] | None = None,
+        sync_knowledge: bool = True
+    ) -> dict:
+        """
+        Lưu hoặc cập nhật một Profile đảo ngược.
+        Mapping được lưu dưới dạng: {"tên cột nguồn chuẩn hóa": chỉ_số_cột_mẫu | [cột, thứ_tự] | None}
+        """
+        data = self._load_raw()
+        profiles = data.setdefault("profiles", [])
+
+        # Chuẩn hóa danh sách tiêu đề nguồn
+        clean_headers: list[str] = []
+        norm_headers: list[str] = []
+        for h in source_headers:
+            if h is not None and str(h).strip():
+                clean_str = clean_whitespace(auto_convert_legacy_encoding(str(h)))
+                norm_str = normalize_text_for_match(clean_str)
+                if clean_str and norm_str:
+                    clean_headers.append(clean_str)
+                    norm_headers.append(norm_str)
+
+        # Chuẩn hóa mapping
+        norm_mapping: dict[str, Any] = {}
+        is_target_keyed = False
+        if mapping:
+            # Kiểm tra xem mapping truyền vào là {norm_header: target} hay {target_col_idx: source_idx}
+            is_target_keyed = any(isinstance(k, int) and 1 <= k <= 28 for k in mapping.keys())
+            if is_target_keyed:
+                # Chuyển đổi từ {target_idx: source_idx_or_list} sang {norm_header: target}
+                for t_idx, s_val in mapping.items():
+                    if s_val is None:
+                        continue
+                    if isinstance(s_val, list):
+                        for ord_idx, si in enumerate(s_val):
+                            if 0 <= si < len(source_headers):
+                                h_norm = normalize_text_for_match(source_headers[si])
+                                if h_norm:
+                                    norm_mapping[h_norm] = [int(t_idx), ord_idx]
+                    elif isinstance(s_val, int) and 0 <= s_val < len(source_headers):
+                        h_norm = normalize_text_for_match(source_headers[s_val])
+                        if h_norm:
+                            norm_mapping[h_norm] = int(t_idx)
+                # Các cột nguồn không được ánh xạ -> map to None
+                for nh in norm_headers:
+                    if nh not in norm_mapping:
+                        norm_mapping[nh] = None
+            else:
+                for k, v in mapping.items():
+                    nh = normalize_text_for_match(str(k))
+                    if nh:
+                        norm_mapping[nh] = v
+
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now_ts = int(datetime.now().timestamp())
+
+        # Tìm profile trùng lặp (theo ID hoặc tập hợp header giống hệt 100%)
+        existing_idx = None
+        s_set = set(norm_headers)
+        for idx, p in enumerate(profiles):
+            if profile_id and p.get("id") == profile_id:
+                existing_idx = idx
+                break
+            if set(p.get("source_headers_norm", [])) == s_set:
+                existing_idx = idx
+                break
+
+        prof_obj = {
+            "id": profile_id or (profiles[existing_idx].get("id") if existing_idx is not None else f"prof_{now_ts}_{uuid.uuid4().hex[:6]}"),
+            "name": name.strip() or f"Mẫu {len(clean_headers)} cột ({now_str})",
+            "source_headers": clean_headers,
+            "source_headers_norm": norm_headers,
+            "mapping": norm_mapping,
+            "timestamp": now_ts,
+            "updated_at": now_str
+        }
+
+        if existing_idx is not None:
+            profiles[existing_idx] = prof_obj
+        else:
+            profiles.append(prof_obj)
+
+        data["updated_at"] = now_str
+        self._save_raw(data)
+
+        # Cập nhật song song từ điển biến thể tương thích
+        if sync_knowledge and mapping:
+            self.learn_mapping(
+                mapping if is_target_keyed else self.resolve_execution_mapping(source_headers, norm_mapping),
+                source_headers,
+                save_prof=False
+            )
+
+        return prof_obj
+
+    def delete_profile(self, profile_id: str) -> bool:
+        """Xóa một Profile theo ID."""
+        data = self._load_raw()
+        profiles = data.get("profiles", [])
+        init_len = len(profiles)
+        data["profiles"] = [p for p in profiles if p.get("id") != profile_id]
+        if len(data["profiles"]) < init_len:
+            data["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self._save_raw(data)
+            return True
+        return False
+
+    def delete_profiles(self, profile_ids: list[str]) -> int:
+        """Xóa nhiều Profile cùng lúc theo danh sách ID."""
+        if not profile_ids:
+            return 0
+        data = self._load_raw()
+        profiles = data.get("profiles", [])
+        id_set = set(profile_ids)
+        new_profiles = [p for p in profiles if p.get("id") not in id_set]
+        deleted_count = len(profiles) - len(new_profiles)
+        if deleted_count > 0:
+            data["profiles"] = new_profiles
+            data["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self._save_raw(data)
+        return deleted_count
+
+    def delete_all_profiles(self) -> int:
+        """Xóa toàn bộ Profile đã lưu."""
+        data = self._load_raw()
+        profiles = data.get("profiles", [])
+        total = len(profiles)
+        data["profiles"] = []
+        data["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self._save_raw(data)
+        return total
+
+    # -------------------------------------------------------------------------
+    # CHUYỂN ĐỔI MAPPING ĐẢO NGƯỢC -> MAPPING THỰC THI (Execution Mapping)
+    # -------------------------------------------------------------------------
+
+    def resolve_execution_mapping(
+        self,
+        raw_headers: list[str],
+        inverted_mapping: dict[str, Any]
+    ) -> dict[int, int | list[int] | None]:
+        """
+        Chuyển đổi từ Inverted Mapping (tên cột nguồn -> chỉ số cột mẫu)
+        sang Execution Mapping (chỉ số cột mẫu 1..28 -> chỉ số cột nguồn 0..N-1).
+        Đồng thời áp dụng các quy tắc cột dự phòng (fallback).
+        """
+        resolved: dict[int, int | list[int] | None] = {c["idx"]: None for c in TARGET_COLUMNS}
+        composites: dict[int, list[tuple[int, int]]] = {}
+
+        for si, h in enumerate(raw_headers):
+            if h is None or not str(h).strip():
+                continue
+            norm_h = normalize_text_for_match(str(h))
+            if not norm_h:
+                continue
+
+            target_spec = inverted_mapping.get(norm_h)
+            if target_spec is None:
+                continue
+
+            if isinstance(target_spec, list) and len(target_spec) >= 2:
+                # Dạng composite: [target_idx, order]
+                t_idx, order = int(target_spec[0]), int(target_spec[1])
+                composites.setdefault(t_idx, []).append((order, si))
+            elif isinstance(target_spec, int) and 1 <= target_spec <= 28:
+                resolved[target_spec] = si
+
+        # Sắp xếp và đưa các cột composite vào resolved
+        for t_idx, parts in composites.items():
+            sorted_parts = sorted(parts, key=lambda x: x[0])
+            indices = [si for _, si in sorted_parts]
+            resolved[t_idx] = indices[0] if len(indices) == 1 else indices
+
+        # Áp dụng quy tắc dự phòng cột đích (ví dụ Cột 17 lấy theo Cột 14)
+        fallback_rules = self.get_fallback_columns()
+        for t_idx, fb_target in fallback_rules.items():
+            if resolved.get(t_idx) is None and resolved.get(fb_target) is not None:
+                resolved[t_idx] = resolved[fb_target]
+
+        return resolved
+
+    # -------------------------------------------------------------------------
+    # BỘ SO KHỚP TẬP HỢP 4 CẤP ĐỘ (Exact, Subset, Superset, Fallback)
+    # -------------------------------------------------------------------------
+
+    def find_matching_profile(
+        self,
+        raw_headers: list[str],
+        sample_rows: list[list[Any]] | None = None
+    ) -> tuple[str | None, dict | None, dict[int, int | list[int] | None] | None, list[str]]:
+        """
+        So khớp tập hợp tiêu đề của file Excel nguồn với kho Profiles:
+        - Cấp 1: Khớp 100% (S == P)
+        - Cấp 2: Khớp Tập con (S c P): chứa cột Họ tên, chọn Profile cha gần nhất.
+        - Cấp 3: Khớp Tập mẹ (S > P):
+            + Nếu các cột thừa không có dữ liệu -> Tự động bỏ qua và áp dụng.
+            + Nếu các cột thừa có dữ liệu -> Báo về để mở dialog hỏi người dùng.
+        - Cấp 4: Không khớp -> Trả về (None, None, None, [])
+
+        Trả về: (match_type, matched_profile, resolved_mapping, extra_headers_with_data)
+        """
+        norm_source: list[str] = []
+        for h in raw_headers:
+            if h is not None and str(h).strip():
+                nh = normalize_text_for_match(str(h))
+                if nh:
+                    norm_source.append(nh)
+
+        if not norm_source:
+            return None, None, None, []
+
+        S = set(norm_source)
+        profiles = self.get_all_profiles()
+        if not profiles:
+            return None, None, None, []
+
+        # CẤP 1: TRÙNG KHỚP 100% (Exact Match: S == P)
+        for p in profiles:
+            P = set(p.get("source_headers_norm", []))
+            if S == P:
+                res_map = self.resolve_execution_mapping(raw_headers, p.get("mapping", {}))
+                return "exact", p, res_map, []
+
+        # CẤP 2: TẬP CON (Subset Match: S c P)
+        subset_candidates: list[dict] = []
+        for p in profiles:
+            P = set(p.get("source_headers_norm", []))
+            if S.issubset(P) and len(S) < len(P):
+                # Kiểm tra điều kiện tiên quyết: Các cột còn lại trong S phải chứa Cột 5 (Họ tên)
+                p_map = p.get("mapping", {})
+                has_name = False
+                for sh in S:
+                    spec = p_map.get(sh)
+                    if spec == 5 or (isinstance(spec, list) and len(spec) > 0 and spec[0] == 5):
+                        has_name = True
+                        break
+                if has_name:
+                    subset_candidates.append(p)
+
+        if subset_candidates:
+            # Chọn Profile cha có số lượng cột nhỏ nhất (gần S nhất), nếu bằng nhau chọn bản mới nhất
+            subset_candidates.sort(key=lambda x: (len(x.get("source_headers_norm", [])), -x.get("timestamp", 0)))
+            best_p = subset_candidates[0]
+            res_map = self.resolve_execution_mapping(raw_headers, best_p.get("mapping", {}))
+            return "subset", best_p, res_map, []
+
+        # CẤP 3: TẬP MẸ (Superset Match: S > P)
+        superset_candidates: list[dict] = []
+        for p in profiles:
+            P = set(p.get("source_headers_norm", []))
+            if P.issubset(S) and len(P) < len(S):
+                superset_candidates.append(p)
+
+        if superset_candidates:
+            # Chọn Profile con bao quát được nhiều cột của S nhất
+            superset_candidates.sort(key=lambda x: (-len(x.get("source_headers_norm", [])), -x.get("timestamp", 0)))
+            best_p = superset_candidates[0]
+            P = set(best_p.get("source_headers_norm", []))
+            extra_headers = S - P
+
+            # Xác định những cột thừa nào thực sự có dữ liệu trong các dòng mẫu
+            extra_indices = [
+                i for i, h in enumerate(raw_headers)
+                if h is not None and normalize_text_for_match(str(h)) in extra_headers
+            ]
+
+            extra_with_data_names: list[str] = []
+            if sample_rows:
+                for idx in extra_indices:
+                    has_val = any(
+                        idx < len(row) and row[idx] is not None and str(row[idx]).strip() != ""
+                        for row in sample_rows
+                    )
+                    if has_val:
+                        extra_with_data_names.append(str(raw_headers[idx]))
+            else:
+                extra_with_data_names = [str(raw_headers[i]) for i in extra_indices]
+
+            if not extra_with_data_names:
+                # Toàn bộ cột thừa KHÔNG có dữ liệu -> Tự động bỏ qua và áp dụng
+                augmented_mapping = dict(best_p.get("mapping", {}))
+                for eh in extra_headers:
+                    augmented_mapping[eh] = None
+                res_map = self.resolve_execution_mapping(raw_headers, augmented_mapping)
+                return "superset_auto", best_p, res_map, []
+            else:
+                # Có cột thừa CHỨA dữ liệu -> Cần hiển thị để người dùng quyết định
+                return "superset_ask", best_p, None, extra_with_data_names
+
+        return None, None, None, []
+
+    # -------------------------------------------------------------------------
+    # TỰ ĐỘNG GỢI Ý MAPPING ĐẢO NGƯỢC (Heuristics & Fuzzy Match)
+    # -------------------------------------------------------------------------
+
+    def auto_suggest_inverted_mapping(
+        self,
+        source_headers: list[str]
+    ) -> dict[str, Any]:
+        """
+        Tự động tạo gợi ý ánh xạ đảo ngược: {norm_header: target_spec}
+        - Nhận diện cột Họ đệm + Tên: [5, 0], [5, 1]
+        - Nhận diện cột Ngày + Tháng + Năm: [9, 0], [9, 1], [9, 2]
+        - Khớp mờ các cột còn lại với 28 cột chuẩn. Nếu độ khớp thấp thì để None (Bỏ qua).
+        """
+        inverted_map: dict[str, Any] = {}
+        if not source_headers:
+            return inverted_map
+
+        # Danh sách chuẩn hóa
+        norm_list = [normalize_text_for_match(str(h or "")) for h in source_headers]
+
+        # 1. Phát hiện Họ đệm + Tên tách rời
+        ho_idx = None
+        ten_idx = None
+        HO_KW = {"ho", "ho dem", "ho va chu dem", "ho va ten dem", "ho lot", "hodem", "ho va"}
+        TEN_KW = {"ten", "ten hs", "ten hoc sinh", "ten thi sinh"}
+
+        has_full_name = any(n in {"ho va ten", "ho ten", "ho chu dem va ten", "ho va chu dem va ten"} for n in norm_list)
+        if not has_full_name:
+            for i, n in enumerate(norm_list):
+                if not n:
+                    continue
+                if ho_idx is None and n in HO_KW:
+                    ho_idx = i
+                elif ten_idx is None and n in TEN_KW:
+                    ten_idx = i
+
+            if ho_idx is not None and ten_idx is not None and ho_idx != ten_idx:
+                inverted_map[norm_list[ho_idx]] = [5, 0]
+                inverted_map[norm_list[ten_idx]] = [5, 1]
+
+        # 2. Phát hiện Ngày + Tháng + Năm tách rời
+        ngay_idx, thang_idx, nam_idx = None, None, None
+        has_full_dob = any(n in {"ngay sinh", "ngay thang nam sinh", "ns"} for n in norm_list)
+        if not has_full_dob:
+            for i, n in enumerate(norm_list):
+                if not n:
+                    continue
+                if ngay_idx is None and n in {"ngay", "ngay sinh"}:
+                    ngay_idx = i
+                elif thang_idx is None and n in {"thang", "thang sinh"}:
+                    thang_idx = i
+                elif nam_idx is None and n in {"nam", "nam sinh"}:
+                    nam_idx = i
+
+            if ngay_idx is not None and thang_idx is not None and nam_idx is not None:
+                inverted_map[norm_list[ngay_idx]] = [9, 0]
+                inverted_map[norm_list[thang_idx]] = [9, 1]
+                inverted_map[norm_list[nam_idx]] = [9, 2]
+
+        # 3. So khớp mờ các cột còn lại với 28 cột chuẩn
+        used_targets = {v if isinstance(v, int) else v[0] for v in inverted_map.values() if v is not None}
+        for i, n in enumerate(norm_list):
+            if not n or n in inverted_map:
+                continue
+
+            best_target = None
+            best_score = 0.0
+
+            for col in TARGET_COLUMNS:
+                t_idx = col["idx"]
+                if t_idx in used_targets:
+                    continue
+                score = compute_fuzzy_similarity(col["name"], n)
+                if score > best_score:
+                    best_score = score
+                    best_target = t_idx
+
+            if best_target is not None and best_score >= 0.55:
+                inverted_map[n] = best_target
+                used_targets.add(best_target)
+            else:
+                inverted_map[n] = None
+
+        return inverted_map
+
+    # -------------------------------------------------------------------------
+    # CÁC HÀM TƯƠNG THÍCH NGƯỢC (Backward Compatibility)
+    # -------------------------------------------------------------------------
+
     def get_columns_knowledge(self) -> dict[str, list[str | list[str]]]:
-        """Lấy toàn bộ từ điển tri thức của 28 cột chuẩn."""
+        """Tương thích ngược: lấy từ điển tri thức cột."""
         data = self._load_raw()
         return data.get("columns", {})
 
     def get_learned_terms(self, t_idx: int) -> list[str | list[str]]:
-        """Lấy danh sách các biến thể tiêu đề đã học cho cột đích t_idx."""
         cols = self.get_columns_knowledge()
         return cols.get(str(t_idx), [])
 
     def learn_mapping(
         self,
         mapping: dict[int, int | list[int] | None],
-        raw_headers: list[str]
+        raw_headers: list[str],
+        save_prof: bool = True
     ) -> None:
-        """Học và bổ sung các biến thể tên cột mới vào kho tri thức tập trung."""
+        """Tương thích ngược: bổ sung các từ khóa vào data['columns'] và profiles."""
         if not mapping or not raw_headers:
             return
         data = self._load_raw()
         cols = data.setdefault("columns", {})
+        fallback_rules = self.get_fallback_columns()
 
         for t_idx, s_val in mapping.items():
             if s_val is None:
                 continue
+            fb_target = fallback_rules.get(t_idx)
+            if fb_target and mapping.get(fb_target) == s_val:
+                continue
+
             str_t = str(t_idx)
             existing_terms = cols.setdefault(str_t, [])
 
@@ -630,12 +1111,11 @@ class MappingProfileManager:
                 ]
                 if combo:
                     combo_norms = [normalize_text_for_match(c) for c in combo]
-                    already_exists = False
-                    for ex in existing_terms:
-                        if isinstance(ex, list) and len(ex) == len(combo):
-                            if [normalize_text_for_match(c) for c in ex] == combo_norms:
-                                already_exists = True
-                                break
+                    already_exists = any(
+                        isinstance(ex, list) and len(ex) == len(combo) and
+                        [normalize_text_for_match(c) for c in ex] == combo_norms
+                        for ex in existing_terms
+                    )
                     if not already_exists:
                         existing_terms.append(combo)
 
@@ -643,19 +1123,25 @@ class MappingProfileManager:
                 raw_text = clean_whitespace(auto_convert_legacy_encoding(str(raw_headers[s_val] or "")))
                 if raw_text:
                     norm_text = normalize_text_for_match(raw_text)
-                    already_exists = False
-                    for ex in existing_terms:
-                        if isinstance(ex, str) and normalize_text_for_match(ex) == norm_text:
-                            already_exists = True
-                            break
+                    already_exists = any(
+                        isinstance(ex, str) and normalize_text_for_match(ex) == norm_text
+                        for ex in existing_terms
+                    )
                     if not already_exists:
                         existing_terms.append(raw_text)
 
         data["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self._save_raw(data)
 
+        if save_prof:
+            self.save_profile(
+                name="Tri thức đã học",
+                source_headers=raw_headers,
+                mapping=mapping,
+                sync_knowledge=False
+            )
+
     def delete_learned_term(self, t_idx: int, term_idx: int) -> bool:
-        """Xóa một từ khóa đã học của cột đích t_idx."""
         data = self._load_raw()
         cols = data.get("columns", {})
         str_t = str(t_idx)
@@ -671,146 +1157,14 @@ class MappingProfileManager:
         self,
         current_raw_headers: list[str]
     ) -> tuple[dict | None, dict[int, int | list[int] | None] | None]:
-        """
-        Kiểm tra xem 100% các cột có dữ liệu trong current_raw_headers có khớp chính xác
-        với kho tri thức đã học hay không.
-        Nếu 100% khớp: trả về (profile_info, resolved_mapping).
-        Nếu có cột chưa biết: trả về (None, None).
-        """
-        valid_indices = [i for i, h in enumerate(current_raw_headers) if str(h or "").strip()]
-        if not valid_indices:
-            return None, None
-
-        knowledge = self.get_columns_knowledge()
-        if not knowledge:
-            return None, None
-
-        resolved_map: dict[int, int | list[int] | None] = {col["idx"]: None for col in TARGET_COLUMNS}
-        used_sources: set[int] = set()
-        used_targets: set[int] = set()
-
-        # 1. So khớp các cụm cột gộp trước (e.g. ['Họ đệm', 'Tên'], ['Ngày', 'Tháng', 'Năm'])
-        for t_str, terms in knowledge.items():
-            t_idx = int(t_str)
-            if t_idx in used_targets:
-                continue
-            for term in terms:
-                if isinstance(term, list):
-                    matched = []
-                    for sub in term:
-                        norm_sub = normalize_text_for_match(sub)
-                        found = None
-                        for si in valid_indices:
-                            if si not in used_sources and normalize_text_for_match(current_raw_headers[si]) == norm_sub:
-                                found = si
-                                break
-                        if found is not None:
-                            matched.append(found)
-                    if len(matched) == len(term) and len(set(matched)) == len(term):
-                        resolved_map[t_idx] = matched
-                        used_targets.add(t_idx)
-                        used_sources.update(matched)
-                        break
-
-        # 2. So khớp các cột đơn
-        for si in valid_indices:
-            if si in used_sources:
-                continue
-            norm_s = normalize_text_for_match(current_raw_headers[si])
-            for t_str, terms in knowledge.items():
-                t_idx = int(t_str)
-                if t_idx in used_targets:
-                    continue
-                matched_term = False
-                for term in terms:
-                    if isinstance(term, str) and normalize_text_for_match(term) == norm_s:
-                        matched_term = True
-                        break
-                if matched_term:
-                    resolved_map[t_idx] = si
-                    used_targets.add(t_idx)
-                    used_sources.add(si)
-                    break
-
-        # Điều kiện tự động 100%: TẤT CẢ các cột hợp lệ trong file đều phải được nhận diện chính xác
-        if len(used_sources) == len(valid_indices):
-            prof_info = {
-                "id": "knowledge_pool",
-                "name": "Tri thức đã học",
-                "total_matched": len(used_sources)
-            }
-            return prof_info, resolved_map
-
+        """Tương thích ngược: tìm profile khớp 100%."""
+        match_type, prof, res_map, _ = self.find_matching_profile(current_raw_headers)
+        if match_type == "exact":
+            return prof, res_map
         return None, None
 
-    def save_profile(
-        self,
-        name: str,
-        raw_headers: list[str],
-        mapping: dict[int, int | list[int] | None] | None = None,
-        default_values: dict[int | str, str] | None = None,
-        named_mapping: dict[str, str | list[str] | None] | None = None,
-        signature: str | None = None
-    ) -> dict:
-        """Tương thích ngược: ghi nhận ánh xạ vào kho tri thức tập trung."""
-        if mapping:
-            self.learn_mapping(mapping, raw_headers)
-        elif named_mapping:
-            # Chuyển đổi named_mapping sang mapping nếu có
-            norm_map = {}
-            for t_str, val in named_mapping.items():
-                if val is not None:
-                    t_idx = int(t_str)
-                    if isinstance(val, list):
-                        indices = []
-                        for sub in val:
-                            n_sub = normalize_text_for_match(sub)
-                            for i, h in enumerate(raw_headers):
-                                if normalize_text_for_match(h) == n_sub and i not in indices:
-                                    indices.append(i)
-                                    break
-                        norm_map[t_idx] = indices
-                    else:
-                        n_val = normalize_text_for_match(val)
-                        for i, h in enumerate(raw_headers):
-                            if normalize_text_for_match(h) == n_val:
-                                norm_map[t_idx] = i
-                                break
-            self.learn_mapping(norm_map, raw_headers)
-        return {"id": "knowledge_pool", "name": name, "raw_headers": raw_headers}
-
-    def list_profiles(self) -> list[dict]:
-        """Tương thích ngược cho UI: trả về danh sách các cột đã học tri thức."""
-        cols = self.get_columns_knowledge()
-        res = []
-        for col in TARGET_COLUMNS:
-            t_idx = col["idx"]
-            terms = cols.get(str(t_idx), [])
-            if terms:
-                res.append({
-                    "id": f"col_{t_idx}",
-                    "name": f"Cột {t_idx}: {col['name']}",
-                    "raw_headers": terms,
-                    "named_mapping": {str(t_idx): terms[-1]},
-                    "updated_at": ""
-                })
-        return res
-
     def get_named_mapping(self, profile: dict) -> dict[str, str | list[str] | None]:
-        return profile.get("named_mapping", {})
-
-    def delete_profile(self, profile_id: str) -> bool:
-        if profile_id.startswith("col_"):
-            try:
-                t_idx = int(profile_id.replace("col_", ""))
-                data = self._load_raw()
-                if str(t_idx) in data.get("columns", {}):
-                    del data["columns"][str(t_idx)]
-                    self._save_raw(data)
-                    return True
-            except Exception:
-                pass
-        return False
+        return profile.get("mapping", {})
 
 
 # ==============================================================================
@@ -949,34 +1303,60 @@ class SmartMerger:
                 if not raw_headers:
                     continue
 
-                # 2. Tạo chữ ký cấu trúc cột
-                sig = compute_headers_signature(raw_headers)
-                mapping: dict[int, int | None] | None = None
+                # 2. Đọc các dòng mẫu dữ liệu (sample_rows) để kiểm tra cột có dữ liệu hay rỗng
+                sample_rows: list[list[Any]] = []
+                for row_vals in ws_curr.iter_rows(min_row=h_idx + 1, max_row=min(h_idx + 25, ws_curr.max_row), values_only=True):
+                    sample_rows.append(list(row_vals))
+
+                sample_values: dict[int, str] = {}
+                for c_idx in range(len(raw_headers)):
+                    for r in sample_rows:
+                        if c_idx < len(r) and r[c_idx] is not None and str(r[c_idx]).strip():
+                            sample_values[c_idx] = str(r[c_idx]).strip()
+                            break
+
+                mapping: dict[int, int | list[int] | None] | None = None
                 current_defaults: dict[int, str] = {}
                 profile_used_name: str = ""
 
-                # 1. Kiểm tra xem có khớp chuẩn 28 cột không
+                # 3. Kiểm tra xem có khớp chuẩn 28 cột không
                 if is_standard_28_headers(raw_headers):
                     mapping = {col["idx"]: idx for idx, col in enumerate(TARGET_COLUMNS) if idx < len(raw_headers)}
                     current_defaults = {}
                     profile_used_name = "Chuẩn 28 cột gốc"
-                    log(f"  ⚡ Sheet '{ws_curr.title}': Cấu trúc chuẩn 28 cột $\\rightarrow$ Ánh xạ tự động 1:1.", "info")
+                    log(f"  ⚡ Sheet '{ws_curr.title}': Cấu trúc chuẩn 28 cột ➔ Ánh xạ tự động 1:1.", "info")
                 else:
-                    # 2. Tìm Profile khớp 100% theo TÊN CỘT (không phụ thuộc thứ tự index)
-                    exact_prof, resolved_map = self.profile_mgr.find_exact_matching_profile(raw_headers)
-                    if exact_prof and resolved_map:
+                    # 4. So khớp theo lý thuyết tập hợp (Trùng khớp 100%, Tập con, Tập mẹ)
+                    match_type, matched_prof, resolved_map, extra_cols = self.profile_mgr.find_matching_profile(
+                        raw_headers, sample_rows=sample_rows
+                    )
+
+                    if match_type in ("exact", "subset", "superset_auto") and resolved_map:
                         mapping = resolved_map
-                        str_defs = exact_prof.get("default_values", {})
-                        current_defaults = {int(k): str(v).strip() for k, v in str_defs.items() if str(v).strip()}
-                        profile_used_name = exact_prof.get("name", "Profile đã lưu")
-                        log(f"  ⚡ Sheet '{ws_curr.title}': Tự động áp dụng Profile '{profile_used_name}' (Khớp 100% tên cột).", "info")
+                        profile_used_name = matched_prof.get("name", "Profile")
+                        if match_type == "exact":
+                            log(f"  ⚡ Sheet '{ws_curr.title}': Tự động áp dụng Profile '{profile_used_name}' (Khớp 100% tiêu đề).", "info")
+                        elif match_type == "subset":
+                            log(f"  ⚡ Sheet '{ws_curr.title}': Tự động áp dụng Profile '{profile_used_name}' (Khớp tập con, kế thừa quy tắc).", "info")
+                        elif match_type == "superset_auto":
+                            log(f"  ⚡ Sheet '{ws_curr.title}': Tự động áp dụng Profile '{profile_used_name}' (Khớp tập mẹ, cột thừa không có dữ liệu ➔ Bỏ qua).", "info")
                     else:
-                        # 3. Chưa có Profile khớp 100% tên cột -> Gợi ý thông minh 2 tầng:
-                        #    Tầng 1: Khớp mờ theo Profile gần nhất
-                        #    Tầng 2: Điền tiếp theo từ điển đồng nghĩa 28 cột
-                        suggested_map, suggested_defs, matched_pname = auto_suggest_mapping_with_details(
-                            raw_headers, profile_mgr=self.profile_mgr
-                        )
+                        # Cần sự can thiệp của người dùng:
+                        # Tạo gợi ý đảo ngược
+                        suggested_inverted = self.profile_mgr.auto_suggest_inverted_mapping(raw_headers)
+                        if match_type == "superset_ask" and matched_prof:
+                            # Kế thừa ánh xạ từ profile cha cho các cột đã biết
+                            for k, v in matched_prof.get("mapping", {}).items():
+                                suggested_inverted[k] = v
+                            # Tự động bỏ qua các cột thừa KHÔNG có dữ liệu
+                            extra_data_norm_set = {normalize_text_for_match(c) for c in extra_cols}
+                            for h in raw_headers:
+                                nh = normalize_text_for_match(str(h or ''))
+                                if nh and nh not in matched_prof.get("mapping", {}) and nh not in extra_data_norm_set:
+                                    suggested_inverted[nh] = None
+                            log(f"  🔍 Sheet '{ws_curr.title}': Khớp tập mẹ với '{matched_prof.get('name')}', các cột phát hiện thêm có dữ liệu: {extra_cols} ➔ Hiển thị để xác nhận.", "info")
+
+                        suggested_map = self.profile_mgr.resolve_execution_mapping(raw_headers, suggested_inverted)
                         formatted_headers = header_info.get("formatted_headers", [])
 
                         callback_payload = {
@@ -986,44 +1366,74 @@ class SmartMerger:
                             "header_row_idx": h_idx,
                             "raw_headers": raw_headers,
                             "formatted_headers": formatted_headers,
-                            "signature": sig,
                             "suggested_mapping": suggested_map,
-                            "suggested_defaults": suggested_defs,
-                            "matched_profile_name": matched_pname
+                            "suggested_inverted_mapping": suggested_inverted,
+                            "sample_rows": sample_rows,
+                            "sample_values": sample_values,
+                            "extra_cols_with_data": extra_cols,
+                            "matched_profile_name": matched_prof.get("name") if matched_prof else None
                         }
 
                         if mapping_callback:
                             cb_res = mapping_callback(callback_payload)
-                            if len(cb_res) == 4:
-                                confirmed_map, prof_name, custom_defs, should_skip = cb_res
-                            elif len(cb_res) == 3:
-                                confirmed_map, prof_name, should_skip = cb_res
-                                custom_defs = {}
-                            else:
-                                confirmed_map, prof_name, custom_defs, should_skip = None, None, {}, True
+                            action = "skip"
+                            confirmed_map = None
+                            prof_name = None
+                            custom_inverted = None
 
-                            if should_skip or confirmed_map is None:
+                            if isinstance(cb_res, tuple):
+                                if cb_res[0] in ("cancel", "skip", "apply"):
+                                    action = cb_res[0]
+                                    confirmed_map = cb_res[1]
+                                    prof_name = cb_res[2] if len(cb_res) > 2 else None
+                                    custom_inverted = cb_res[3] if len(cb_res) > 3 else None
+                                elif len(cb_res) == 4:
+                                    c_map, p_name, _, is_skip = cb_res
+                                    if is_skip is True:
+                                        action = "skip"
+                                    elif is_skip is False and c_map is None:
+                                        action = "cancel"
+                                    else:
+                                        action = "apply"
+                                        confirmed_map = c_map
+                                        prof_name = p_name
+                                elif len(cb_res) == 3:
+                                    c_map, p_name, is_skip = cb_res
+                                    if is_skip is True:
+                                        action = "skip"
+                                    elif is_skip is False and c_map is None:
+                                        action = "cancel"
+                                    else:
+                                        action = "apply"
+                                        confirmed_map = c_map
+                                        prof_name = p_name
+
+                            if action == "cancel":
+                                log("⏹ Đã dừng toàn bộ quá trình ghép theo yêu cầu của người dùng.", "warning")
+                                return {
+                                    "status": "cancelled",
+                                    "total_rows": total_extracted_rows,
+                                    "sheets_processed": sheets_processed,
+                                    "sheets_skipped": sheets_skipped
+                                }
+                            elif action == "skip" or confirmed_map is None:
                                 log(f"  ⏭️ Đã bỏ qua Sheet '{ws_curr.title}' theo lựa chọn của bạn.", "warning")
                                 sheets_skipped += 1
                                 continue
 
                             mapping = confirmed_map
-                            current_defaults = {int(k): str(v).strip() for k, v in (custom_defs or {}).items() if str(v).strip()}
-                            profile_used_name = prof_name or f"Profile_{p.stem}_{ws_curr.title}"
+                            profile_used_name = prof_name or f"Mẫu {p.stem}_{ws_curr.title}"
 
-                            # Lưu Profile này vào bộ nhớ cho những lần sau (bao gồm cả Tên cột và Index)
+                            # Lưu Profile đảo ngược vào kho Profiles
                             self.profile_mgr.save_profile(
                                 name=profile_used_name,
-                                raw_headers=raw_headers,
-                                mapping=mapping,
-                                default_values=current_defaults
+                                source_headers=raw_headers,
+                                mapping=custom_inverted or mapping
                             )
                             log(f"  💾 Đã lưu cấu hình ánh xạ: '{profile_used_name}' vào kho Profiles.", "success")
                         else:
-                            # Không có UI callback -> sử dụng luôn gợi ý tự động
                             mapping = suggested_map
-                            current_defaults = suggested_defs
-                            profile_used_name = matched_pname or "Tự động suy luận"
+                            profile_used_name = "Tự động suy luận"
 
                 if not mapping:
                     continue

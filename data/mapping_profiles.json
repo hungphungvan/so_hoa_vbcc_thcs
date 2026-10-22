@@ -1,5 +1,49 @@
 {
   "version": "2.0",
-  "columns": {},
-  "updated_at": ""
+  "columns": {
+    "1": [
+      "Stt"
+    ],
+    "5": [
+      [
+        "Hodem",
+        "Ten"
+      ],
+      [
+        "Nơi học",
+        "Họ, đệm",
+        "tên"
+      ]
+    ],
+    "6": [
+      "Noihoc"
+    ],
+    "9": [
+      "Ngaysinh",
+      "Ngày sinh"
+    ],
+    "10": [
+      "Gioitinh",
+      "Giới tính"
+    ],
+    "11": [
+      "Dantoc",
+      "Dân tộc"
+    ],
+    "13": [
+      "Noisinh",
+      "Nơi sinh (Huyện-Tỉnh)"
+    ],
+    "14": [
+      "Noihoc",
+      "Nơi học"
+    ],
+    "24": [
+      "Ghi chú"
+    ]
+  },
+  "fallback_columns": {
+    "17": 14
+  },
+  "updated_at": "2026-10-23 03:06:33"
 }

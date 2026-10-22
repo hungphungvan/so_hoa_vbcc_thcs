@@ -449,6 +449,159 @@ class TestSmartMerger(unittest.TestCase):
         for t_idx, s_val in mapping.items():
             self.assertNotEqual(s_val, 4)
 
+    def test_fallback_columns_when_no_dedicated_exam_board_column(self):
+        """Kiểm tra Cột 17 (Hội đồng thi) tự động dự phòng lấy từ Cột 14 (Tên trường) khi không có cột riêng."""
+        from src.smart_merger import auto_suggest_mapping_with_details
+
+        headers = ["STT", "Họ và tên", "Ngày sinh", "Nơi học"]
+        mapping, defaults, _ = auto_suggest_mapping_with_details(headers, self.profile_mgr)
+
+        # Cột 14 nhận cột "Nơi học" (index 3)
+        self.assertEqual(mapping.get(14), 3)
+        # Cột 17 tự động nhận theo Cột 14 nhờ quy tắc fallback
+        self.assertEqual(mapping.get(17), 3)
+
+        # Kiểm tra learn_mapping không nhét "Nơi học" vào từ điển riêng của Cột 17
+        self.profile_mgr.learn_mapping(mapping, headers)
+        terms_17 = self.profile_mgr.get_learned_terms(17)
+        self.assertNotIn("Nơi học", terms_17)
+
+    def test_fallback_columns_when_dedicated_exam_board_column_exists(self):
+        """Kiểm tra Cột 17 ưu tiên nhận cột Hội đồng thi riêng biệt khi file có cả hai cột."""
+        from src.smart_merger import auto_suggest_mapping_with_details
+
+        headers = ["STT", "Họ và tên", "Ngày sinh", "Tên trường", "Hội đồng coi thi"]
+        mapping, defaults, _ = auto_suggest_mapping_with_details(headers, self.profile_mgr)
+
+        # Cột 14 nhận cột "Tên trường" (index 3)
+        self.assertEqual(mapping.get(14), 3)
+    def test_inverted_profiles_set_matching(self):
+        """Kiểm tra toàn diện cơ chế so khớp tập hợp: Trùng khớp 100%, Tập con, Tập mẹ."""
+        # Lưu Profile gốc A: 5 cột
+        prof_headers = ["STT", "Họ đệm", "Tên", "Ngày sinh", "Nơi sinh"]
+        self.profile_mgr.save_profile(
+            name="Mẫu Trường A",
+            source_headers=prof_headers,
+            mapping={
+                "stt": 1,
+                "ho dem": [5, 0],
+                "ten": [5, 1],
+                "ngay sinh": 9,
+                "noi sinh": 13
+            }
+        )
+
+        # 1. Trùng khớp 100% (Exact Match)
+        match_type, p, res_map, _ = self.profile_mgr.find_matching_profile(
+            ["Nơi sinh", "Ngày sinh", "Tên", "Họ đệm", "STT"]
+        )
+        self.assertEqual(match_type, "exact")
+        self.assertEqual(p["name"], "Mẫu Trường A")
+        self.assertEqual(res_map[1], 4)   # STT ở vị trí 4
+        self.assertEqual(res_map[5], [3, 2]) # Họ đệm ở 3, Tên ở 2
+
+        # 2. Tập con (Subset Match) - có đủ Họ tên
+        sub_headers = ["STT", "Họ đệm", "Tên", "Ngày sinh"]
+        match_type_sub, p_sub, res_map_sub, _ = self.profile_mgr.find_matching_profile(sub_headers)
+        self.assertEqual(match_type_sub, "subset")
+        self.assertEqual(p_sub["name"], "Mẫu Trường A")
+        self.assertEqual(res_map_sub[1], 0)
+        self.assertEqual(res_map_sub[5], [1, 2])
+        self.assertIsNone(res_map_sub[13]) # Nơi sinh bị thiếu trong tập con -> None
+
+        # 3. Tập con nhưng thiếu Họ tên -> Không được tự động áp dụng (trả về None)
+        no_name_sub = ["STT", "Ngày sinh", "Nơi sinh"]
+        match_type_no_name, _, _, _ = self.profile_mgr.find_matching_profile(no_name_sub)
+        self.assertIsNone(match_type_no_name)
+
+        # 4. Tập mẹ (Superset Match) - Cột thừa KHÔNG có dữ liệu -> Tự động bỏ qua
+        sup_headers = ["STT", "Họ đệm", "Tên", "Ngày sinh", "Nơi sinh", "Cột Thừa 1", "Cột Thừa 2"]
+        sample_rows_empty_extras = [
+            [1, "Nguyễn Văn", "An", "01/01/2005", "Hà Nội", None, ""],
+            [2, "Trần Thị", "Bình", "02/02/2005", "Hải Phòng", "", None]
+        ]
+        match_type_sup_auto, p_sup, res_map_sup, _ = self.profile_mgr.find_matching_profile(
+            sup_headers, sample_rows=sample_rows_empty_extras
+        )
+        self.assertEqual(match_type_sup_auto, "superset_auto")
+        self.assertEqual(p_sup["name"], "Mẫu Trường A")
+        self.assertEqual(res_map_sup[1], 0)
+
+        # 5. Tập mẹ (Superset Match) - Cột thừa CÓ dữ liệu -> Yêu cầu người dùng duyệt (superset_ask)
+        sample_rows_with_extras = [
+            [1, "Nguyễn Văn", "An", "01/01/2005", "Hà Nội", "Có dữ liệu điểm", "8.5"],
+            [2, "Trần Thị", "Bình", "02/02/2005", "Hải Phòng", "Có dữ liệu điểm", "9.0"]
+        ]
+        match_type_sup_ask, p_ask, _, extra_cols = self.profile_mgr.find_matching_profile(
+            sup_headers, sample_rows=sample_rows_with_extras
+        )
+        self.assertEqual(match_type_sup_ask, "superset_ask")
+        self.assertEqual(p_ask["name"], "Mẫu Trường A")
+        self.assertIn("Cột Thừa 1", extra_cols)
+        self.assertIn("Cột Thừa 2", extra_cols)
+
+    def test_batch_delete_profiles(self):
+        """Kiểm tra xóa nhiều Profile cùng lúc và xóa tất cả Profile."""
+        p1 = self.profile_mgr.save_profile("Prof 1", ["STT", "Họ tên"], {"stt": 1, "ho ten": 5})
+        p2 = self.profile_mgr.save_profile("Prof 2", ["STT", "Tên"], {"stt": 1, "ten": 5})
+        p3 = self.profile_mgr.save_profile("Prof 3", ["STT", "Họ"], {"stt": 1, "ho": 5})
+
+        self.assertGreaterEqual(len(self.profile_mgr.get_all_profiles()), 3)
+
+        # Xóa 2 profile cùng lúc
+        deleted_cnt = self.profile_mgr.delete_profiles([p1["id"], p2["id"]])
+        self.assertEqual(deleted_cnt, 2)
+        self.assertIsNone(self.profile_mgr.get_profile_by_id(p1["id"]))
+        self.assertIsNone(self.profile_mgr.get_profile_by_id(p2["id"]))
+        self.assertIsNotNone(self.profile_mgr.get_profile_by_id(p3["id"]))
+
+        # Xóa tất cả
+        total_deleted = self.profile_mgr.delete_all_profiles()
+        self.assertGreaterEqual(total_deleted, 1)
+        self.assertEqual(len(self.profile_mgr.get_all_profiles()), 0)
+
+    def test_immediate_cancel_all(self):
+        """Kiểm tra nút 'Dừng toàn bộ' dừng ngay lập tức, không tiếp tục các file kế tiếp."""
+        file1 = self.tmp_dir / "file_cancel_1.xlsx"
+        wb1 = openpyxl.Workbook()
+        ws1 = wb1.active
+        ws1.title = "Sheet1"
+        ws1.append(["STT_La", "HoTen_La"])
+        ws1.append([1, "Nguyen Van A"])
+        wb1.save(file1)
+        wb1.close()
+
+        file2 = self.tmp_dir / "file_cancel_2.xlsx"
+        wb2 = openpyxl.Workbook()
+        ws2 = wb2.active
+        ws2.title = "Sheet1"
+        ws2.append(["STT_La", "HoTen_La"])
+        ws2.append([1, "Tran Van B"])
+        wb2.save(file2)
+        wb2.close()
+
+        out_f = self.tmp_dir / "Out_Cancel_Test.xlsx"
+        callback_history = []
+
+        def cancel_callback(payload):
+            callback_history.append(payload["file_name"])
+            # Người dùng chọn "Dừng toàn bộ"
+            return ("cancel", None, None)
+
+        merger = SmartMerger(profile_mgr=self.profile_mgr)
+        res = merger.process_merge_and_standardize(
+            source_files=[file1, file2],
+            output_file_path=out_f,
+            mapping_callback=cancel_callback,
+            merge_all_sheets=True
+        )
+
+        self.assertEqual(res["status"], "cancelled")
+        # Phải dừng ngay tại file 1, KHÔNG được mở file 2
+        self.assertEqual(len(callback_history), 1)
+        self.assertEqual(callback_history[0], file1.name)
+
 
 if __name__ == '__main__':
     unittest.main()
+

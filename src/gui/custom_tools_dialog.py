@@ -25,7 +25,8 @@ from src.custom_excel_manager import (
 )
 from src.smart_merger import (
     SmartMerger,
-    MappingProfileManager
+    MappingProfileManager,
+    TARGET_COLUMNS
 )
 from src.gui.column_mapping_dialog import ColumnMappingDialog
 from src.file_converter import FileFormatConverter
@@ -85,6 +86,7 @@ class CustomToolsView(ttk.Frame):
         self.smart_fill_defaults_var = tk.BooleanVar(value=True)
         self.smart_all_sheets_var = tk.BooleanVar(value=True)
         self.last_smart_output_file: Path | None = None
+        self.smart_cancel_requested = False
 
         # Biến Tab 4 (Chuyển đổi định dạng tệp cũ .doc, .xls)
         self.convert_files_list: list[Path] = []
@@ -778,6 +780,14 @@ class CustomToolsView(ttk.Frame):
         self.btn_open_smart_file = ttk.Button(s_act_row, text="📂 Mở tệp kết quả", command=self._open_smart_file, state=tk.DISABLED)
         self.btn_open_smart_file.pack(side=tk.RIGHT, padx=(8, 0))
 
+        self.btn_cancel_smart_merge = ttk.Button(
+            s_act_row,
+            text="⏹️ Dừng",
+            command=self._on_cancel_smart_merge,
+            state=tk.DISABLED
+        )
+        self.btn_cancel_smart_merge.pack(side=tk.RIGHT, padx=(8, 0))
+
         self.btn_run_smart_merge = ttk.Button(
             s_act_row,
             text="⚡ BẮT ĐẦU GHÉP & CHUẨN HÓA",
@@ -900,7 +910,9 @@ class CustomToolsView(ttk.Frame):
                 messagebox.showwarning("Chưa chọn nơi lưu", "Vui lòng chọn đường dẫn tệp kết quả đầu ra!", parent=self)
                 return
 
+            self.smart_cancel_requested = False
             self.btn_run_smart_merge.config(state=tk.DISABLED)
+            self.btn_cancel_smart_merge.config(state=tk.NORMAL)
             self.btn_open_smart_file.config(state=tk.DISABLED)
             self.smart_prog["value"] = 0
             self.smart_status_lbl.config(text="⏳ Đang quét và chuẩn hóa các tệp...", foreground=self.palette.WARNING)
@@ -918,7 +930,7 @@ class CustomToolsView(ttk.Frame):
 
                     def mapping_callback_sync(payload):
                         resp_event = threading.Event()
-                        resp_holder = {"result": (None, None, {}, True)}
+                        resp_holder = {"result": ("skip", None, None)}
                         self.msg_queue.put(("ask_mapping", payload, resp_event, resp_holder))
                         resp_event.wait()
                         return resp_holder["result"]
@@ -931,7 +943,8 @@ class CustomToolsView(ttk.Frame):
                         fill_defaults=fill_defs,
                         merge_all_sheets=merge_all,
                         progress_callback=prog_cb,
-                        log_callback=lambda m, l: self._log(m, l)
+                        log_callback=lambda m, l: self._log(m, l),
+                        check_cancel=lambda: self.smart_cancel_requested
                     )
 
                     self.msg_queue.put(("smart_done", res, Path(out_path)))
@@ -947,6 +960,15 @@ class CustomToolsView(ttk.Frame):
             self._log(f"❌ Lỗi khởi chạy tiến trình ghép & chuẩn hóa: {ex}\n{err_trace}", "error")
             messagebox.showerror("Lỗi khởi chạy", f"Không thể bắt đầu ghép và chuẩn hóa file:\n{ex}", parent=self)
             self.btn_run_smart_merge.config(state=tk.NORMAL)
+            self.btn_cancel_smart_merge.config(state=tk.DISABLED)
+
+    def _on_cancel_smart_merge(self):
+        """Yêu cầu dừng toàn bộ tiến trình ghép file."""
+        if messagebox.askyesno("Xác nhận dừng", "Bạn có chắc chắn muốn DỪNG TOÀN BỘ quá trình ghép không?", parent=self):
+            self.smart_cancel_requested = True
+            self.btn_cancel_smart_merge.config(state=tk.DISABLED)
+            self.smart_status_lbl.config(text="⏳ Đang dừng toàn bộ quá trình...", foreground=self.palette.DANGER)
+            self._log("⏹ Người dùng đã gửi lệnh dừng toàn bộ tiến trình...", "warning")
 
     def _open_smart_file(self):
         if self.last_smart_output_file and self.last_smart_output_file.exists():
@@ -1303,18 +1325,21 @@ class CustomToolsView(ttk.Frame):
                         file_name=payload["file_name"],
                         sheet_name=payload["sheet_name"],
                         raw_headers=payload["raw_headers"],
-                        formatted_headers=payload["formatted_headers"],
-                        suggested_mapping=payload["suggested_mapping"],
+                        formatted_headers=payload.get("formatted_headers"),
+                        suggested_mapping=payload.get("suggested_mapping"),
+                        suggested_inverted_mapping=payload.get("suggested_inverted_mapping"),
                         profile_mgr=self.smart_merger.profile_mgr,
                         is_dark=self.is_dark,
                         suggested_defaults=payload.get("suggested_defaults"),
-                        matched_profile_name=payload.get("matched_profile_name")
+                        matched_profile_name=payload.get("matched_profile_name"),
+                        sample_values=payload.get("sample_values"),
+                        extra_cols_with_data=payload.get("extra_cols_with_data")
                     )
                     dlg.wait_window()
                     resp_holder["result"] = dlg.result
                 except Exception as ex:
                     self._log(f"❌ Lỗi hiển thị hộp thoại ánh xạ: {ex}", "error")
-                    resp_holder["result"] = (None, None, {}, True)
+                    resp_holder["result"] = ("skip", None, None)
                 finally:
                     resp_event.set()
             elif msg_type == "smart_prog":
@@ -1323,22 +1348,30 @@ class CustomToolsView(ttk.Frame):
                 self._log(f"  {msg}", "info")
             elif msg_type == "smart_done":
                 res, out_p = item[1], item[2]
-                self.smart_prog["value"] = 100
                 self.btn_run_smart_merge.config(state=tk.NORMAL)
-                self.btn_open_smart_file.config(state=tk.NORMAL)
-                self.last_smart_output_file = out_p
+                self.btn_cancel_smart_merge.config(state=tk.DISABLED)
                 total_rows = res.get("total_rows", 0)
                 sheets_p = res.get("sheets_processed", 0)
 
-                self.smart_status_lbl.config(
-                    text=f"✅ Đã ghép xong ({total_rows:,} dòng, {sheets_p} sheet)!",
-                    foreground=self.palette.SUCCESS
-                )
-                messagebox.showinfo(
-                    "Hoàn tất Ghép & Chuẩn hóa",
-                    f"Đã ghép thành công {total_rows:,} dòng dữ liệu học sinh từ {sheets_p} sheet vào mẫu chuẩn 28 cột!\n\nTệp: {out_p.name}",
-                    parent=self
-                )
+                if res.get("status") == "cancelled":
+                    self.smart_status_lbl.config(
+                        text=f"⏹️ Đã dừng ghép ({total_rows:,} dòng, {sheets_p} sheet)!",
+                        foreground=self.palette.WARNING
+                    )
+                    messagebox.showinfo("Đã dừng tiến trình", f"Tiến trình ghép file đã dừng theo yêu cầu của bạn.\nĐã xử lý: {sheets_p} sheet ({total_rows:,} dòng).", parent=self)
+                else:
+                    self.smart_prog["value"] = 100
+                    self.btn_open_smart_file.config(state=tk.NORMAL)
+                    self.last_smart_output_file = out_p
+                    self.smart_status_lbl.config(
+                        text=f"✅ Đã ghép xong ({total_rows:,} dòng, {sheets_p} sheet)!",
+                        foreground=self.palette.SUCCESS
+                    )
+                    messagebox.showinfo(
+                        "Hoàn tất Ghép & Chuẩn hóa",
+                        f"Đã ghép thành công {total_rows:,} dòng dữ liệu học sinh từ {sheets_p} sheet vào mẫu chuẩn 28 cột!\n\nTệp: {out_p.name}",
+                        parent=self
+                    )
             elif msg_type == "smart_error":
                 err, trace = item[1], item[2]
                 self.btn_run_smart_merge.config(state=tk.NORMAL)
@@ -1412,20 +1445,21 @@ class CustomToolsView(ttk.Frame):
 
 
 class ManageProfilesDialog(tk.Toplevel):
-    """Hộp thoại Quản lý danh sách Profile ánh xạ cột đã lưu trong data/mapping_profiles.json."""
+    """Hộp thoại Quản lý Kho Tri Thức Ánh Xạ & Quy Tắc Cột Dự Phòng trong data/mapping_profiles.json."""
     def __init__(self, parent, profile_mgr: MappingProfileManager, is_dark: bool | None = None):
         super().__init__(parent)
         self.palette = get_theme_palette(is_dark)
         self.profile_mgr = profile_mgr
-        self.title("⚙️ Quản lý Profiles Ánh Xạ Cột Đã Lưu")
-        self.geometry("780x480")
-        self.minsize(620, 360)
+        self.title("⚙️ Quản lý Tri Thức Ánh Xạ & Quy Tắc Dự Phòng")
+        self.geometry("860x540")
+        self.minsize(700, 420)
         self.configure(bg=self.palette.WINDOW_BG)
         self.transient(parent)
         self.grab_set()
 
         self._build_ui()
-        self._refresh()
+        self._refresh_profiles()
+        self._refresh_fallbacks()
 
     def _build_ui(self):
         p = self.palette
@@ -1435,73 +1469,214 @@ class ManageProfilesDialog(tk.Toplevel):
         h_frame.pack(fill=tk.X)
         tk.Label(
             h_frame,
-            text="⚙️ QUẢN LÝ CÁC PROFILES ÁNH XẠ CỘT ĐÃ LƯU",
+            text="⚙️ QUẢN LÝ TRI THỨC ÁNH XẠ & QUY TẮC CỘT DỰ PHÒNG",
             font=FONT_TITLE,
             bg=p.HEADER_BANNER_BG,
             fg=p.HEADER_BANNER_FG
         ).pack(anchor=tk.W)
         tk.Label(
             h_frame,
-            text="Khi quét file/sheet có cùng cấu trúc cột, hệ thống sẽ tự động ghép mà không cần hỏi lại.",
+            text="Kho tri thức lưu trữ các biến thể tiêu đề đã học và các quy tắc tự động lấy dữ liệu dự phòng.",
             font=FONT_SUBTITLE,
             bg=p.HEADER_BANNER_BG,
             fg=p.HEADER_SUB_FG
         ).pack(anchor=tk.W, pady=(2, 0))
 
-        # Treeview
-        tree_card = ttk.Frame(self, padding=8)
+        # Notebook tabs
+        self.notebook = ttk.Notebook(self)
+        self.notebook.pack(fill=tk.BOTH, expand=True, padx=8, pady=(8, 4))
+
+        # Tab 1: Từ điển biến thể cột đã học
+        self.tab_profiles = ttk.Frame(self.notebook, padding=6)
+        self.notebook.add(self.tab_profiles, text="📚 Từ điển Biến thể Cột đã học")
+        self._build_tab_profiles(self.tab_profiles)
+
+        # Tab 2: Quy tắc cột dự phòng (Fallback)
+        self.tab_fallback = ttk.Frame(self.notebook, padding=6)
+        self.notebook.add(self.tab_fallback, text="🔄 Quy tắc Cột dự phòng (Fallback)")
+        self._build_tab_fallback(self.tab_fallback)
+
+        # Bottom close button
+        b_frame = ttk.Frame(self, padding=(10, 6))
+        b_frame.pack(fill=tk.X)
+        ttk.Button(b_frame, text="Đóng", command=self.destroy).pack(side=tk.RIGHT)
+
+    def _build_tab_profiles(self, container):
+        p = self.palette
+        tree_card = ttk.Frame(container)
         tree_card.pack(fill=tk.BOTH, expand=True)
 
         cols = ("stt", "name", "cols", "mapped", "date")
-        self.tree = ttk.Treeview(tree_card, columns=cols, show="headings")
+        self.tree = ttk.Treeview(tree_card, columns=cols, show="headings", selectmode="extended")
         self.tree.heading("stt", text="STT")
-        self.tree.heading("name", text="Tên Profile")
+        self.tree.heading("name", text="Tên Profile đã lưu")
         self.tree.heading("cols", text="Số cột nguồn")
-        self.tree.heading("mapped", text="Cột đã ánh xạ")
+        self.tree.heading("mapped", text="Chi tiết ánh xạ")
         self.tree.heading("date", text="Ngày cập nhật")
 
         self.tree.column("stt", width=45, anchor=tk.CENTER)
-        self.tree.column("name", width=280, anchor=tk.W)
-        self.tree.column("cols", width=95, anchor=tk.CENTER)
-        self.tree.column("mapped", width=140, anchor=tk.CENTER)
-        self.tree.column("date", width=160, anchor=tk.CENTER)
+        self.tree.column("name", width=250, anchor=tk.W)
+        self.tree.column("cols", width=100, anchor=tk.CENTER)
+        self.tree.column("mapped", width=260, anchor=tk.W)
+        self.tree.column("date", width=140, anchor=tk.CENTER)
 
         sb = ttk.Scrollbar(tree_card, orient=tk.VERTICAL, command=self.tree.yview)
         self.tree.configure(yscrollcommand=sb.set)
         self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         sb.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # Bottom buttons
-        b_frame = ttk.Frame(self, padding=10)
-        b_frame.pack(fill=tk.X)
-        ttk.Button(b_frame, text="🗑️ Xóa Profile đã chọn", command=self._delete_selected).pack(side=tk.LEFT)
-        ttk.Button(b_frame, text="Đóng", command=self.destroy).pack(side=tk.RIGHT)
+        btn_bar = ttk.Frame(container, padding=(0, 6))
+        btn_bar.pack(fill=tk.X)
+        ttk.Button(btn_bar, text="🗑️ Xóa các Profile đã chọn", command=self._delete_selected_profiles).pack(side=tk.LEFT)
+        ttk.Button(btn_bar, text="⚠️ Xóa TẤT CẢ Profile", command=self._delete_all_profiles).pack(side=tk.LEFT, padx=(8, 0))
+        ttk.Button(btn_bar, text="🔄 Làm mới", command=self._refresh_profiles).pack(side=tk.LEFT, padx=(8, 0))
 
-    def _refresh(self):
+    def _build_tab_fallback(self, container):
+        p = self.palette
+
+        # Info card
+        info_lbl = ttk.Label(
+            container,
+            text="💡 Quy tắc dự phòng cho phép một cột đích tự động lấy dữ liệu từ cột khác nếu file Excel nguồn không có cột riêng biệt.\nVí dụ chuẩn: Cột 17 (Hội đồng thi) tự động dự phòng lấy từ Cột 14 (Tên trường đã học).",
+            font=FONT_MUTED,
+            foreground=p.PRIMARY
+        )
+        info_lbl.pack(anchor=tk.W, pady=(0, 6))
+
+        # Fallback treeview
+        tree_card = ttk.Frame(container)
+        tree_card.pack(fill=tk.BOTH, expand=True)
+
+        cols = ("target", "fallback", "desc")
+        self.tree_fb = ttk.Treeview(tree_card, columns=cols, show="headings")
+        self.tree_fb.heading("target", text="Cột đích cần dữ liệu")
+        self.tree_fb.heading("fallback", text="Dự phòng lấy từ Cột")
+        self.tree_fb.heading("desc", text="Mô tả hành vi khi ghép file")
+
+        self.tree_fb.column("target", width=220, anchor=tk.W)
+        self.tree_fb.column("fallback", width=220, anchor=tk.W)
+        self.tree_fb.column("desc", width=340, anchor=tk.W)
+
+        sb = ttk.Scrollbar(tree_card, orient=tk.VERTICAL, command=self.tree_fb.yview)
+        self.tree_fb.configure(yscrollcommand=sb.set)
+        self.tree_fb.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Form thêm/sửa quy tắc
+        form_frame = ttk.LabelFrame(container, text="➕ Thêm / Cập nhật Quy tắc Dự phòng", padding=8)
+        form_frame.pack(fill=tk.X, pady=(6, 0))
+
+        col_options = [f"Cột {c['idx']}: {c['name']}" for c in TARGET_COLUMNS]
+
+        row1 = ttk.Frame(form_frame)
+        row1.pack(fill=tk.X)
+
+        ttk.Label(row1, text="Nếu Cột đích:", font=FONT_LABEL).pack(side=tk.LEFT)
+        self.cb_fb_target = ttk.Combobox(row1, values=col_options, state="readonly", width=26)
+        self.cb_fb_target.pack(side=tk.LEFT, padx=(4, 12))
+        # Mặc định chọn Cột 17
+        for opt in col_options:
+            if opt.startswith("Cột 17:"):
+                self.cb_fb_target.set(opt)
+                break
+
+        ttk.Label(row1, text="trống ➔ Dự phòng lấy từ:", font=FONT_LABEL).pack(side=tk.LEFT)
+        self.cb_fb_source = ttk.Combobox(row1, values=col_options, state="readonly", width=26)
+        self.cb_fb_source.pack(side=tk.LEFT, padx=(4, 12))
+        # Mặc định chọn Cột 14
+        for opt in col_options:
+            if opt.startswith("Cột 14:"):
+                self.cb_fb_source.set(opt)
+                break
+
+        ttk.Button(row1, text="💾 Lưu quy tắc", command=self._add_fallback_rule).pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Button(row1, text="🗑️ Xóa quy tắc đã chọn", command=self._delete_selected_fallback).pack(side=tk.RIGHT)
+
+    def _refresh_profiles(self):
         for item in self.tree.get_children():
             self.tree.delete(item)
-        profiles = self.profile_mgr.list_profiles()
+        profiles = self.profile_mgr.get_all_profiles()
         for idx, p in enumerate(profiles, start=1):
-            raw_h = p.get("raw_headers", [])
-            named_m = self.profile_mgr.get_named_mapping(p)
-            mapped_count = sum(1 for v in named_m.values() if v is not None)
+            src_h = p.get("source_headers", [])
+            mapping = p.get("mapping", {})
+            mapped_count = sum(1 for v in mapping.values() if v is not None)
+            ignored_count = len(src_h) - mapped_count
+            mapped_desc = f"{mapped_count} cột ghép, {ignored_count} bỏ qua"
             self.tree.insert("", tk.END, iid=p.get("id"), values=(
                 idx,
                 p.get("name", "Không tên"),
-                f"{len(raw_h)} cột",
-                f"{mapped_count}/28 cột",
-                p.get("updated_at", p.get("created_at", ""))
+                f"{len(src_h)} cột",
+                mapped_desc,
+                p.get("updated_at", "---")
             ))
 
-    def _delete_selected(self):
+    def _delete_selected_profiles(self):
         selected = self.tree.selection()
         if not selected:
-            messagebox.showwarning("Chưa chọn", "Vui lòng chọn Profile cần xóa!", parent=self)
+            messagebox.showwarning("Chưa chọn", "Vui lòng chọn ít nhất một Profile để xóa!", parent=self)
             return
-        p_id = selected[0]
-        if messagebox.askyesno("Xác nhận xóa", "Bạn có chắc chắn muốn xóa Profile này?", parent=self):
-            self.profile_mgr.delete_profile(p_id)
-            self._refresh()
+        count = len(selected)
+        if messagebox.askyesno("Xác nhận xóa", f"Bạn có chắc chắn muốn xóa {count} Profile đã chọn không?", parent=self):
+            self.profile_mgr.delete_profiles(list(selected))
+            self._refresh_profiles()
+
+    def _delete_all_profiles(self):
+        profiles = self.profile_mgr.get_all_profiles()
+        if not profiles:
+            messagebox.showinfo("Thông báo", "Hiện không có Profile nào trong danh sách.", parent=self)
+            return
+        if messagebox.askyesno(
+            "Cảnh báo xóa tất cả",
+            f"CẢNH BÁO: Bạn có chắc chắn muốn xóa TOÀN BỘ {len(profiles)} Profile đã lưu không?\n"
+            "Toàn bộ cấu hình ánh xạ sẽ bị xóa và hành động này không thể hoàn tác!",
+            parent=self
+        ):
+            self.profile_mgr.delete_all_profiles()
+            self._refresh_profiles()
+
+    def _refresh_fallbacks(self):
+        for item in self.tree_fb.get_children():
+            self.tree_fb.delete(item)
+        fbs = self.profile_mgr.get_fallback_columns()
+        col_map = {c["idx"]: c["name"] for c in TARGET_COLUMNS}
+        for t_idx, fb_idx in sorted(fbs.items()):
+            t_name = f"Cột {t_idx}: {col_map.get(t_idx, f'Cột {t_idx}')}"
+            fb_name = f"Cột {fb_idx}: {col_map.get(fb_idx, f'Cột {fb_idx}')}"
+            desc = f"Nếu Cột {t_idx} trống ➔ Tự động lấy dữ liệu từ Cột {fb_idx} ({col_map.get(fb_idx, '')})"
+            self.tree_fb.insert("", tk.END, iid=str(t_idx), values=(t_name, fb_name, desc))
+
+    def _add_fallback_rule(self):
+        t_str = self.cb_fb_target.get()
+        s_str = self.cb_fb_source.get()
+        if not t_str or not s_str:
+            messagebox.showwarning("Thiếu thông tin", "Vui lòng chọn cả Cột đích và Cột nguồn dự phòng!", parent=self)
+            return
+        try:
+            t_idx = int(t_str.split(":")[0].replace("Cột", "").strip())
+            s_idx = int(s_str.split(":")[0].replace("Cột", "").strip())
+        except Exception:
+            messagebox.showerror("Lỗi", "Không thể xác định chỉ số cột!", parent=self)
+            return
+        if t_idx == s_idx:
+            messagebox.showwarning("Không hợp lệ", "Cột đích và Cột nguồn dự phòng không được trùng nhau!", parent=self)
+            return
+        self.profile_mgr.add_fallback_column(t_idx, s_idx)
+        self._refresh_fallbacks()
+        messagebox.showinfo("Thành công", f"Đã lưu quy tắc: Cột {t_idx} dự phòng lấy từ Cột {s_idx}!", parent=self)
+
+    def _delete_selected_fallback(self):
+        selected = self.tree_fb.selection()
+        if not selected:
+            messagebox.showwarning("Chưa chọn", "Vui lòng chọn một quy tắc dự phòng cần xóa trong bảng!", parent=self)
+            return
+        t_idx_str = selected[0]
+        try:
+            t_idx = int(t_idx_str)
+        except Exception:
+            return
+        if messagebox.askyesno("Xác nhận xóa", f"Bạn có chắc chắn muốn xóa quy tắc dự phòng của Cột {t_idx} không?", parent=self):
+            self.profile_mgr.delete_fallback_column(t_idx)
+            self._refresh_fallbacks()
 
 
 class CustomToolsDialog(tk.Toplevel):
