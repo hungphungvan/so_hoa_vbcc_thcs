@@ -21,6 +21,14 @@ def get_default_db_path() -> Path:
     base_dir = get_persistent_data_dir()
     return base_dir / "vbcc_database.db"
 
+class ManagedConnection(sqlite3.Connection):
+    """Lớp kết nối SQLite tự động đóng kết nối khi rời khỏi khối lệnh with."""
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        try:
+            return super().__exit__(exc_type, exc_val, exc_tb)
+        finally:
+            self.close()
+
 class DatabaseManager:
     """
     Quản lý tập trung CSDL SQLite cho hệ thống Số hóa Văn bằng Chứng chỉ THCS.
@@ -40,7 +48,7 @@ class DatabaseManager:
 
     def get_connection(self) -> sqlite3.Connection:
         """Tạo kết nối SQLite với cấu hình hiệu năng cao."""
-        conn = sqlite3.connect(str(self.db_path), timeout=30.0)
+        conn = sqlite3.connect(str(self.db_path), timeout=30.0, factory=ManagedConnection)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         cursor.execute("PRAGMA journal_mode = WAL;")
