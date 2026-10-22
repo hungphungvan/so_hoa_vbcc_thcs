@@ -575,12 +575,26 @@ class FileFormatConverter:
 
     @staticmethod
     def _convert_xls_via_excel_macos(src_p: Path, out_p: Path, auto_quit: bool = True) -> tuple[bool, str]:
-        """Chuyển đổi .xls sang .xlsx thông qua Microsoft Excel trên macOS bằng AppleScript."""
+        """
+        Chuyển đổi .xls sang .xlsx thông qua Microsoft Excel trên macOS bằng AppleScript:
+        - Tự động mở file .xls trong Microsoft Excel
+        - Lưu sang .xlsx chuẩn native bằng engine Excel (bảo toàn 100% định dạng, viền, ô gộp, công thức, font)
+        - Đóng file .xls ngay sau khi lưu để không bị kẹt cửa sổ
+        - Chờ người dùng cấp phép truy cập thư mục nếu macOS hiển thị hộp thoại
+        """
         if not Path("/Applications/Microsoft Excel.app").exists():
             return False, "Microsoft Excel không được cài đặt trong /Applications."
 
         src_abs = str(src_p.resolve())
         out_abs = str(out_p.resolve())
+
+        # Nếu tệp đích đã tồn tại, xóa trước để Excel không hiển thị hộp thoại hỏi ghi đè
+        if out_p.exists():
+            try:
+                out_p.unlink()
+            except Exception:
+                pass
+
         quit_clause = "if (count of workbooks) is 0 then quit" if auto_quit else ""
 
         as_script = f'''
@@ -591,9 +605,11 @@ class FileFormatConverter:
                 open (POSIX file "{src_abs}")
                 set theWb to active workbook
                 set hfsOut to (POSIX file "{out_abs}") as text
-                save workbook as theWb filename hfsOut file format Excel XML file format
+                save workbook as theWb filename hfsOut file format workbook normal file format
                 close active workbook saving no
-                set display alerts to origAlerts
+                try
+                    set display alerts to origAlerts
+                end try
                 {quit_clause}
                 return "OK"
             on error errMsg
@@ -613,20 +629,34 @@ class FileFormatConverter:
                 ["osascript", "-e", as_script],
                 capture_output=True,
                 text=True,
-                timeout=45
+                timeout=120
             )
             out_str = (res.stdout or "").strip()
             if "OK" in out_str and out_p.exists() and out_p.stat().st_size > 0:
                 return True, "Thành công qua Microsoft Excel (macOS)"
             return False, res.stderr.strip() or out_str
+        except subprocess.TimeoutExpired:
+            return False, "Quá thời gian chờ (120s) khi chuyển đổi bằng Microsoft Excel."
         except Exception as e:
             return False, str(e)
 
     @staticmethod
     def _convert_xls_via_excel_windows(src_p: Path, out_p: Path) -> tuple[bool, str]:
-        """Chuyển đổi .xls sang .xlsx thông qua PowerShell COM Automation trên Windows."""
+        """
+        Chuyển đổi .xls sang .xlsx thông qua PowerShell COM Automation trên Windows:
+        - Mở trực tiếp file .xls bằng Excel
+        - Lưu sang .xlsx chuẩn mã 51 (xlOpenXMLWorkbook)
+        - Đóng file và giải phóng sạch tiến trình EXCEL.EXE
+        """
         src_abs = str(src_p.resolve()).replace("'", "''")
         out_abs = str(out_p.resolve()).replace("'", "''")
+
+        # Xóa tệp đích trước để không bị hỏi ghi đè
+        if out_p.exists():
+            try:
+                out_p.unlink()
+            except Exception:
+                pass
 
         ps_script = f'''
         $ErrorActionPreference = 'Stop'
@@ -663,11 +693,13 @@ class FileFormatConverter:
                 ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script],
                 capture_output=True,
                 text=True,
-                timeout=45
+                timeout=120
             )
             if "OK" in (res.stdout or "") and out_p.exists() and out_p.stat().st_size > 0:
                 return True, "Thành công qua Microsoft Excel (Windows)"
             return False, res.stderr.strip() or "Lỗi PowerShell COM Excel"
+        except subprocess.TimeoutExpired:
+            return False, "Quá thời gian chờ (120s) khi gọi Excel COM trên Windows."
         except Exception as e:
             return False, str(e)
 
@@ -825,13 +857,12 @@ class FileFormatConverter:
         auto_quit: bool = True
     ) -> tuple[bool, Path | None, str]:
         """
-        Chuyển đổi một tệp .xls (Excel 97-2003) sang .xlsx theo chiến lược đa tầng:
-        1. Kiểm tra định dạng thực tế (xử lý tệp .xlsx bị đổi tên nhầm thành .xls).
-        2. Tầng 1: Sử dụng Native Microsoft Excel (AppleScript trên Mac, COM trên Windows)
-           - Giữ nguyên 100% định dạng, kẻ khung viền, ô gộp, công thức, độ rộng cột, font chữ.
-        3. Tầng 2: Sử dụng LibreOffice Calc CLI (chất lượng mã nguồn mở 99.9%).
-        4. Tầng 3: Sử dụng xlrd + openpyxl nâng cao (khôi phục ô gộp, auto-fit cột, kẻ viền, header style).
-        5. Tầng 4: Kiểm tra tính toàn vẹn (Validation) của tệp .xlsx sinh ra.
+        Chuyển đổi một tệp .xls (Excel 97-2003) sang .xlsx trực tiếp bằng Microsoft Excel:
+        - Mở trực tiếp bằng Microsoft Excel (AppleScript trên macOS, COM trên Windows).
+        - Lưu sang .xlsx chuẩn Native để giữ nguyên 100% định dạng, kẻ khung viền, ô gộp, công thức, độ rộng cột, font chữ.
+        - Tự động đóng tệp .xls cũ ngay sau khi lưu để không lưu lại bất kỳ cửa sổ nào.
+        - Chờ người dùng cấp phép truy cập thư mục nếu cần (hỗ trợ timeout lên đến 120s).
+        - Thực hiện nghiêm ngặt qua Microsoft Excel, không sử dụng các phương án dự phòng làm sai lệch định dạng.
         """
         p = Path(xls_path)
         if not p.exists() or p.suffix.lower() != ".xls":
@@ -840,10 +871,8 @@ class FileFormatConverter:
         out_p = Path(output_path) if output_path else p.with_suffix(".xlsx")
         out_p.parent.mkdir(parents=True, exist_ok=True)
 
-        # 0. Nhận diện định dạng thực tế
+        # 0. Nhận diện định dạng thực tế (trường hợp tệp thực chất là .xlsx bị đổi đuôi nhầm thành .xls)
         real_type = FileFormatConverter.detect_file_type(p)
-
-        # Trường hợp tệp thực chất là .xlsx bị đổi đuôi nhầm thành .xls
         if real_type == "xlsx_zip":
             try:
                 shutil.copy2(p, out_p)
@@ -861,90 +890,42 @@ class FileFormatConverter:
             except Exception:
                 pass
 
-        success = False
-        method_used = ""
-        attempt_errors: list[str] = []
+        # Chuyển đổi trực tiếp bằng Microsoft Excel Native theo yêu cầu (không dùng phương án dự phòng khác)
+        if sys.platform == "darwin":
+            ok, msg = FileFormatConverter._convert_xls_via_excel_macos(p, out_p, auto_quit=auto_quit)
+            method_used = "Microsoft Excel (macOS)"
+        elif sys.platform == "win32":
+            ok, msg = FileFormatConverter._convert_xls_via_excel_windows(p, out_p)
+            method_used = "Microsoft Excel (Windows)"
+        else:
+            return False, None, "Hệ điều hành hiện tại không hỗ trợ Microsoft Excel."
 
-        # TẦNG 1: xlrd + openpyxl nâng cao (Ưu tiên số 1: thuần Python, 100% headless, bảo toàn ô gộp & viền, KHÔNG mở cửa sổ Excel)
-        if HAS_XLRD:
-            ok, msg = FileFormatConverter._convert_xls_via_openpyxl_enhanced(p, out_p)
-            if ok:
-                valid, val_err = FileFormatConverter.validate_xlsx_integrity(out_p)
-                if valid:
-                    success = True
-                    method_used = "xlrd + openpyxl (Enhanced)"
-                else:
-                    attempt_errors.append(f"openpyxl: {val_err}")
-            else:
-                attempt_errors.append(f"openpyxl: {msg}")
+        if not ok:
+            if out_p.exists():
+                try:
+                    out_p.unlink()
+                except Exception:
+                    pass
+            return False, None, f"Lỗi chuyển đổi qua Microsoft Excel: {msg}"
 
-        # TẦNG 2: LibreOffice Calc CLI (chất lượng mã nguồn mở, chạy headless hoàn toàn không mở cửa sổ)
-        if not success:
-            soffice_bin = FileFormatConverter.find_libreoffice()
-            if soffice_bin:
-                ok, msg = FileFormatConverter._convert_xls_via_libreoffice(soffice_bin, p, out_p)
-                if ok:
-                    valid, val_err = FileFormatConverter.validate_xlsx_integrity(out_p)
-                    if valid:
-                        success = True
-                        method_used = "LibreOffice Calc"
-                    else:
-                        attempt_errors.append(f"LibreOffice: {val_err}")
-                else:
-                    attempt_errors.append(f"LibreOffice: {msg}")
-
-        # TẦNG 3: Microsoft Excel Native (Dự phòng cuối cùng khi các bộ lọc trên không khả dụng)
-        if not success:
-            if sys.platform == "darwin":
-                ok, msg = FileFormatConverter._convert_xls_via_excel_macos(p, out_p, auto_quit=auto_quit)
-                if ok:
-                    valid, val_err = FileFormatConverter.validate_xlsx_integrity(out_p)
-                    if valid:
-                        success = True
-                        method_used = "Microsoft Excel (macOS)"
-                    else:
-                        attempt_errors.append(f"Excel Mac: {val_err}")
-                else:
-                    attempt_errors.append(f"Excel Mac: {msg}")
-
-            elif sys.platform == "win32":
-                ok, msg = FileFormatConverter._convert_xls_via_excel_windows(p, out_p)
-                if ok:
-                    valid, val_err = FileFormatConverter.validate_xlsx_integrity(out_p)
-                    if valid:
-                        success = True
-                        method_used = "Microsoft Excel (Windows)"
-                    else:
-                        attempt_errors.append(f"Excel Win: {val_err}")
-                else:
-                    attempt_errors.append(f"Excel Win: {msg}")
-
-        # TẦNG 4: Thẩm định và Xử lý kết quả cuối cùng
-        if success and out_p.exists():
+        # Kiểm tra tính toàn vẹn của tệp .xlsx sinh ra
+        if out_p.exists():
             final_valid, final_val_msg = FileFormatConverter.validate_xlsx_integrity(out_p)
             if not final_valid:
                 try:
                     out_p.unlink()
                 except Exception:
                     pass
-                success = False
-            else:
-                if delete_source:
-                    try:
-                        p.unlink()
-                    except Exception:
-                        pass
-                return True, out_p, f"Thành công ({method_used})"
+                return False, None, f"Tệp .xlsx sinh ra không hợp lệ: {final_val_msg}"
 
-        # Nếu thất bại hoàn toàn
-        if out_p.exists():
-            try:
-                out_p.unlink()
-            except Exception:
-                pass
+            if delete_source:
+                try:
+                    p.unlink()
+                except Exception:
+                    pass
+            return True, out_p, f"Thành công ({method_used})"
 
-        err_summary = " | ".join(attempt_errors) if attempt_errors else "Không tìm thấy công cụ chuyển đổi tương thích."
-        return False, None, f"Lỗi chuyển đổi .xls: {err_summary}"
+        return False, None, "Microsoft Excel không tạo được tệp .xlsx đích."
 
     @staticmethod
     def batch_convert(

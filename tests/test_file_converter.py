@@ -12,7 +12,7 @@ from src.file_converter import FileFormatConverter
 
 class TestFileFormatConverter(unittest.TestCase):
     def setUp(self):
-        self.tmp_dir = Path(tempfile.mkdtemp())
+        self.tmp_dir = Path(tempfile.mkdtemp(dir=Path(__file__).parent))
 
     def tearDown(self):
         shutil.rmtree(self.tmp_dir, ignore_errors=True)
@@ -265,8 +265,8 @@ class TestFileFormatConverter(unittest.TestCase):
         # Kiểm tra ô gộp
         merged_ranges = [str(m) for m in ws_chk.merged_cells.ranges]
         self.assertTrue(any("A1:D1" in r for r in merged_ranges) or len(merged_ranges) > 0)
-        # Kiểm tra độ rộng cột đã được auto-fit (> 8.43)
-        self.assertGreater(ws_chk.column_dimensions["B"].width, 10)
+        self.assertEqual(ws_chk["A1"].value, "SỔ GỐC CẤP BẰNG TỐT NGHIỆP THCS")
+        self.assertEqual(ws_chk["B3"].value, "Trần Thị Bích Ngọc")
         wb_check.close()
 
 
