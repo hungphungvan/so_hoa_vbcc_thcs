@@ -46,12 +46,12 @@ class ColumnMappingDialog(tk.Toplevel):
         self.formatted_headers = formatted_headers
         self.suggested_mapping = suggested_mapping
 
-        # Kết quả trả về: (mapping, profile_name, should_skip)
-        self.result: tuple[dict[int, int | None] | None, str | None, bool] = (None, None, True)
+        # Kết quả trả về: (mapping, profile_name, default_values, should_skip)
+        self.result: tuple[dict[int, int | None] | None, str | None, dict[int, str], bool] = (None, None, {}, True)
 
         self.title("🧩 Cấu hình Ánh xạ Cột - Ghép & Chuẩn hóa")
-        self.geometry("920x680")
-        self.minsize(800, 550)
+        self.geometry("980x700")
+        self.minsize(860, 560)
         self.configure(bg=self.palette.WINDOW_BG)
 
         # Chặn tương tác ngoài dialog (modal)
@@ -63,8 +63,9 @@ class ColumnMappingDialog(tk.Toplevel):
         self.profile_name_var = tk.StringVar(value=default_prof_name)
         self.saved_profile_var = tk.StringVar()
 
-        # Danh sách combobox và biến cho 28 cột
+        # Danh sách combobox ánh xạ và ô nhập giá trị mặc định cho 28 cột
         self.target_vars: dict[int, tk.StringVar] = {}
+        self.default_vars: dict[int, tk.StringVar] = {}
         self.combo_options = [EMPTY_OPTION] + formatted_headers
 
         self._build_ui()
@@ -136,7 +137,7 @@ class ColumnMappingDialog(tk.Toplevel):
 
         ttk.Label(
             quick_bar,
-            text="💡 Mẹo: Những cột không có trong file nguồn có thể chọn '-- Để trống --'. Hệ thống sẽ tự điền giá trị mặc định chuẩn.",
+            text="💡 Mẹo: Với các cột file nguồn không có hoặc bị khuyết (vd: Tên trường, Niên khóa...), bạn có thể nhập Giá trị mặc định vào ô bên phải để tự động điền cho tất cả học sinh.",
             font=FONT_MUTED,
             foreground=p.PRIMARY
         ).pack(side=tk.LEFT)
@@ -153,10 +154,10 @@ class ColumnMappingDialog(tk.Toplevel):
         t_header.pack(fill=tk.X)
 
         tk.Label(t_header, text="STT", font=FONT_LABEL_BOLD, bg=p.TREE_HEADING_BG, fg=p.TREE_HEADING_FG, width=4, anchor="center").pack(side=tk.LEFT)
-        tk.Label(t_header, text="Cột đích (Mẫu chuẩn 28)", font=FONT_LABEL_BOLD, bg=p.TREE_HEADING_BG, fg=p.TREE_HEADING_FG, width=28, anchor="w").pack(side=tk.LEFT, padx=(6, 0))
-        tk.Label(t_header, text="Yêu cầu", font=FONT_LABEL_BOLD, bg=p.TREE_HEADING_BG, fg=p.TREE_HEADING_FG, width=12, anchor="center").pack(side=tk.LEFT, padx=(6, 0))
-        tk.Label(t_header, text="👉 Cột nguồn tương ứng", font=FONT_LABEL_BOLD, bg=p.TREE_HEADING_BG, fg=p.TREE_HEADING_FG, width=32, anchor="w").pack(side=tk.LEFT, padx=(6, 0))
-        tk.Label(t_header, text="Giá trị mặc định nếu để trống", font=FONT_LABEL_BOLD, bg=p.TREE_HEADING_BG, fg=p.TREE_HEADING_FG, anchor="w").pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(6, 0))
+        tk.Label(t_header, text="Cột đích (Mẫu chuẩn 28)", font=FONT_LABEL_BOLD, bg=p.TREE_HEADING_BG, fg=p.TREE_HEADING_FG, width=24, anchor="w").pack(side=tk.LEFT, padx=(6, 0))
+        tk.Label(t_header, text="Yêu cầu", font=FONT_LABEL_BOLD, bg=p.TREE_HEADING_BG, fg=p.TREE_HEADING_FG, width=10, anchor="center").pack(side=tk.LEFT, padx=(6, 0))
+        tk.Label(t_header, text="👉 Cột nguồn tương ứng", font=FONT_LABEL_BOLD, bg=p.TREE_HEADING_BG, fg=p.TREE_HEADING_FG, width=26, anchor="w").pack(side=tk.LEFT, padx=(6, 0))
+        tk.Label(t_header, text="✍️ Giá trị mặc định (nếu ô nguồn trống)", font=FONT_LABEL_BOLD, bg=p.TREE_HEADING_BG, fg=p.TREE_HEADING_FG, anchor="w").pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(8, 0))
 
         # Canvas cuộn
         canvas_frame = ttk.Frame(table_container)
@@ -195,22 +196,33 @@ class ColumnMappingDialog(tk.Toplevel):
             tk.Label(r_frame, text=str(t_idx), font=FONT_LABEL, bg=row_bg, fg=p.TEXT, width=4, anchor="center").pack(side=tk.LEFT)
 
             # Cột 2: Tên cột đích
-            tk.Label(r_frame, text=t_name, font=FONT_LABEL_BOLD if t_req else FONT_LABEL, bg=row_bg, fg=p.TEXT, width=28, anchor="w").pack(side=tk.LEFT, padx=(6, 0))
+            tk.Label(r_frame, text=t_name, font=FONT_LABEL_BOLD if t_req else FONT_LABEL, bg=row_bg, fg=p.TEXT, width=24, anchor="w").pack(side=tk.LEFT, padx=(6, 0))
 
             # Cột 3: Tính chất
             req_text = "⭐ Bắt buộc" if t_req else ("Khuyên dùng" if t_idx in (9, 14, 15) else "Tùy chọn")
             req_fg = p.DANGER if t_req else (p.WARNING if t_idx in (9, 14, 15) else p.MUTED)
-            tk.Label(r_frame, text=req_text, font=FONT_MUTED, bg=row_bg, fg=req_fg, width=12, anchor="center").pack(side=tk.LEFT, padx=(6, 0))
+            tk.Label(r_frame, text=req_text, font=FONT_MUTED, bg=row_bg, fg=req_fg, width=10, anchor="center").pack(side=tk.LEFT, padx=(6, 0))
 
             # Cột 4: Combobox Cột nguồn
             c_var = tk.StringVar(value=EMPTY_OPTION)
             self.target_vars[t_idx] = c_var
 
-            cb = ttk.Combobox(r_frame, textvariable=c_var, values=self.combo_options, state="readonly", width=30)
+            cb = ttk.Combobox(r_frame, textvariable=c_var, values=self.combo_options, state="readonly", width=25)
             cb.pack(side=tk.LEFT, padx=(6, 0))
 
-            # Cột 5: Ghi chú mặc định
-            tk.Label(r_frame, text=t_def, font=FONT_MUTED, bg=row_bg, fg=p.MUTED, anchor="w").pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(6, 0))
+            # Cột 5: Ô nhập Giá trị mặc định nếu ô nguồn trống
+            d_var = tk.StringVar()
+            if t_idx == 4:
+                d_var.set("Bằng tốt nghiệp trung học cơ sở")
+            elif t_idx == 12:
+                d_var.set("Việt Nam")
+            self.default_vars[t_idx] = d_var
+
+            if t_idx == 1:
+                tk.Label(r_frame, text="Tự động đánh số 1..N", font=FONT_MUTED, bg=row_bg, fg=p.MUTED, anchor="w").pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(8, 0))
+            else:
+                def_entry = ttk.Entry(r_frame, textvariable=d_var, font=FONT_LABEL)
+                def_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(8, 0))
 
         # 5. Thanh nút bấm điều khiển ở đáy
         btn_bar = ttk.Frame(self, padding=(12, 10))
@@ -259,6 +271,23 @@ class ColumnMappingDialog(tk.Toplevel):
                     mapping[t_idx] = None
         return mapping
 
+    def _apply_defaults(self, defaults: dict[int | str, str]):
+        """Cập nhật các ô nhập giá trị mặc định từ profile."""
+        for t_idx, d_var in self.default_vars.items():
+            str_key = str(t_idx)
+            int_key = t_idx
+            if str_key in defaults:
+                d_var.set(defaults[str_key])
+            elif int_key in defaults:
+                d_var.set(defaults[int_key])
+            else:
+                if t_idx == 4:
+                    d_var.set("Bằng tốt nghiệp trung học cơ sở")
+                elif t_idx == 12:
+                    d_var.set("Việt Nam")
+                else:
+                    d_var.set("")
+
     def _on_auto_match(self):
         """Khớp lại tự động bằng thuật toán."""
         new_map = auto_suggest_mapping(self.raw_headers)
@@ -281,12 +310,17 @@ class ColumnMappingDialog(tk.Toplevel):
                 str_map = p_item.get("mapping", {})
                 converted_map = {int(k): v for k, v in str_map.items()}
                 self._apply_mapping(converted_map)
+
+                saved_defaults = p_item.get("default_values", {})
+                self._apply_defaults(saved_defaults)
+
                 self.profile_name_var.set(p_item.get("name", self.profile_name_var.get()))
                 break
 
     def _on_save_and_confirm(self):
         """Xác nhận cấu hình ánh xạ và lưu profile."""
         current_map = self._get_current_mapping()
+        current_defaults = {t_idx: var.get().strip() for t_idx, var in self.default_vars.items() if var.get().strip()}
 
         # Kiểm tra cột bắt buộc Họ và tên (Cột 5)
         if current_map.get(5) is None:
@@ -301,13 +335,13 @@ class ColumnMappingDialog(tk.Toplevel):
                 return
 
         prof_name = self.profile_name_var.get().strip() or f"Mẫu {self.file_name}"
-        self.result = (current_map, prof_name, False)
+        self.result = (current_map, prof_name, current_defaults, False)
         self.grab_release()
         self.destroy()
 
     def _on_skip(self):
         """Bỏ qua sheet này."""
-        self.result = (None, None, True)
+        self.result = (None, None, {}, True)
         self.grab_release()
         self.destroy()
 
@@ -319,6 +353,6 @@ class ColumnMappingDialog(tk.Toplevel):
             parent=self
         )
         if confirm:
-            self.result = (None, None, False)
+            self.result = (None, None, {}, False)
             self.grab_release()
             self.destroy()

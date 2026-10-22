@@ -311,17 +311,20 @@ class MappingProfileManager:
         name: str,
         signature: str,
         raw_headers: list[str],
-        mapping: dict[int, int | None]
+        mapping: dict[int, int | None],
+        default_values: dict[int | str, str] | None = None
     ) -> dict:
         """
         Lưu hoặc cập nhật một Profile.
         mapping: {1: 0, 5: 1, 9: None, ...}
+        default_values: {4: "Bằng tốt nghiệp THCS", 12: "Việt Nam", 14: "THCS A", ...}
         """
         data = self._load_raw()
         profiles = data.get("profiles", [])
 
-        # Chuyển key mapping thành string để lưu JSON chuẩn
+        # Chuyển key mapping và default_values thành string để lưu JSON chuẩn
         str_mapping = {str(k): v for k, v in mapping.items()}
+        str_defaults = {str(k): str(v).strip() for k, v in (default_values or {}).items() if str(v).strip()}
 
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -336,6 +339,7 @@ class MappingProfileManager:
             existing["name"] = name or existing.get("name", "Profile Không tên")
             existing["raw_headers"] = raw_headers
             existing["mapping"] = str_mapping
+            existing["default_values"] = str_defaults
             existing["updated_at"] = now_str
             ret_profile = existing
         else:
@@ -346,6 +350,7 @@ class MappingProfileManager:
                 "signature": signature,
                 "raw_headers": raw_headers,
                 "mapping": str_mapping,
+                "default_values": str_defaults,
                 "created_at": now_str,
                 "updated_at": now_str
             }
@@ -498,11 +503,13 @@ class SmartMerger:
                 # 2. Tạo chữ ký cấu trúc cột
                 sig = compute_headers_signature(raw_headers)
                 mapping: dict[int, int | None] | None = None
+                current_defaults: dict[int, str] = {}
                 profile_used_name: str = ""
 
                 # Kiểm tra xem có khớp chuẩn 28 cột không
                 if is_standard_28_headers(raw_headers):
                     mapping = {col["idx"]: idx for idx, col in enumerate(TARGET_COLUMNS) if idx < len(raw_headers)}
+                    current_defaults = {}
                     profile_used_name = "Chuẩn 28 cột gốc"
                     log(f"  ⚡ Sheet '{ws_curr.title}': Cấu trúc chuẩn 28 cột $\\rightarrow$ Ánh xạ tự động 1:1.", "info")
                 else:
@@ -512,6 +519,8 @@ class SmartMerger:
                         # Áp dụng Profile đã lưu tự động mà KHÔNG cần hỏi lại
                         str_map = saved_prof.get("mapping", {})
                         mapping = {int(k): v for k, v in str_map.items()}
+                        str_defs = saved_prof.get("default_values", {})
+                        current_defaults = {int(k): str(v).strip() for k, v in str_defs.items() if str(v).strip()}
                         profile_used_name = saved_prof.get("name", "Profile đã lưu")
                         log(f"  ⚡ Sheet '{ws_curr.title}': Áp dụng Profile đã nhớ: '{profile_used_name}'.", "info")
                     else:
@@ -531,13 +540,22 @@ class SmartMerger:
                         }
 
                         if mapping_callback:
-                            confirmed_map, prof_name, should_skip = mapping_callback(callback_payload)
+                            cb_res = mapping_callback(callback_payload)
+                            if len(cb_res) == 4:
+                                confirmed_map, prof_name, custom_defs, should_skip = cb_res
+                            elif len(cb_res) == 3:
+                                confirmed_map, prof_name, should_skip = cb_res
+                                custom_defs = {}
+                            else:
+                                confirmed_map, prof_name, custom_defs, should_skip = None, None, {}, True
+
                             if should_skip or confirmed_map is None:
                                 log(f"  ⏭️ Đã bỏ qua Sheet '{ws_curr.title}' theo lựa chọn của bạn.", "warning")
                                 sheets_skipped += 1
                                 continue
 
                             mapping = confirmed_map
+                            current_defaults = {int(k): str(v).strip() for k, v in (custom_defs or {}).items() if str(v).strip()}
                             profile_used_name = prof_name or f"Profile_{p.stem}_{ws_curr.title}"
 
                             # Lưu Profile này vào bộ nhớ cho những lần sau
@@ -545,12 +563,14 @@ class SmartMerger:
                                 name=profile_used_name,
                                 signature=sig,
                                 raw_headers=raw_headers,
-                                mapping=mapping
+                                mapping=mapping,
+                                default_values=current_defaults
                             )
                             log(f"  💾 Đã lưu cấu hình ánh xạ: '{profile_used_name}' vào kho Profiles.", "success")
                         else:
                             # Không có UI callback -> sử dụng luôn gợi ý tự động
                             mapping = suggested_map
+                            current_defaults = {}
                             profile_used_name = "Tự động suy luận"
 
                 if not mapping:
@@ -643,11 +663,23 @@ class SmartMerger:
                             row_28[t_col_0] = None
 
                         # Xử lý các giá trị mặc định nếu để trống
-                        if fill_defaults and (row_28[t_col_0] is None or row_28[t_col_0] == ""):
-                            if t_idx == 4: # Tên văn bằng
-                                row_28[t_col_0] = "Bằng tốt nghiệp trung học cơ sở"
-                            elif t_idx == 12: # Quốc tịch
-                                row_28[t_col_0] = "Việt Nam"
+                        if row_28[t_col_0] is None or row_28[t_col_0] == "":
+                            # 1. Ưu tiên giá trị mặc định do người dùng tự nhập trong Profile cho cột này
+                            cust_def = current_defaults.get(t_idx)
+                            if cust_def is not None and str(cust_def).strip() != "":
+                                c_str = str(cust_def).strip()
+                                if t_idx in (9, 19):
+                                    row_28[t_col_0] = format_date_to_text(c_str)
+                                elif t_idx == 5:
+                                    row_28[t_col_0] = vietnamese_title_case(c_str)
+                                else:
+                                    row_28[t_col_0] = clean_whitespace(c_str)
+                            elif fill_defaults:
+                                # 2. Giá trị mặc định chuẩn của hệ thống (nếu bật fill_defaults)
+                                if t_idx == 4: # Tên văn bằng
+                                    row_28[t_col_0] = "Bằng tốt nghiệp trung học cơ sở"
+                                elif t_idx == 12: # Quốc tịch
+                                    row_28[t_col_0] = "Việt Nam"
 
                     # Đánh lại STT tăng dần 1..N (hoặc tự điền nếu sheet nguồn không có STT)
                     if renumber_stt or row_28[0] is None or row_28[0] == "":

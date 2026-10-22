@@ -919,7 +919,7 @@ class CustomToolsView(ttk.Frame):
 
                     def mapping_callback_sync(payload):
                         resp_event = threading.Event()
-                        resp_holder = {"result": (None, None, True)}
+                        resp_holder = {"result": (None, None, {}, True)}
                         self.msg_queue.put(("ask_mapping", payload, resp_event, resp_holder))
                         resp_event.wait()
                         return resp_holder["result"]
@@ -1309,7 +1309,7 @@ class CustomToolsView(ttk.Frame):
                     resp_holder["result"] = dlg.result
                 except Exception as ex:
                     self._log(f"❌ Lỗi hiển thị hộp thoại ánh xạ: {ex}", "error")
-                    resp_holder["result"] = (None, None, True)
+                    resp_holder["result"] = (None, None, {}, True)
                 finally:
                     resp_event.set()
             elif msg_type == "smart_prog":

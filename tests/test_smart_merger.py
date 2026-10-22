@@ -234,6 +234,83 @@ class TestSmartMerger(unittest.TestCase):
 
         wb_res.close()
 
+    def test_smart_merger_with_custom_default_values(self):
+        """Kiểm tra tính năng nhập giá trị mặc định cho cột để trống (Tên trường, Niên khóa, Cơ quan cấp...)."""
+        file1 = self.tmp_dir / "src_custom_defaults_1.xlsx"
+        wb1 = openpyxl.Workbook()
+        ws1 = wb1.active
+        ws1.title = "Lop9"
+        ws1.append(["Họ và tên", "Ngày sinh", "Giới tính"])
+        ws1.append(["Đặng Thái Sơn", "02/07/2005", "Nam"])
+        ws1.append(["Ngô Bảo Châu", "28/06/2005", "Nam"])
+        wb1.save(file1)
+        wb1.close()
+
+        file2 = self.tmp_dir / "src_custom_defaults_2.xlsx"
+        wb2 = openpyxl.Workbook()
+        ws2 = wb2.active
+        ws2.title = "Lop9"
+        ws2.append(["Họ và tên", "Ngày sinh", "Giới tính"])
+        ws2.append(["Lưu Lệ Hằng", "04/10/2005", "Nữ"])
+        wb2.save(file2)
+        wb2.close()
+
+        output_file = self.tmp_dir / "Out_Custom_Defaults.xlsx"
+
+        call_count = 0
+        def mock_callback(payload):
+            nonlocal call_count
+            call_count += 1
+            mapping = {
+                5: 0, # Họ và tên
+                9: 1, # Ngày sinh
+                10: 2 # Giới tính
+            }
+            # Người dùng tự nhập giá trị mặc định cho các cột không có trong file nguồn
+            custom_defs = {
+                14: "THCS Chu Văn An",
+                15: "2019-2023",
+                18: "Hà Nội",
+                20: "Phòng GD&ĐT Tây Hồ"
+            }
+            return mapping, "Profile Chu Văn An 2019", custom_defs, False
+
+        merger = SmartMerger(profile_mgr=self.profile_mgr)
+        res = merger.process_merge_and_standardize(
+            source_files=[file1, file2],
+            output_file_path=output_file,
+            mapping_callback=mock_callback,
+            renumber_stt=True,
+            fill_defaults=True,
+            merge_all_sheets=True
+        )
+
+        self.assertEqual(res["status"], "success")
+        self.assertEqual(res["total_rows"], 3)
+        self.assertEqual(call_count, 1) # File 2 tự động áp dụng Profile kèm cả default_values
+
+        wb_res = openpyxl.load_workbook(output_file, data_only=True)
+        ws_res = wb_res.active
+
+        # Kiểm tra học sinh 1 (Đặng Thái Sơn)
+        self.assertEqual(ws_res.cell(3, 1).value, 1) # STT
+        self.assertEqual(ws_res.cell(3, 4).value, "Bằng tốt nghiệp trung học cơ sở") # Mặc định hệ thống
+        self.assertEqual(ws_res.cell(3, 5).value, "Đặng Thái Sơn") # Họ tên
+        self.assertEqual(ws_res.cell(3, 12).value, "Việt Nam") # Mặc định hệ thống
+        self.assertEqual(ws_res.cell(3, 14).value, "THCS Chu Văn An") # Mặc định do người dùng nhập
+        self.assertEqual(ws_res.cell(3, 15).value, "2019-2023") # Mặc định do người dùng nhập
+        self.assertEqual(ws_res.cell(3, 18).value, "Hà Nội") # Mặc định do người dùng nhập
+        self.assertEqual(ws_res.cell(3, 20).value, "Phòng GD&ĐT Tây Hồ") # Mặc định do người dùng nhập
+
+        # Kiểm tra học sinh 3 (Lưu Lệ Hằng từ file 2 - tự động thừa hưởng default_values của Profile)
+        self.assertEqual(ws_res.cell(5, 1).value, 3) # STT
+        self.assertEqual(ws_res.cell(5, 5).value, "Lưu Lệ Hằng")
+        self.assertEqual(ws_res.cell(5, 14).value, "THCS Chu Văn An")
+        self.assertEqual(ws_res.cell(5, 15).value, "2019-2023")
+        self.assertEqual(ws_res.cell(5, 20).value, "Phòng GD&ĐT Tây Hồ")
+
+        wb_res.close()
+
 
 if __name__ == '__main__':
     unittest.main()
