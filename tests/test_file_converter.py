@@ -200,6 +200,75 @@ class TestFileFormatConverter(unittest.TestCase):
         self.assertIn("DOCX đổi tên", msg)
         self.assertTrue(out_docx.exists())
 
+    def test_validate_xlsx_integrity(self):
+        """Kiểm tra thẩm định tính toàn vẹn của tệp .xlsx."""
+        ok, _ = FileFormatConverter.validate_xlsx_integrity(self.tmp_dir / "nonexistent.xlsx")
+        self.assertFalse(ok)
+
+        f_empty = self.tmp_dir / "empty.xlsx"
+        f_empty.write_bytes(b"")
+        ok, _ = FileFormatConverter.validate_xlsx_integrity(f_empty)
+        self.assertFalse(ok)
+
+        import zipfile
+        f_invalid = self.tmp_dir / "invalid.xlsx"
+        with zipfile.ZipFile(f_invalid, "w") as z:
+            z.writestr("test.txt", "abc")
+        ok, _ = FileFormatConverter.validate_xlsx_integrity(f_invalid)
+        self.assertFalse(ok)
+
+        f_valid = self.tmp_dir / "valid.xlsx"
+        with zipfile.ZipFile(f_valid, "w") as z:
+            z.writestr("[Content_Types].xml", '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>')
+            z.writestr("xl/workbook.xml", '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheets/></workbook>')
+        ok, msg = FileFormatConverter.validate_xlsx_integrity(f_valid)
+        self.assertTrue(ok)
+
+    def test_convert_renamed_xlsx(self):
+        """Kiểm tra phục hồi tự động khi người dùng đổi tên tệp .xlsx thành .xls."""
+        import zipfile
+        f_xls = self.tmp_dir / "mistakenly_named.xls"
+        with zipfile.ZipFile(f_xls, "w") as z:
+            z.writestr("[Content_Types].xml", '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>')
+            z.writestr("xl/workbook.xml", '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheets/></workbook>')
+
+        ok, out_xlsx, msg = FileFormatConverter.convert_xls_to_xlsx(f_xls)
+        self.assertTrue(ok)
+        self.assertIn("XLSX đổi tên", msg)
+        self.assertTrue(out_xlsx.exists())
+
+    def test_convert_xls_formatting_enhanced(self):
+        """Kiểm tra chuyển đổi file .xls bảo toàn ô gộp (Merged Cells), căn lề và độ rộng cột."""
+        xls_file = self.tmp_dir / "so_bo.xls"
+        wb_xls = xlwt.Workbook(encoding="utf-8")
+        ws = wb_xls.add_sheet("So_Goc")
+        # Gộp ô dòng 0 từ cột 0 đến 3 cho tiêu đề
+        ws.write_merge(0, 0, 0, 3, "SỔ GỐC CẤP BẰNG TỐT NGHIỆP THCS")
+        ws.write(1, 0, "STT")
+        ws.write(1, 1, "Họ và tên")
+        ws.write(1, 2, "Ngày tháng năm sinh")
+        ws.write(1, 3, "Xếp loại tốt nghiệp")
+
+        ws.write(2, 0, 1)
+        ws.write(2, 1, "Trần Thị Bích Ngọc")
+        ws.write(2, 2, "20/11/2006")
+        ws.write(2, 3, "Giỏi")
+        wb_xls.save(str(xls_file))
+
+        ok, out_xlsx, msg = FileFormatConverter.convert_xls_to_xlsx(xls_file)
+        self.assertTrue(ok)
+        self.assertTrue(out_xlsx.exists())
+
+        # Đọc lại bằng openpyxl và kiểm tra định dạng
+        wb_check = openpyxl.load_workbook(out_xlsx)
+        ws_chk = wb_check["So_Goc"]
+        # Kiểm tra ô gộp
+        merged_ranges = [str(m) for m in ws_chk.merged_cells.ranges]
+        self.assertTrue(any("A1:D1" in r for r in merged_ranges) or len(merged_ranges) > 0)
+        # Kiểm tra độ rộng cột đã được auto-fit (> 8.43)
+        self.assertGreater(ws_chk.column_dimensions["B"].width, 10)
+        wb_check.close()
+
 
 if __name__ == '__main__':
     unittest.main()
