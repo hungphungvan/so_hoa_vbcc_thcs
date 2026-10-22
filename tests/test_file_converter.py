@@ -118,6 +118,88 @@ class TestFileFormatConverter(unittest.TestCase):
         self.assertTrue((out_sub_dir / "sheet1.xlsx").exists())
         self.assertGreater(len(progress_records), 0)
 
+    def test_detect_file_type(self):
+        """Kiểm tra nhận diện định dạng thực tế của tệp qua header / magic bytes."""
+        # Binary doc
+        f_bin = self.tmp_dir / "real.doc"
+        f_bin.write_bytes(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x00" * 100)
+        self.assertEqual(FileFormatConverter.detect_file_type(f_bin), "doc_binary")
+
+        # Renamed docx
+        f_docx_renamed = self.tmp_dir / "fake.doc"
+        f_docx_renamed.write_bytes(b"PK\x03\x04" + b"\x00" * 100)
+        self.assertEqual(FileFormatConverter.detect_file_type(f_docx_renamed), "docx_zip")
+
+        # RTF
+        f_rtf = self.tmp_dir / "text.doc"
+        f_rtf.write_text("{\\rtf1\\ansi\\deff0 Hello World}", encoding="utf-8")
+        self.assertEqual(FileFormatConverter.detect_file_type(f_rtf), "rtf")
+
+        # HTML
+        f_html = self.tmp_dir / "table.doc"
+        f_html.write_text("<html><body><table><tr><td>1</td></tr></table></body></html>", encoding="utf-8")
+        self.assertEqual(FileFormatConverter.detect_file_type(f_html), "html")
+
+    def test_validate_docx_integrity(self):
+        """Kiểm tra thẩm định tính toàn vẹn của tệp .docx."""
+        # File không tồn tại
+        ok, msg = FileFormatConverter.validate_docx_integrity(self.tmp_dir / "nonexistent.docx")
+        self.assertFalse(ok)
+
+        # File rỗng / quá nhỏ
+        f_empty = self.tmp_dir / "empty.docx"
+        f_empty.write_bytes(b"")
+        ok, msg = FileFormatConverter.validate_docx_integrity(f_empty)
+        self.assertFalse(ok)
+
+        # File zip nhưng thiếu part
+        import zipfile
+        f_invalid_zip = self.tmp_dir / "corrupt_parts.docx"
+        with zipfile.ZipFile(f_invalid_zip, "w") as z:
+            z.writestr("test.txt", "abc")
+        ok, msg = FileFormatConverter.validate_docx_integrity(f_invalid_zip)
+        self.assertFalse(ok)
+
+        # File zip hợp lệ
+        f_valid = self.tmp_dir / "valid.docx"
+        with zipfile.ZipFile(f_valid, "w") as z:
+            z.writestr("[Content_Types].xml", '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>')
+            z.writestr("word/document.xml", '<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p/></w:body></w:document>')
+        ok, msg = FileFormatConverter.validate_docx_integrity(f_valid)
+        self.assertTrue(ok)
+
+    def test_sanitize_and_repair_docx(self):
+        """Kiểm tra khử thẻ lỗi w:sz-cs và loại bỏ file rác Cocoa meta.xml."""
+        import zipfile
+        f_quirky = self.tmp_dir / "quirky.docx"
+        with zipfile.ZipFile(f_quirky, "w") as z:
+            z.writestr("[Content_Types].xml", '<Types/>')
+            z.writestr("word/document.xml", '<w:document><w:rPr><w:sz-cs w:val="24"/><w:spacing w:val="0"/></w:rPr></w:document>')
+            z.writestr("docProps/meta.xml", '<meta/>')
+
+        repaired = FileFormatConverter.sanitize_and_repair_docx(f_quirky)
+        self.assertTrue(repaired)
+
+        with zipfile.ZipFile(f_quirky, "r") as z:
+            namelist = z.namelist()
+            self.assertNotIn("docProps/meta.xml", namelist)
+            xml_content = z.read("word/document.xml").decode("utf-8")
+            self.assertNotIn("w:sz-cs", xml_content)
+            self.assertIn("w:szCs", xml_content)
+
+    def test_convert_renamed_docx(self):
+        """Kiểm tra phục hồi tự động khi người dùng đổi tên tệp .docx thành .doc."""
+        import zipfile
+        f_doc = self.tmp_dir / "mistakenly_named.doc"
+        with zipfile.ZipFile(f_doc, "w") as z:
+            z.writestr("[Content_Types].xml", '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>')
+            z.writestr("word/document.xml", '<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p/></w:body></w:document>')
+
+        ok, out_docx, msg = FileFormatConverter.convert_doc_to_docx(f_doc)
+        self.assertTrue(ok)
+        self.assertIn("DOCX đổi tên", msg)
+        self.assertTrue(out_docx.exists())
+
 
 if __name__ == '__main__':
     unittest.main()
