@@ -15,6 +15,7 @@ from src.smart_merger import (
     compute_headers_signature,
     is_standard_28_headers,
     auto_suggest_mapping,
+    parse_column_expression,
     MappingProfileManager,
     SmartMerger
 )
@@ -310,6 +311,127 @@ class TestSmartMerger(unittest.TestCase):
         self.assertEqual(ws_res.cell(5, 20).value, "Phòng GD&ĐT Tây Hồ")
 
         wb_res.close()
+
+    def test_parse_column_expression(self):
+        """Kiểm tra phân tích các cú pháp biểu thức ghép cột (Phương án 3)."""
+        formatted = ["Cột A: STT", "Cột B: Họ và chữ đệm", "Cột C: Tên", "Cột D: Ngày sinh", "Cột E: Quê quán"]
+        
+        # 1. Để trống
+        self.assertIsNone(parse_column_expression("", formatted))
+        self.assertIsNone(parse_column_expression("-- Để trống --", formatted))
+        self.assertIsNone(parse_column_expression("--", formatted))
+
+        # 2. Cột đơn khớp chính xác
+        self.assertEqual(parse_column_expression("Cột B: Họ và chữ đệm", formatted), 1)
+        self.assertEqual(parse_column_expression("Cột D: Ngày sinh", formatted), 3)
+
+        # 3. Biểu thức ghép bằng chữ cái cột: B + C, b, c, B & C
+        self.assertEqual(parse_column_expression("B + C", formatted), [1, 2])
+        self.assertEqual(parse_column_expression("b, c", formatted), [1, 2])
+        self.assertEqual(parse_column_expression("B & C", formatted), [1, 2])
+        self.assertEqual(parse_column_expression("cột b + cột c", formatted), [1, 2])
+
+        # 4. Biểu thức ghép bằng nhãn đầy đủ
+        self.assertEqual(parse_column_expression("Cột B: Họ và chữ đệm + Cột C: Tên", formatted), [1, 2])
+
+        # 5. Biểu thức ghép bằng số thứ tự 1-indexed: 2 + 3
+        self.assertEqual(parse_column_expression("2 + 3", formatted), [1, 2])
+
+        # 6. Biểu thức ghép bằng từ khóa tương đối
+        self.assertEqual(parse_column_expression("Họ và chữ đệm + Tên", formatted), [1, 2])
+
+    def test_auto_suggest_mapping_split_name(self):
+        """Kiểm tra thuật toán tự động nhận diện tệp nguồn có cột Họ đệm và Tên tách rời."""
+        # Trường hợp 1: Họ và chữ đệm + Tên
+        headers1 = ["STT", "Họ và chữ đệm", "Tên", "Ngày sinh", "Giới tính"]
+        m1 = auto_suggest_mapping(headers1)
+        self.assertEqual(m1[1], 0)        # STT
+        self.assertEqual(m1[5], [1, 2])   # Họ, chữ đệm và tên <- ghép cột 1 và 2
+        self.assertEqual(m1[9], 3)        # Ngày sinh
+        self.assertEqual(m1[10], 4)       # Giới tính
+
+        # Trường hợp 2: Họ đệm + Tên
+        headers2 = ["STT", "Họ đệm", "Tên", "Ngày sinh"]
+        m2 = auto_suggest_mapping(headers2)
+        self.assertEqual(m2[5], [1, 2])
+
+        # Trường hợp 3: Họ + Tên (không có STT)
+        headers3 = ["Họ", "Tên", "Ngày sinh"]
+        m3 = auto_suggest_mapping(headers3)
+        self.assertEqual(m3[5], [0, 1])
+
+        # Trường hợp 4: Có cột Họ và tên gộp thì không tách
+        headers4 = ["STT", "Họ và tên", "Ngày sinh"]
+        m4 = auto_suggest_mapping(headers4)
+        self.assertEqual(m4[5], 1)
+
+    def test_smart_merger_with_split_name_columns(self):
+        """Kiểm tra quy trình Ghép & Chuẩn hóa thực tế khi cột Họ và Tên bị tách thành 2 cột."""
+        file_split = self.tmp_dir / "src_split_name.xlsx"
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Lop9_TachCot"
+        ws.append(["DANH SÁCH TỐT NGHIỆP CÓ HỌ VÀ TÊN TÁCH RỜI"])
+        ws.append(["STT", "Họ và chữ đệm", "Tên", "Ngày sinh", "Nơi sinh"])
+        ws.append([1, "nguyễn văn", "an", "15/05/2005", "Hà Nội"])
+        ws.append([2, "TRẦN THỊ BÍCH", "NGỌC", "20/10/2005", "Hải Phòng"])
+        ws.append([3, "  LÊ   VĂN ", " CƯỜNG ", "01/01/2005", "Đà Nẵng"])
+        ws.append(["Tổng số học sinh: 3", None, None, None, None]) # Dòng footer
+        wb.save(file_split)
+        wb.close()
+
+        output_file = self.tmp_dir / "Out_Split_Name.xlsx"
+
+        merger = SmartMerger(profile_mgr=self.profile_mgr)
+        res = merger.process_merge_and_standardize(
+            source_files=[file_split],
+            output_file_path=output_file,
+            mapping_callback=None, # Tự động phát hiện mapping[5] = [1, 2]
+            renumber_stt=True,
+            fill_defaults=True,
+            merge_all_sheets=True
+        )
+
+        self.assertEqual(res["status"], "success")
+        self.assertEqual(res["total_rows"], 3)
+
+        wb_res = openpyxl.load_workbook(output_file, data_only=True)
+        ws_res = wb_res.active
+
+        # Kiểm tra học sinh 1: "nguyễn văn" + "an" -> "Nguyễn Văn An"
+        self.assertEqual(ws_res.cell(3, 1).value, 1)
+        self.assertEqual(ws_res.cell(3, 5).value, "Nguyễn Văn An")
+        self.assertEqual(ws_res.cell(3, 9).value, "15/05/2005")
+        self.assertEqual(ws_res.cell(3, 13).value, "Hà Nội")
+
+        # Kiểm tra học sinh 2: "TRẦN THỊ BÍCH" + "NGỌC" -> "Trần Thị Bích Ngọc"
+        self.assertEqual(ws_res.cell(4, 1).value, 2)
+        self.assertEqual(ws_res.cell(4, 5).value, "Trần Thị Bích Ngọc")
+
+        # Kiểm tra học sinh 3: khoảng trắng thừa được dọn sạch -> "Lê Văn Cường"
+        self.assertEqual(ws_res.cell(5, 1).value, 3)
+        self.assertEqual(ws_res.cell(5, 5).value, "Lê Văn Cường")
+
+        wb_res.close()
+
+    def test_profile_with_combined_columns(self):
+        """Kiểm tra lưu và nạp lại Profile chứa cấu hình ghép nhiều cột."""
+        headers = ["STT", "Họ và chữ đệm", "Tên", "Ngày sinh"]
+        sig = compute_headers_signature(headers)
+
+        # Lưu profile với mapping Cột 5 = [1, 2]
+        prof = self.profile_mgr.save_profile(
+            name="Mẫu Tách Cột Test",
+            signature=sig,
+            raw_headers=headers,
+            mapping={1: 0, 5: [1, 2], 9: 3}
+        )
+        self.assertEqual(prof["mapping"]["5"], [1, 2])
+
+        # Tìm lại theo signature
+        found = self.profile_mgr.get_profile_by_signature(sig)
+        self.assertIsNotNone(found)
+        self.assertEqual(found["mapping"]["5"], [1, 2])
 
 
 if __name__ == '__main__':

@@ -10,7 +10,7 @@ from src.gui.theme import (
     FONT_TITLE, FONT_SUBTITLE, FONT_CARD_TITLE, FONT_LABEL, FONT_LABEL_BOLD,
     FONT_BUTTON, FONT_BUTTON_REG, FONT_MUTED
 )
-from src.smart_merger import TARGET_COLUMNS, MappingProfileManager, auto_suggest_mapping
+from src.smart_merger import TARGET_COLUMNS, MappingProfileManager, auto_suggest_mapping, parse_column_expression
 
 EMPTY_OPTION = "-- Để trống --"
 
@@ -47,11 +47,11 @@ class ColumnMappingDialog(tk.Toplevel):
         self.suggested_mapping = suggested_mapping
 
         # Kết quả trả về: (mapping, profile_name, default_values, should_skip)
-        self.result: tuple[dict[int, int | None] | None, str | None, dict[int, str], bool] = (None, None, {}, True)
+        self.result: tuple[dict[int, int | list[int] | None] | None, str | None, dict[int, str], bool] = (None, None, {}, True)
 
         self.title("🧩 Cấu hình Ánh xạ Cột - Ghép & Chuẩn hóa")
-        self.geometry("980x700")
-        self.minsize(860, 560)
+        self.geometry("1020x720")
+        self.minsize(900, 580)
         self.configure(bg=self.palette.WINDOW_BG)
 
         # Chặn tương tác ngoài dialog (modal)
@@ -137,7 +137,7 @@ class ColumnMappingDialog(tk.Toplevel):
 
         ttk.Label(
             quick_bar,
-            text="💡 Mẹo: Với các cột file nguồn không có hoặc bị khuyết (vd: Tên trường, Niên khóa...), bạn có thể nhập Giá trị mặc định vào ô bên phải để tự động điền cho tất cả học sinh.",
+            text="💡 Hỗ trợ gộp nhiều cột nguồn bằng dấu '+' (ví dụ: 'B + C', 'Cột B + Cột C') hoặc bấm nút '➕' bên cạnh để tích chọn các cột cần ghép.",
             font=FONT_MUTED,
             foreground=p.PRIMARY
         ).pack(side=tk.LEFT)
@@ -156,7 +156,7 @@ class ColumnMappingDialog(tk.Toplevel):
         tk.Label(t_header, text="STT", font=FONT_LABEL_BOLD, bg=p.TREE_HEADING_BG, fg=p.TREE_HEADING_FG, width=4, anchor="center").pack(side=tk.LEFT)
         tk.Label(t_header, text="Cột đích (Mẫu chuẩn 28)", font=FONT_LABEL_BOLD, bg=p.TREE_HEADING_BG, fg=p.TREE_HEADING_FG, width=24, anchor="w").pack(side=tk.LEFT, padx=(6, 0))
         tk.Label(t_header, text="Yêu cầu", font=FONT_LABEL_BOLD, bg=p.TREE_HEADING_BG, fg=p.TREE_HEADING_FG, width=10, anchor="center").pack(side=tk.LEFT, padx=(6, 0))
-        tk.Label(t_header, text="👉 Cột nguồn tương ứng", font=FONT_LABEL_BOLD, bg=p.TREE_HEADING_BG, fg=p.TREE_HEADING_FG, width=26, anchor="w").pack(side=tk.LEFT, padx=(6, 0))
+        tk.Label(t_header, text="👉 Cột nguồn tương ứng", font=FONT_LABEL_BOLD, bg=p.TREE_HEADING_BG, fg=p.TREE_HEADING_FG, width=28, anchor="w").pack(side=tk.LEFT, padx=(6, 0))
         tk.Label(t_header, text="✍️ Giá trị mặc định (nếu ô nguồn trống)", font=FONT_LABEL_BOLD, bg=p.TREE_HEADING_BG, fg=p.TREE_HEADING_FG, anchor="w").pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(8, 0))
 
         # Canvas cuộn
@@ -203,12 +203,20 @@ class ColumnMappingDialog(tk.Toplevel):
             req_fg = p.DANGER if t_req else (p.WARNING if t_idx in (9, 14, 15) else p.MUTED)
             tk.Label(r_frame, text=req_text, font=FONT_MUTED, bg=row_bg, fg=req_fg, width=10, anchor="center").pack(side=tk.LEFT, padx=(6, 0))
 
-            # Cột 4: Combobox Cột nguồn
+            # Cột 4: Combobox Cột nguồn + Nút ➕ Ghép nhiều cột
             c_var = tk.StringVar(value=EMPTY_OPTION)
             self.target_vars[t_idx] = c_var
 
-            cb = ttk.Combobox(r_frame, textvariable=c_var, values=self.combo_options, state="readonly", width=25)
+            cb = ttk.Combobox(r_frame, textvariable=c_var, values=self.combo_options, state="normal", width=22)
             cb.pack(side=tk.LEFT, padx=(6, 0))
+
+            btn_multi = ttk.Button(
+                r_frame,
+                text="➕",
+                width=3,
+                command=lambda idx=t_idx, name=t_name: self._open_multi_column_selector(idx, name)
+            )
+            btn_multi.pack(side=tk.LEFT, padx=(2, 0))
 
             # Cột 5: Ô nhập Giá trị mặc định nếu ô nguồn trống
             d_var = tk.StringVar()
@@ -246,29 +254,42 @@ class ColumnMappingDialog(tk.Toplevel):
                 self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
         widget.bind_all("<MouseWheel>", _on_mousewheel)
 
-    def _apply_mapping(self, mapping: dict[int, int | None]):
+    def _open_multi_column_selector(self, t_idx: int, t_name: str):
+        c_var = self.target_vars[t_idx]
+        MultiColumnSelectorDialog(
+            parent=self,
+            target_name=t_name,
+            formatted_headers=self.formatted_headers,
+            current_value=c_var.get(),
+            callback=lambda res_str: c_var.set(res_str)
+        )
+
+    def _apply_mapping(self, mapping: dict[int, int | list[int] | None]):
         """Cập nhật giá trị hiển thị trên combobox theo mapping."""
-        for t_idx, s_idx in mapping.items():
+        for t_idx, s_val in mapping.items():
             if t_idx not in self.target_vars:
                 continue
-            if s_idx is not None and 0 <= s_idx < len(self.formatted_headers):
-                self.target_vars[t_idx].set(self.formatted_headers[s_idx])
+            if isinstance(s_val, list):
+                # Nhiều cột gộp: e.g. [1, 2] -> "Cột B: Họ và chữ đệm + Cột C: Tên"
+                text_parts = []
+                for sc in s_val:
+                    if sc is not None and 0 <= sc < len(self.formatted_headers):
+                        text_parts.append(self.formatted_headers[sc])
+                if text_parts:
+                    self.target_vars[t_idx].set(" + ".join(text_parts))
+                else:
+                    self.target_vars[t_idx].set(EMPTY_OPTION)
+            elif isinstance(s_val, int) and 0 <= s_val < len(self.formatted_headers):
+                self.target_vars[t_idx].set(self.formatted_headers[s_val])
             else:
                 self.target_vars[t_idx].set(EMPTY_OPTION)
 
-    def _get_current_mapping(self) -> dict[int, int | None]:
-        """Lấy bản đồ ánh xạ hiện tại từ các combobox."""
-        mapping: dict[int, int | None] = {}
+    def _get_current_mapping(self) -> dict[int, int | list[int] | None]:
+        """Lấy bản đồ ánh xạ hiện tại từ các combobox hoặc biểu thức người dùng gõ."""
+        mapping: dict[int, int | list[int] | None] = {}
         for t_idx, c_var in self.target_vars.items():
             val = c_var.get()
-            if val == EMPTY_OPTION or not val:
-                mapping[t_idx] = None
-            else:
-                try:
-                    s_idx = self.formatted_headers.index(val)
-                    mapping[t_idx] = s_idx
-                except ValueError:
-                    mapping[t_idx] = None
+            mapping[t_idx] = parse_column_expression(val, self.formatted_headers)
         return mapping
 
     def _apply_defaults(self, defaults: dict[int | str, str]):
@@ -356,3 +377,123 @@ class ColumnMappingDialog(tk.Toplevel):
             self.result = (None, None, {}, False)
             self.grab_release()
             self.destroy()
+
+
+class MultiColumnSelectorDialog(tk.Toplevel):
+    """Hộp thoại tích chọn nhiều cột nguồn để ghép vào một cột đích."""
+
+    def __init__(
+        self,
+        parent: tk.Toplevel,
+        target_name: str,
+        formatted_headers: list[str],
+        current_value: str,
+        callback: Any
+    ):
+        super().__init__(parent)
+        self.callback = callback
+        self.formatted_headers = formatted_headers
+        is_dark = getattr(parent, 'is_dark', IS_DARK)
+        self.palette = get_theme_palette(is_dark)
+
+        self.title(f"🧩 Ghép nhiều cột: {target_name}")
+        self.geometry("520x460")
+        self.minsize(440, 340)
+        self.configure(bg=self.palette.WINDOW_BG)
+        self.transient(parent)
+        self.grab_set()
+
+        p = self.palette
+
+        # Parse current_value để tìm các chỉ số cột đang được chọn trước đó
+        parsed = parse_column_expression(current_value, formatted_headers)
+        if isinstance(parsed, list):
+            selected_indices = set(parsed)
+        elif isinstance(parsed, int):
+            selected_indices = {parsed}
+        else:
+            selected_indices = set()
+
+        self.check_vars: list[tuple[int, tk.BooleanVar, str]] = []
+
+        # Header info
+        hdr_frame = tk.Frame(self, bg=p.HEADER_BANNER_BG, padx=14, pady=10)
+        hdr_frame.pack(fill=tk.X)
+
+        tk.Label(
+            hdr_frame,
+            text=f"Tích chọn các cột nguồn cần gộp vào: {target_name}",
+            font=FONT_LABEL_BOLD,
+            bg=p.HEADER_BANNER_BG,
+            fg=p.HEADER_BANNER_FG
+        ).pack(anchor=tk.W)
+
+        tk.Label(
+            hdr_frame,
+            text="Hệ thống sẽ tự động ghép các cột được chọn lại với nhau (ngăn cách bằng 1 dấu cách).",
+            font=FONT_MUTED,
+            bg=p.HEADER_BANNER_BG,
+            fg=p.HEADER_SUB_FG
+        ).pack(anchor=tk.W, pady=(2, 0))
+
+        # Scrollable checklist
+        container = ttk.Frame(self, padding=(12, 8))
+        container.pack(fill=tk.BOTH, expand=True)
+
+        canvas = tk.Canvas(container, bg=p.WINDOW_BG, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(container, orient=tk.VERTICAL, command=canvas.yview)
+        scroll_frame = tk.Frame(canvas, bg=p.WINDOW_BG)
+
+        scroll_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        c_win = canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.bind("<Configure>", lambda e: canvas.itemconfig(c_win, width=e.width))
+
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        for i, fh in enumerate(formatted_headers):
+            var = tk.BooleanVar(value=(i in selected_indices))
+            self.check_vars.append((i, var, fh))
+            chk = ttk.Checkbutton(scroll_frame, text=fh, variable=var)
+            chk.pack(anchor=tk.W, pady=3, padx=6)
+
+        # Buttons
+        btn_frame = ttk.Frame(self, padding=12)
+        btn_frame.pack(fill=tk.X)
+
+        ttk.Button(btn_frame, text="Hủy", command=self._on_close).pack(side=tk.LEFT)
+        ttk.Button(btn_frame, text="🧹 Bỏ chọn hết", command=self._clear_all).pack(side=tk.LEFT, padx=(8, 0))
+        ttk.Button(btn_frame, text="✅ Áp dụng ghép", command=self._confirm).pack(side=tk.RIGHT)
+
+        self._center_window(parent)
+
+    def _clear_all(self):
+        for _, var, _ in self.check_vars:
+            var.set(False)
+
+    def _confirm(self):
+        selected_headers = [fh for _, var, fh in self.check_vars if var.get()]
+        if selected_headers:
+            result_str = " + ".join(selected_headers)
+        else:
+            result_str = EMPTY_OPTION
+        self.callback(result_str)
+        self._on_close()
+
+    def _on_close(self):
+        self.grab_release()
+        self.destroy()
+
+    def _center_window(self, parent):
+        self.update_idletasks()
+        pw = parent.winfo_width()
+        ph = parent.winfo_height()
+        px = parent.winfo_rootx()
+        py = parent.winfo_rooty()
+        w = self.winfo_width()
+        h = self.winfo_height()
+        x = max(0, px + (pw - w) // 2)
+        y = max(0, py + (ph - h) // 2)
+        self.geometry(f"{w}x{h}+{x}+{y}")
+

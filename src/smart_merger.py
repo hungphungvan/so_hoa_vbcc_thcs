@@ -15,7 +15,7 @@ from datetime import datetime
 
 import openpyxl
 from openpyxl.styles import Font
-from openpyxl.utils import get_column_letter
+from openpyxl.utils import get_column_letter, column_index_from_string
 
 from src.lookup_manager import find_data_file, get_data_dir, get_persistent_data_dir
 from src.normalizer import (
@@ -200,12 +200,13 @@ def is_standard_28_headers(headers: list[str]) -> bool:
                 matches += 1
     return matches >= 20
 
-def auto_suggest_mapping(source_headers: list[str]) -> dict[int, int | None]:
+def auto_suggest_mapping(source_headers: list[str]) -> dict[int, int | list[int] | None]:
     """
     Gợi ý ánh xạ thông minh từ 28 cột đích sang chỉ số cột nguồn (0-based) hoặc None.
+    Hỗ trợ nhận diện tự động trường hợp cột Họ và tên bị tách thành 2 cột (Họ đệm + Tên).
     Thuật toán đa tầng kết hợp từ điển đồng nghĩa và so khớp mờ, chống gán trùng lặp.
     """
-    mapping: dict[int, int | None] = {col["idx"]: None for col in TARGET_COLUMNS}
+    mapping: dict[int, int | list[int] | None] = {col["idx"]: None for col in TARGET_COLUMNS}
     if not source_headers:
         return mapping
 
@@ -216,24 +217,51 @@ def auto_suggest_mapping(source_headers: list[str]) -> dict[int, int | None]:
                 mapping[col["idx"]] = idx
         return mapping
 
+    used_sources = set()
+    used_targets = set()
+
+    # Kiểm tra trường hợp đặc biệt: Cột Họ và tên bị tách thành 2 cột (Họ đệm + Tên)
+    has_full_name_col = False
+    ho_col_idx = None
+    ten_col_idx = None
+
+    for s_idx, s_h in enumerate(source_headers):
+        s_norm = normalize_text_for_match(s_h)
+        if any(fn in s_norm for fn in ["ho va ten", "ho ten", "ho, chu dem va ten", "ho va chu dem va ten"]):
+            has_full_name_col = True
+            break
+        if ho_col_idx is None and any(hd == s_norm or hd in s_norm for hd in ["ho va chu dem", "ho va ten dem", "ho dem", "ho lot", "ho"]):
+            if "ten" not in s_norm or "dem" in s_norm or "chu" in s_norm:
+                ho_col_idx = s_idx
+        if ten_col_idx is None and (s_norm in ["ten", "ten hs", "ten hoc sinh", "ten thi sinh"]):
+            ten_col_idx = s_idx
+
+    # Nếu không có cột gộp mà có cả cột Họ đệm và Tên riêng biệt
+    if not has_full_name_col and ho_col_idx is not None and ten_col_idx is not None and ho_col_idx != ten_col_idx:
+        mapping[5] = [ho_col_idx, ten_col_idx]
+        used_targets.add(5)
+        used_sources.add(ho_col_idx)
+        used_sources.add(ten_col_idx)
+
     # Bảng điểm cho từng cặp (target_idx, source_idx)
     candidates: list[tuple[float, int, int, str]] = [] # (score, target_idx, source_col_idx, match_type)
 
     for col in TARGET_COLUMNS:
         t_idx = col["idx"]
+        if t_idx in used_targets:
+            continue
         t_name = col["name"]
         syns = SYNONYMS_MAP.get(t_idx, [])
 
         for s_idx, s_header in enumerate(source_headers):
+            if s_idx in used_sources:
+                continue
             score, match_type = compute_similarity(t_name, syns, s_header)
             if score >= 0.62:
                 candidates.append((score, t_idx, s_idx, match_type))
 
     # Sắp xếp theo điểm số giảm dần để ưu tiên gán các cặp có độ tin cậy cao nhất trước
     candidates.sort(key=lambda x: x[0], reverse=True)
-
-    used_sources = set()
-    used_targets = set()
 
     for score, t_idx, s_idx, match_type in candidates:
         if t_idx not in used_targets and s_idx not in used_sources:
@@ -242,6 +270,79 @@ def auto_suggest_mapping(source_headers: list[str]) -> dict[int, int | None]:
             used_sources.add(s_idx)
 
     return mapping
+
+
+def parse_column_expression(expr: str, formatted_headers: list[str]) -> int | list[int] | None:
+    """
+    Phân tích biểu thức ánh xạ cột từ người dùng:
+    - Rỗng hoặc '-- Để trống --' -> None
+    - Cột đơn chính xác (vd: 'Cột B: Họ và tên') -> int (chỉ số 0-based)
+    - Biểu thức gộp nhiều cột qua dấu '+', ',', '&':
+        + Theo chữ cái: 'B + C', 'Cột B + Cột C', 'B, C', 'B & C'
+        + Theo nhãn đầy đủ: 'Cột B: Họ và chữ đệm + Cột C: Tên'
+        + Theo số thứ tự 1-indexed: '2 + 3'
+        + Khớp theo từ khóa tiêu đề: 'Họ và chữ đệm + Tên'
+    - Trả về: int nếu là 1 cột, list[int] nếu là nhiều cột, None nếu không hợp lệ hoặc để trống.
+    """
+    if not expr:
+        return None
+    s = str(expr).strip()
+    if s in ("", "-- Để trống --", "--", "None", "none"):
+        return None
+
+    # Khớp chính xác với 1 nhãn hoàn chỉnh trong formatted_headers
+    if s in formatted_headers:
+        return formatted_headers.index(s)
+
+    # Tách biểu thức theo các toán tử ghép cột: '+', ',', '&'
+    tokens = [t.strip() for t in re.split(r'[,+&]', s) if t.strip()]
+    if not tokens:
+        return None
+
+    indices: list[int] = []
+    for tok in tokens:
+        # 1. Trực tiếp có trong formatted_headers
+        if tok in formatted_headers:
+            idx = formatted_headers.index(tok)
+            if idx not in indices:
+                indices.append(idx)
+            continue
+
+        # 2. Định dạng chữ cái cột Excel: "Cột B", "B", "Cột AA", "AA"
+        m_col = re.match(r'^(?:cột\s+)?([A-Za-z]+)(?::.*)?$', tok, re.IGNORECASE)
+        if m_col:
+            letter = m_col.group(1).upper()
+            try:
+                c_idx = column_index_from_string(letter) - 1
+                if 0 <= c_idx < len(formatted_headers) and c_idx not in indices:
+                    indices.append(c_idx)
+                    continue
+            except Exception:
+                pass
+
+        # 3. Định dạng số 1-indexed: "1", "2"
+        if tok.isdigit():
+            c_idx = int(tok) - 1
+            if 0 <= c_idx < len(formatted_headers) and c_idx not in indices:
+                indices.append(c_idx)
+                continue
+
+        # 4. Tìm kiếm tương đối / từ khóa trong formatted_headers
+        tok_norm = normalize_text_for_match(tok)
+        matched_idx = None
+        for i, fh in enumerate(formatted_headers):
+            fh_norm = normalize_text_for_match(fh)
+            if tok_norm and (tok_norm == fh_norm or tok_norm in fh_norm or fh_norm in tok_norm):
+                matched_idx = i
+                break
+        if matched_idx is not None and matched_idx not in indices:
+            indices.append(matched_idx)
+
+    if not indices:
+        return None
+    if len(indices) == 1:
+        return indices[0]
+    return indices
 
 
 # ==============================================================================
@@ -447,7 +548,16 @@ class SmartMerger:
             if log_callback:
                 log_callback(msg, level)
             else:
-                print(msg)
+                try:
+                    print(msg)
+                except Exception:
+                    try:
+                        if hasattr(sys.stdout, 'buffer') and sys.stdout.buffer:
+                            sys.stdout.buffer.write((str(msg) + "\n").encode('utf-8', errors='replace'))
+                        else:
+                            print(str(msg).encode('ascii', errors='replace').decode('ascii'))
+                    except Exception:
+                        pass
 
         if not source_files:
             return {"status": "error", "message": "Chưa chọn tệp nguồn nào để ghép."}
@@ -583,6 +693,9 @@ class SmartMerger:
                 s_src_idx = mapping.get(1) # Cột STT nguồn
                 n_src_idx = mapping.get(5) # Cột Họ tên nguồn
 
+                first_s_idx = s_src_idx[0] if isinstance(s_src_idx, list) else (s_src_idx if s_src_idx is not None else -1)
+                first_n_idx = n_src_idx[0] if isinstance(n_src_idx, list) else (n_src_idx if n_src_idx is not None else -1)
+
                 # Đọc dòng tiêu đề chuẩn của sheet để kiểm tra lặp lại
                 header_row_vals = [ws_curr.cell(row=h_idx, column=c).value for c in range(1, len(raw_headers) + 1)]
 
@@ -591,7 +704,7 @@ class SmartMerger:
                         break
 
                     # Kiểm tra dòng tiêu đề lặp lại (ví dụ ngắt trang lặp lại dòng tiêu đề)
-                    if is_header_duplicate_row(row, header_row_vals, s_src_idx if s_src_idx is not None else -1, n_src_idx if n_src_idx is not None else -1):
+                    if is_header_duplicate_row(row, header_row_vals, first_s_idx, first_n_idx):
                         continue
 
                     # Kiểm tra dòng tổng kết / chân trang ký tên
@@ -600,7 +713,16 @@ class SmartMerger:
 
                     # Kiểm tra tính hợp lệ của dòng học sinh: CHỈ CẦN CÓ HỌ VÀ TÊN HỢP LỆ
                     if n_src_idx is not None:
-                        cell_name = row[n_src_idx] if (0 <= n_src_idx < len(row)) else None
+                        if isinstance(n_src_idx, list):
+                            parts = []
+                            for ni in n_src_idx:
+                                if ni is not None and 0 <= ni < len(row) and row[ni] is not None:
+                                    p_text = clean_whitespace(auto_convert_legacy_encoding(str(row[ni])))
+                                    if p_text:
+                                        parts.append(p_text)
+                            cell_name = " ".join(parts) if parts else None
+                        else:
+                            cell_name = row[n_src_idx] if (0 <= n_src_idx < len(row)) else None
                         name_ok = is_valid_name(cell_name)
 
                         # Điều kiện ngắt: Nếu 20 dòng liên tiếp không có Họ tên hợp lệ -> kết thúc bảng dữ liệu
@@ -613,8 +735,8 @@ class SmartMerger:
                             empty_name_consecutive = 0
                     else:
                         # Dự phòng trường hợp hy hữu không map cột Họ tên: kiểm tra STT hoặc dòng không rỗng
-                        cell_stt = row[s_src_idx] if (s_src_idx is not None and 0 <= s_src_idx < len(row)) else None
-                        if s_src_idx is not None:
+                        cell_stt = row[first_s_idx] if (first_s_idx >= 0 and first_s_idx < len(row)) else None
+                        if first_s_idx >= 0:
                             if not is_valid_stt(cell_stt):
                                 empty_name_consecutive += 1
                                 if empty_name_consecutive >= 20:
@@ -643,7 +765,16 @@ class SmartMerger:
                         s_col_idx = mapping.get(t_idx)
 
                         raw_val = None
-                        if s_col_idx is not None and 0 <= s_col_idx < len(row):
+                        if isinstance(s_col_idx, list):
+                            parts = []
+                            for sc in s_col_idx:
+                                if sc is not None and 0 <= sc < len(row) and row[sc] is not None:
+                                    p_str = auto_convert_legacy_encoding(str(row[sc]))
+                                    p_str = clean_whitespace(p_str)
+                                    if p_str:
+                                        parts.append(p_str)
+                            raw_val = " ".join(parts) if parts else None
+                        elif isinstance(s_col_idx, int) and 0 <= s_col_idx < len(row):
                             raw_val = row[s_col_idx]
 
                         # Chuẩn hóa giá trị ô
