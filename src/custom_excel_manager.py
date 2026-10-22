@@ -1,19 +1,43 @@
 from __future__ import annotations
 
+import sys
 import re
 import math
 from pathlib import Path
+from typing import Any
 import openpyxl
 from openpyxl.utils import get_column_letter
 
-from src.normalizer import auto_convert_legacy_encoding, clean_whitespace
+from src.normalizer import (
+    auto_convert_legacy_encoding,
+    clean_whitespace,
+    is_tcvn3,
+    tcvn3_to_unicode
+)
 from src.exporter import sanitize_filename
+
+def safe_print(msg: Any) -> None:
+    try:
+        print(msg)
+    except Exception:
+        try:
+            if hasattr(sys.stdout, 'buffer') and sys.stdout.buffer:
+                sys.stdout.buffer.write((str(msg) + "\n").encode('utf-8', errors='replace'))
+            else:
+                print(str(msg).encode('ascii', errors='replace').decode('ascii'))
+        except Exception:
+            pass
+
 
 # Từ khóa nhận dạng dòng tiêu đề STT
 STT_KEYWORDS = ["stt", "số tt", "số thứ tự", "stt.", "tt", "tt."]
 
 # Từ khóa nhận dạng dòng tiêu đề Họ và tên
-NAME_KEYWORDS = ["họ và tên", "họ tên", "họ, chữ đệm và tên", "họ và chữ đệm", "tên học sinh", "họ tên học sinh"]
+NAME_KEYWORDS = [
+    "họ và tên", "họ tên", "họ, chữ đệm và tên", "họ và chữ đệm", "tên học sinh", "họ tên học sinh",
+    "họ đệm", "họ, đệm", "họ và", "họ chữ đệm", "họ lót", "họ", "hodem", "ho dem",
+    "tên", "ten", "tên thí sinh", "tên người học"
+]
 
 # Các họ phổ biến của Việt Nam phục vụ Heuristic dò tìm
 VIETNAMESE_SURNAMES = [
@@ -67,8 +91,11 @@ def _is_index_row(row_cells: list | tuple) -> bool:
     non_empty = [c for c in row_cells if c is not None and str(c).strip() != ""]
     if not non_empty or len(non_empty) < 2:
         return False
+    # Nếu dòng chứa tên người hợp lệ -> chắc chắn là dữ liệu, không phải dòng đánh số cột
+    if any(is_valid_name(c) for c in non_empty):
+        return False
     num_count = sum(1 for c in non_empty if re.match(r'^\(?\d{1,3}\)?$', str(c).strip()))
-    return (num_count / len(non_empty)) >= 0.6
+    return (num_count / len(non_empty)) >= 0.7
 
 def is_header_duplicate_row(row: list | tuple, header_row_data: list | tuple | None = None, s_idx: int = -1, n_idx: int = -1) -> bool:
     """
@@ -148,7 +175,15 @@ def detect_header_and_columns(ws, max_scan_rows: int = 25) -> dict:
     for r_idx, row in enumerate(ws.iter_rows(min_row=1, max_row=max_scan_rows, values_only=True), start=1):
         if not row:
             continue
-        row_str = [auto_convert_legacy_encoding(clean_whitespace(str(c or ''))) for c in row]
+        row_raw = [str(c or '').strip() for c in row]
+        row_is_tcvn3 = any(is_tcvn3(s) for s in row_raw)
+        row_str = []
+        for c in row:
+            s_raw = str(c or '').strip()
+            if row_is_tcvn3 and any(ord(ch) > 127 for ch in s_raw):
+                row_str.append(clean_whitespace(tcvn3_to_unicode(s_raw)))
+            else:
+                row_str.append(auto_convert_legacy_encoding(clean_whitespace(str(c or ''))))
         row_lower = [s.lower() for s in row_str]
 
         # Kiểm tra xem dòng có chứa STT hoặc Họ và tên không
@@ -167,159 +202,35 @@ def detect_header_and_columns(ws, max_scan_rows: int = 25) -> dict:
                     stt_idx = c_i
                     break
 
-            # Tìm cột Họ và tên sơ bộ
+            # Tìm cột Họ và tên sơ bộ (ưu tiên cột Họ đệm/Họ và tên trước, sau đó tới Tên)
             for c_i, s in enumerate(row_lower):
-                if any(kw in s for kw in NAME_KEYWORDS):
+                s_clean = s.strip()
+                if any(kw in s_clean for kw in ["họ và tên", "họ tên", "họ, chữ đệm", "họ và chữ đệm", "họ đệm", "họ, đệm", "họ và", "hodem", "ho dem", "họ lót"]):
                     name_idx = c_i
                     break
+            if name_idx == -1:
+                for c_i, s in enumerate(row_lower):
+                    s_clean = s.strip()
+                    if s_clean in ["tên", "ten", "tên học sinh", "tên thí sinh", "tên người học"] or any(kw in s_clean for kw in ["tên học sinh", "tên thí sinh"]):
+                        name_idx = c_i
+                        break
             break
 
     # Nếu không tìm thấy theo từ khóa, mặc định lấy dòng 1 hoặc 2
     if best_header_idx is None:
         best_header_idx = 1
-        best_headers = [auto_convert_legacy_encoding(clean_whitespace(str(c or ''))) for c in next(ws.iter_rows(min_row=1, max_row=1, values_only=True), [])]
+        first_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), [])
+        first_is_tcvn3 = any(is_tcvn3(str(c or '').strip()) for c in first_row)
+        best_headers = []
+        for c in first_row:
+            s_raw = str(c or '').strip()
+            if first_is_tcvn3 and any(ord(ch) > 127 for ch in s_raw):
+                best_headers.append(clean_whitespace(tcvn3_to_unicode(s_raw)))
+            else:
+                best_headers.append(auto_convert_legacy_encoding(clean_whitespace(str(c or ''))))
 
     header_start_row = best_header_idx
-    header_end_row = header_start_row
-
-    # =========================================================================
-    # PHÁT HIỆN TIÊU ĐỀ ĐA DÒNG (MULTI-ROW HEADER / MERGED CELLS)
-    # =========================================================================
-    # 1. Quét ws.merged_cells xem có ô nào merge từ header_start_row xuống dưới không
-    if hasattr(ws, 'merged_cells') and ws.merged_cells:
-        try:
-            ranges = list(ws.merged_cells.ranges)
-            expanded = True
-            while expanded:
-                expanded = False
-                for rng in ranges:
-                    if rng.min_row <= header_end_row and rng.max_row > header_end_row:
-                        # Giới hạn an toàn: tiêu đề đa tầng thường tối đa 5-6 dòng
-                        if rng.max_row - header_start_row <= 6:
-                            header_end_row = rng.max_row
-                            expanded = True
-        except Exception:
-            pass
-
-    # 2. Quét các dòng kế tiếp trực tiếp phía dưới xem có phải sub-header hoặc hàng đánh số cột (1), (2)... không
-    max_possible_row = min(header_start_row + 6, ws.max_row if (hasattr(ws, 'max_row') and ws.max_row) else (header_start_row + 6))
-    check_row = header_end_row + 1
-
-    while check_row <= max_possible_row:
-        row_cells = [ws.cell(row=check_row, column=c).value for c in range(1, (ws.max_column or 50) + 1)]
-        non_empty_vals = [c for c in row_cells if c is not None and str(c).strip() != ""]
-        if not non_empty_vals:
-            break
-
-        # Nếu dòng này là dòng học sinh thực tế (STT hợp lệ và Tên hợp lệ) -> dừng ngay
-        cell_stt = row_cells[stt_idx] if stt_idx < len(row_cells) else None
-        cell_name = row_cells[name_idx] if (0 <= name_idx < len(row_cells)) else None
-        if is_valid_stt(cell_stt) and is_valid_name(cell_name):
-            break
-
-        # Nếu là hàng đánh số cột: (1), (2), (3)... hoặc 1, 2, 3...
-        if _is_index_row(non_empty_vals):
-            header_end_row = check_row
-            check_row += 1
-            continue
-
-        # Nếu chứa các từ khóa tiêu đề phụ (Ngày, Tháng, Năm, Toán, Văn...)
-        row_lower_vals = [str(c).lower().strip() for c in non_empty_vals]
-        has_sub_kw = any(any(kw == s or kw in s for kw in SUB_HEADER_KEYWORDS) for s in row_lower_vals)
-        if has_sub_kw and not is_valid_name(cell_name):
-            header_end_row = check_row
-            check_row += 1
-            continue
-
-        break
-
-    # =========================================================================
-    # KẾT HỢP DÒNG TIÊU ĐỀ NẾU LÀ MULTI-ROW (header_end_row > header_start_row)
-    # =========================================================================
-    if header_end_row > header_start_row:
-        num_header_rows = header_end_row - header_start_row + 1
-        max_col = ws.max_column or 0
-        if max_col == 0:
-            max_col = max(len(best_headers), 1)
-
-        # Tạo lưới giá trị từ header_start_row đến header_end_row
-        grid_matrix: list[list[Any]] = []
-        for r in range(header_start_row, header_end_row + 1):
-            row_c = [ws.cell(row=r, column=c).value for c in range(1, max_col + 1)]
-            grid_matrix.append(row_c)
-
-        # Cắt bớt các cột hoàn toàn trống ở cuối
-        while max_col > 0:
-            col_has_val = any(
-                grid_matrix[r_i][max_col - 1] is not None and str(grid_matrix[r_i][max_col - 1]).strip() != ""
-                for r_i in range(num_header_rows)
-            )
-            if col_has_val:
-                break
-            max_col -= 1
-
-        grid_matrix = [row[:max_col] for row in grid_matrix]
-
-        # Áp dụng các dải ô gộp (Merged Cells) để điền đầy đủ dữ liệu cho các ô merge
-        if hasattr(ws, 'merged_cells') and ws.merged_cells:
-            try:
-                for rng in ws.merged_cells.ranges:
-                    if rng.max_row >= header_start_row and rng.min_row <= header_end_row:
-                        top_val = ws.cell(row=rng.min_row, column=rng.min_col).value
-                        if top_val is not None:
-                            val_clean = auto_convert_legacy_encoding(clean_whitespace(str(top_val)))
-                            r_min = max(rng.min_row, header_start_row)
-                            r_max = min(rng.max_row, header_end_row)
-                            c_min = max(rng.min_col, 1)
-                            c_max = min(rng.max_col, max_col)
-                            for r in range(r_min, r_max + 1):
-                                for c in range(c_min, c_max + 1):
-                                    grid_matrix[r - header_start_row][c - 1] = val_clean
-            except Exception:
-                pass
-
-        # Dự phòng: Forward-fill theo chiều ngang ở dòng trên nếu dòng dưới có sub-header mà ô trên bị trống
-        for r_i in range(num_header_rows - 1):
-            last_seen = None
-            for c_i in range(max_col):
-                curr_v = grid_matrix[r_i][c_i]
-                if curr_v is not None and str(curr_v).strip() != "":
-                    last_seen = str(curr_v).strip()
-                else:
-                    next_v = grid_matrix[r_i + 1][c_i]
-                    if next_v is not None and str(next_v).strip() != "" and last_seen is not None:
-                        grid_matrix[r_i][c_i] = last_seen
-
-        # Kết hợp văn bản các dòng theo từng cột
-        combined_headers: list[str] = []
-        for c_i in range(max_col):
-            col_parts: list[str] = []
-            for r_i in range(num_header_rows):
-                # Bỏ qua dòng index (1), (2)... ở cuối không gộp vào tên cột
-                if num_header_rows > 1 and r_i == num_header_rows - 1:
-                    row_non_empty = [c for c in grid_matrix[r_i] if c is not None and str(c).strip() != ""]
-                    if _is_index_row(row_non_empty):
-                        continue
-
-                val = grid_matrix[r_i][c_i]
-                if val is not None:
-                    s = auto_convert_legacy_encoding(clean_whitespace(str(val)))
-                    if s:
-                        if not col_parts:
-                            col_parts.append(s)
-                        else:
-                            last_p = col_parts[-1]
-                            if s.strip().lower() == last_p.strip().lower():
-                                pass
-                            else:
-                                col_parts.append(s)
-
-            if col_parts:
-                combined_headers.append(" - ".join(col_parts))
-            else:
-                combined_headers.append("")
-
-        best_headers = combined_headers
+    header_end_row = best_header_idx
 
     # Cắt gọn đuôi rỗng của header
     while best_headers and not best_headers[-1]:
@@ -497,7 +408,7 @@ class ExcelSplitter:
             if log_callback:
                 log_callback(msg, level)
             else:
-                print(msg)
+                safe_print(msg)
 
         p = Path(file_path)
         out_dir = Path(output_dir)
@@ -729,7 +640,7 @@ class ExcelMerger:
             if log_callback:
                 log_callback(msg, level)
             else:
-                print(msg)
+                safe_print(msg)
 
         if not file_paths:
             return {"status": "error", "message": "Không có tệp để gộp"}

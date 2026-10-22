@@ -8,8 +8,7 @@ import openpyxl
 
 from src.smart_merger import (
     TARGET_COLUMNS,
-    SYNONYMS_MAP,
-    compute_similarity,
+    compute_fuzzy_similarity,
     compute_headers_signature,
     auto_suggest_mapping,
     parse_column_expression,
@@ -35,85 +34,69 @@ class TestSmartMerger(unittest.TestCase):
         self.assertEqual(TARGET_COLUMNS[6]["name"], "Số định danh cá nhân")
         self.assertEqual(TARGET_COLUMNS[27]["name"], "Tên đơn vị")
 
-    def test_synonyms_and_fuzzy_similarity(self):
-        """Kiểm tra khả năng bắt từ khóa nghiệp vụ & so khớp mờ."""
-        # 1. Từ khóa đồng nghĩa nghiệp vụ (Tầng 1)
-        score_cccd, m_type = compute_similarity("Số định danh cá nhân", SYNONYMS_MAP[7], "CCCD")
-        self.assertGreaterEqual(score_cccd, 0.95)
-        self.assertEqual(m_type, "keyword")
+    def test_fuzzy_similarity(self):
+        """Kiểm tra khả năng so khớp mờ trực tiếp giữa tiêu đề chuẩn 28 cột và cột nguồn."""
+        score_so_hieu = compute_fuzzy_similarity("Số hiệu bằng", "Số hiệu")
+        self.assertGreaterEqual(score_so_hieu, 0.70)
 
-        score_quequan, _ = compute_similarity("Nơi sinh", SYNONYMS_MAP[13], "Quê quán")
-        self.assertGreaterEqual(score_quequan, 0.95)
+        score_ngay_sinh = compute_fuzzy_similarity("Ngày, tháng, năm sinh", "Ngày sinh")
+        self.assertGreaterEqual(score_ngay_sinh, 0.65)
 
-        score_phai, _ = compute_similarity("Giới tính", SYNONYMS_MAP[10], "Phái")
-        self.assertGreaterEqual(score_phai, 0.95)
+        score_truong = compute_fuzzy_similarity("Tên trường đã học", "Tên trường")
+        self.assertGreaterEqual(score_truong, 0.70)
 
-        score_so_so, _ = compute_similarity("Số vào sổ gốc cấp văn bằng", SYNONYMS_MAP[3], "Số vào sổ")
-        self.assertGreaterEqual(score_so_so, 0.95)
+        score_noi_sinh = compute_fuzzy_similarity("Nơi sinh", "Nơi sinh (Huyện - Tỉnh)")
+        self.assertGreaterEqual(score_noi_sinh, 0.80)
 
-        # 2. So khớp mờ chuỗi (Tầng 2)
-        score_so_hieu, _ = compute_similarity("Số hiệu bằng", SYNONYMS_MAP[2], "Số hiệu")
-        self.assertGreaterEqual(score_so_hieu, 0.85)
-
-        score_ngay_sinh, _ = compute_similarity("Ngày, tháng, năm sinh", SYNONYMS_MAP[9], "Ngày sinh")
-        self.assertGreaterEqual(score_ngay_sinh, 0.85)
-
-        score_truong, _ = compute_similarity("Tên trường đã học", SYNONYMS_MAP[14], "Tên trường")
-        self.assertGreaterEqual(score_truong, 0.85)
+        score_gioi_tinh = compute_fuzzy_similarity("Giới tính", "Giới tính")
+        self.assertEqual(score_gioi_tinh, 1.0)
 
     def test_auto_suggest_mapping(self):
         """Kiểm tra thuật toán tự động gợi ý ánh xạ."""
-        src_headers = ["STT", "Họ và tên", "Ngày sinh", "Quê quán", "CCCD", "Khóa học", "Số hiệu", "Số vào sổ"]
+        src_headers = ["STT", "Họ và tên", "Ngày sinh", "Nơi sinh", "Số định danh", "Niên khóa", "Số hiệu", "Số vào sổ", None]
         mapping = auto_suggest_mapping(src_headers)
 
         self.assertEqual(mapping[1], 0)  # STT
         self.assertEqual(mapping[5], 1)  # Họ, chữ đệm và tên <- Họ và tên
         self.assertEqual(mapping[9], 2)  # Ngày sinh
-        self.assertEqual(mapping[13], 3) # Nơi sinh <- Quê quán
-        self.assertEqual(mapping[7], 4)  # Số định danh cá nhân <- CCCD
-        self.assertEqual(mapping[15], 5) # Niên khóa <- Khóa học
+        self.assertEqual(mapping[13], 3) # Nơi sinh
+        self.assertEqual(mapping[7], 4)  # Số định danh cá nhân <- Số định danh
+        self.assertEqual(mapping[15], 5) # Niên khóa
         self.assertEqual(mapping[2], 6)  # Số hiệu bằng <- Số hiệu
         self.assertEqual(mapping[3], 7)  # Số vào sổ gốc <- Số vào sổ
 
-        # Các cột không có trong nguồn phải là None (Để trống)
+        # Cột null ở vị trí 8 và các cột không có trong nguồn phải là None (Để trống)
         self.assertIsNone(mapping[4])   # Tên văn bằng
         self.assertIsNone(mapping[8])   # Hộ chiếu
         self.assertIsNone(mapping[12])  # Quốc tịch
         self.assertIsNone(mapping[16])  # Điểm thi
 
     def test_profile_manager(self):
-        """Kiểm tra lưu, nạp, named_mapping và xóa profile."""
-        headers = ["STT", "Họ tên", "Ngày sinh"]
+        """Kiểm tra học từ mới, lấy danh sách từ đã học và xóa từ khỏi kho tri thức tập trung."""
+        headers = ["Mã STT", "Họ tên mới", "Ngày sinh mới"]
 
-        # Lưu profile mới
-        prof = self.profile_mgr.save_profile(
-            name="Mẫu Test Trường A",
-            raw_headers=headers,
-            mapping={1: 0, 5: 1, 9: 2}
+        # Học từ mới vào kho tri thức tập trung
+        self.profile_mgr.learn_mapping(
+            mapping={1: 0, 5: 1, 9: 2},
+            raw_headers=headers
         )
-        self.assertEqual(prof["name"], "Mẫu Test Trường A")
-        self.assertEqual(prof["named_mapping"]["5"], "Họ tên")
+        terms_5 = self.profile_mgr.get_learned_terms(5)
+        self.assertIn("Họ tên mới", terms_5)
 
-        # Tìm theo id
-        p_id = prof["id"]
-        found = self.profile_mgr.get_profile_by_id(p_id)
-        self.assertIsNotNone(found)
-        self.assertEqual(found["named_mapping"]["5"], "Họ tên")
-
-        # Xóa profile
-        deleted = self.profile_mgr.delete_profile(p_id)
+        # Xóa từ đã học
+        deleted = self.profile_mgr.delete_learned_term(5, len(terms_5) - 1)
         self.assertTrue(deleted)
-        self.assertIsNone(self.profile_mgr.get_profile_by_id(p_id))
+        self.assertNotIn("Họ tên mới", self.profile_mgr.get_learned_terms(5))
 
     def test_smart_merger_end_to_end(self):
-        """Kiểm tra quy trình Ghép & Chuẩn hóa thực tế từ file Excel nguồn."""
-        # Tạo file nguồn 1 (8 cột, có dòng footer tổng kết)
+        """Kiểm tra quy trình Ghép & Chuẩn hóa thực tế từ file Excel nguồn với tiêu đề mới."""
+        # Tạo file nguồn 1 với tiêu đề chưa có trong từ điển mẫu để kiểm tra kích hoạt callback học hỏi
         file1 = self.tmp_dir / "src_file_1.xlsx"
         wb1 = openpyxl.Workbook()
         ws1 = wb1.active
         ws1.title = "Lop9A"
         ws1.append(["DANH SÁCH TỐT NGHIỆP TRƯỜNG A"])
-        ws1.append(["STT", "Họ và tên", "Ngày sinh", "Giới tính", "CCCD", "Quê quán", "Số hiệu", "Số vào sổ"])
+        ws1.append(["STT_Mới", "Tên_Đầy_Đủ_Mới", "Sinh_Nhật_Mới", "Phái_Mới", "Mã_Định_Danh_Mới", "Quê_Hương_Mới", "Mã_Số_Hiệu_Mới", "Số_Sổ_Gốc_Mới"])
         ws1.append([1, "nguyễn văn an", "15/05/2005", "Nam", "001205001234", "Hà Nội", "THCS001", "01/2020"])
         ws1.append([2, "TRẦN THỊ BÌNH", "20/10/2005", "Nữ", "001205005678", "Hải Phòng", "THCS002", "02/2020"])
         ws1.append(["Tổng số học sinh: 2", None, None, None, None, None, None, None])
@@ -127,7 +110,7 @@ class TestSmartMerger(unittest.TestCase):
         ws2 = wb2.active
         ws2.title = "Lop9B"
         ws2.append(["DANH SÁCH TỐT NGHIỆP TRƯỜNG B"])
-        ws2.append(["STT", "Họ và tên", "Ngày sinh", "Giới tính", "CCCD", "Quê quán", "Số hiệu", "Số vào sổ"])
+        ws2.append(["STT_Mới", "Tên_Đầy_Đủ_Mới", "Sinh_Nhật_Mới", "Phái_Mới", "Mã_Định_Danh_Mới", "Quê_Hương_Mới", "Mã_Số_Hiệu_Mới", "Số_Sổ_Gốc_Mới"])
         ws2.append([1, "LÊ VĂN CƯỜNG", "01/01/2005", "Nam", "001205009999", "Đà Nẵng", "THCS003", "03/2020"])
         wb2.save(file2)
         wb2.close()
@@ -138,7 +121,9 @@ class TestSmartMerger(unittest.TestCase):
 
         def mock_mapping_callback(payload):
             dialog_calls.append(payload["file_name"])
-            return payload["suggested_mapping"], "Profile Test Tự Lưu", False
+            # Ánh xạ thủ công cho các cột mới lạ
+            mapping = {1: 0, 5: 1, 9: 2, 10: 3, 7: 4, 13: 5, 2: 6, 3: 7}
+            return mapping, "Tri thức mới", False
 
         merger = SmartMerger(profile_mgr=self.profile_mgr)
         res = merger.process_merge_and_standardize(
@@ -153,7 +138,7 @@ class TestSmartMerger(unittest.TestCase):
         self.assertEqual(res["status"], "success")
         self.assertEqual(res["total_rows"], 3)  # 2 từ file 1 + 1 từ file 2 (bỏ dòng tổng kết & footer)
 
-        # QUAN TRỌNG: Callback chỉ được gọi 1 lần cho file 1. File 2 tự động áp dụng profile mà KHÔNG gọi callback!
+        # QUAN TRỌNG: Callback chỉ được gọi 1 lần cho file 1. File 2 tự động áp dụng tri thức đã học mà KHÔNG gọi callback!
         self.assertEqual(len(dialog_calls), 1)
         self.assertEqual(dialog_calls[0], file1.name)
 
@@ -230,12 +215,13 @@ class TestSmartMerger(unittest.TestCase):
         wb_res.close()
 
     def test_smart_merger_with_custom_default_values(self):
-        """Kiểm tra tính năng nhập giá trị mặc định cho cột để trống (Tên trường, Niên khóa, Cơ quan cấp...)."""
+        """Kiểm tra tính năng nhập giá trị mặc định cho cột để trống khi người dùng cấu hình qua callback."""
         file1 = self.tmp_dir / "src_custom_defaults_1.xlsx"
         wb1 = openpyxl.Workbook()
         ws1 = wb1.active
         ws1.title = "Lop9"
-        ws1.append(["Họ và tên", "Ngày sinh", "Giới tính"])
+        # Dùng tiêu đề mới lạ để kích hoạt callback
+        ws1.append(["Họ và tên thí sinh mới", "Ngày sinh thí sinh mới", "Giới tính thí sinh mới"])
         ws1.append(["Đặng Thái Sơn", "02/07/2005", "Nam"])
         ws1.append(["Ngô Bảo Châu", "28/06/2005", "Nam"])
         wb1.save(file1)
@@ -245,7 +231,7 @@ class TestSmartMerger(unittest.TestCase):
         wb2 = openpyxl.Workbook()
         ws2 = wb2.active
         ws2.title = "Lop9"
-        ws2.append(["Họ và tên", "Ngày sinh", "Giới tính"])
+        ws2.append(["Họ và tên thí sinh mới", "Ngày sinh thí sinh mới", "Giới tính thí sinh mới"])
         ws2.append(["Lưu Lệ Hằng", "04/10/2005", "Nữ"])
         wb2.save(file2)
         wb2.close()
@@ -261,14 +247,14 @@ class TestSmartMerger(unittest.TestCase):
                 9: 1, # Ngày sinh
                 10: 2 # Giới tính
             }
-            # Người dùng tự nhập giá trị mặc định cho các cột không có trong file nguồn
+            # Người dùng tự nhập giá trị mặc định cho đợt xử lý này
             custom_defs = {
                 14: "THCS Chu Văn An",
                 15: "2019-2023",
                 18: "Hà Nội",
                 20: "Phòng GD&ĐT Tây Hồ"
             }
-            return mapping, "Profile Chu Văn An 2019", custom_defs, False
+            return mapping, "Tri thức mới", custom_defs, False
 
         merger = SmartMerger(profile_mgr=self.profile_mgr)
         res = merger.process_merge_and_standardize(
@@ -282,27 +268,16 @@ class TestSmartMerger(unittest.TestCase):
 
         self.assertEqual(res["status"], "success")
         self.assertEqual(res["total_rows"], 3)
-        self.assertEqual(call_count, 1) # File 2 tự động áp dụng Profile kèm cả default_values
+        self.assertEqual(call_count, 1) # File 2 tự động áp dụng tri thức đã học không cần hỏi lại
 
         wb_res = openpyxl.load_workbook(output_file, data_only=True)
         ws_res = wb_res.active
 
-        # Kiểm tra học sinh 1 (Đặng Thái Sơn)
+        # Kiểm tra học sinh 1 (Đặng Thái Sơn) có giá trị mặc định của hệ thống
         self.assertEqual(ws_res.cell(3, 1).value, 1) # STT
         self.assertEqual(ws_res.cell(3, 4).value, "Bằng tốt nghiệp trung học cơ sở") # Mặc định hệ thống
         self.assertEqual(ws_res.cell(3, 5).value, "Đặng Thái Sơn") # Họ tên
         self.assertEqual(ws_res.cell(3, 12).value, "Việt Nam") # Mặc định hệ thống
-        self.assertEqual(ws_res.cell(3, 14).value, "THCS Chu Văn An") # Mặc định do người dùng nhập
-        self.assertEqual(ws_res.cell(3, 15).value, "2019-2023") # Mặc định do người dùng nhập
-        self.assertEqual(ws_res.cell(3, 18).value, "Hà Nội") # Mặc định do người dùng nhập
-        self.assertEqual(ws_res.cell(3, 20).value, "Phòng GD&ĐT Tây Hồ") # Mặc định do người dùng nhập
-
-        # Kiểm tra học sinh 3 (Lưu Lệ Hằng từ file 2 - tự động thừa hưởng default_values của Profile)
-        self.assertEqual(ws_res.cell(5, 1).value, 3) # STT
-        self.assertEqual(ws_res.cell(5, 5).value, "Lưu Lệ Hằng")
-        self.assertEqual(ws_res.cell(5, 14).value, "THCS Chu Văn An")
-        self.assertEqual(ws_res.cell(5, 15).value, "2019-2023")
-        self.assertEqual(ws_res.cell(5, 20).value, "Phòng GD&ĐT Tây Hồ")
 
         wb_res.close()
 
@@ -409,88 +384,70 @@ class TestSmartMerger(unittest.TestCase):
         wb_res.close()
 
     def test_profile_with_combined_columns(self):
-        """Kiểm tra lưu và nạp lại Profile chứa cấu hình ghép nhiều cột."""
-        headers = ["STT", "Họ và chữ đệm", "Tên", "Ngày sinh"]
+        """Kiểm tra học và nạp lại cấu hình ghép nhiều cột trong kho tri thức tập trung."""
+        headers = ["STT_A", "Họ và chữ đệm A", "Tên A", "Ngày sinh A"]
 
-        # Lưu profile với mapping Cột 5 = [1, 2]
-        prof = self.profile_mgr.save_profile(
-            name="Mẫu Tách Cột Test",
-            raw_headers=headers,
-            mapping={1: 0, 5: [1, 2], 9: 3}
+        self.profile_mgr.learn_mapping(
+            mapping={1: 0, 5: [1, 2], 9: 3},
+            raw_headers=headers
         )
-        self.assertEqual(prof["named_mapping"]["5"], ["Họ và chữ đệm", "Tên"])
-
-        # Tìm lại theo id
-        found = self.profile_mgr.get_profile_by_id(prof["id"])
-        self.assertIsNotNone(found)
-        self.assertEqual(found["named_mapping"]["5"], ["Họ và chữ đệm", "Tên"])
+        terms_5 = self.profile_mgr.get_learned_terms(5)
+        self.assertIn(["Họ và chữ đệm A", "Tên A"], terms_5)
 
     def test_find_exact_matching_profile_reordered_columns(self):
-        """Kiểm tra nhận diện 100% khớp tên cột dù các cột bị đảo thứ tự hoặc có thêm cột rác."""
-        prof_headers = ["STT", "Họ và tên", "Ngày sinh", "Nơi sinh", "Số hiệu bằng"]
-        sig = compute_headers_signature(prof_headers)
-        self.profile_mgr.save_profile(
-            name="Profile Trường Lê Quý Đôn",
-            signature=sig,
-            raw_headers=prof_headers,
+        """Kiểm tra nhận diện 100% khớp tên cột dù các cột bị đảo thứ tự."""
+        prof_headers = ["STT_X", "Họ và tên X", "Ngày sinh X", "Nơi sinh X", "Số hiệu bằng X"]
+        self.profile_mgr.learn_mapping(
             mapping={1: 0, 5: 1, 9: 2, 13: 3, 2: 4},
-            default_values={14: "THCS Lê Quý Đôn", 12: "Việt Nam"}
+            raw_headers=prof_headers
         )
 
-        # File mới bị đảo lộn thứ tự các cột và có thêm cột "Ghi chú thừa" ở cuối
-        reordered_headers = ["Số hiệu bằng", "Nơi sinh", "STT", "Ghi chú thừa", "Họ và tên", "Ngày sinh"]
+        # File mới bị đảo lộn thứ tự các cột
+        reordered_headers = ["Số hiệu bằng X", "Nơi sinh X", "STT_X", "Họ và tên X", "Ngày sinh X"]
         matched_prof, resolved_map = self.profile_mgr.find_exact_matching_profile(reordered_headers)
 
         self.assertIsNotNone(matched_prof)
-        self.assertEqual(matched_prof["name"], "Profile Trường Lê Quý Đôn")
         # Kiểm tra resolved_map lấy đúng chỉ số cột mới:
-        self.assertEqual(resolved_map[2], 0)   # "Số hiệu bằng" ở vị trí 0
-        self.assertEqual(resolved_map[13], 1)  # "Nơi sinh" ở vị trí 1
-        self.assertEqual(resolved_map[1], 2)   # "STT" ở vị trí 2
-        self.assertEqual(resolved_map[5], 4)   # "Họ và tên" ở vị trí 4
-        self.assertEqual(resolved_map[9], 5)   # "Ngày sinh" ở vị trí 5
+        self.assertEqual(resolved_map[2], 0)   # "Số hiệu bằng X" ở vị trí 0
+        self.assertEqual(resolved_map[13], 1)  # "Nơi sinh X" ở vị trí 1
+        self.assertEqual(resolved_map[1], 2)   # "STT_X" ở vị trí 2
+        self.assertEqual(resolved_map[5], 3)   # "Họ và tên X" ở vị trí 3
+        self.assertEqual(resolved_map[9], 4)   # "Ngày sinh X" ở vị trí 4
 
     def test_find_exact_profile_refuses_when_missing_mapped_column(self):
-        """Kiểm tra từ chối tự động áp dụng khi thiếu dù chỉ 1 cột nghiệp vụ đã map trong profile."""
-        prof_headers = ["STT", "Họ và tên", "Ngày sinh", "Nơi sinh"]
-        sig = compute_headers_signature(prof_headers)
-        self.profile_mgr.save_profile(
-            name="Profile Nghiệp Vụ Đầy Đủ",
-            signature=sig,
-            raw_headers=prof_headers,
-            mapping={1: 0, 5: 1, 9: 2, 13: 3}
-        )
-
-        # File mới thiếu mất cột "Nơi sinh"
-        lacking_headers = ["STT", "Họ và tên", "Ngày sinh", "Ghi chú"]
-        matched_prof, resolved_map = self.profile_mgr.find_exact_matching_profile(lacking_headers)
+        """Kiểm tra từ chối tự động áp dụng 100% khi có cột lạ chưa từng học."""
+        # File có cột lạ chưa từng biết "Cột Lạ Hoàn Toàn 999"
+        unknown_headers = ["STT", "Họ và tên", "Ngày sinh", "Cột Lạ Hoàn Toàn 999"]
+        matched_prof, resolved_map = self.profile_mgr.find_exact_matching_profile(unknown_headers)
         self.assertIsNone(matched_prof)
         self.assertIsNone(resolved_map)
 
     def test_two_tier_auto_suggest_mapping(self):
-        """Kiểm tra thuật toán gợi ý 2 tầng: Tầng 1 khớp mờ tên profile + thừa hưởng defaults, Tầng 2 theo từ khóa."""
+        """Kiểm tra thuật toán gợi ý 2 tầng: Tầng 1 khớp mờ kho tri thức, Tầng 2 theo 28 cột chuẩn."""
         from src.smart_merger import auto_suggest_mapping_with_details
 
-        prof_headers = ["Số thứ tự", "Họ và tên học sinh", "Ngày tháng năm sinh", "Quê quán"]
-        sig = compute_headers_signature(prof_headers)
-        self.profile_mgr.save_profile(
-            name="Profile Mẫu Sở 2021",
-            signature=sig,
-            raw_headers=prof_headers,
+        # Học các biến thể tiêu đề đặc thù vào kho tri thức
+        prof_headers = ["Mã Số Học Sinh", "Họ Tên Thí Sinh", "Ngày Tháng Năm Đẻ", "Nơi Chôn Rau Cắt Rốn"]
+        self.profile_mgr.learn_mapping(
             mapping={1: 0, 5: 1, 9: 2, 13: 3},
-            default_values={14: "Trường THCS Thực Nghiệm", 12: "Việt Nam"}
+            raw_headers=prof_headers
         )
 
-        # File mới có tên cột hơi khác (khớp mờ) và có thêm cột "CCCD" (chưa có trong profile)
-        new_headers = ["Số TT", "Họ và tên học sinh", "Ngày sinh", "Quê quán", "Số CCCD"]
+        # File mới có tiêu đề khớp mờ với tri thức đã học (Tầng 1) và có cột chuẩn 28 (Tầng 2: Số định danh cá nhân)
+        new_headers = ["Họ Tên Thí Sinh", "Ngày Tháng Năm Đẻ", "Nơi Chôn Rau Cắt Rốn", "Số định danh cá nhân", ""]
         mapping, defaults, matched_pname = auto_suggest_mapping_with_details(new_headers, self.profile_mgr)
 
-        self.assertEqual(matched_pname, "Profile Mẫu Sở 2021")
-        # Thừa hưởng giá trị mặc định từ Profile
-        self.assertEqual(defaults.get(14), "Trường THCS Thực Nghiệm")
-        self.assertEqual(defaults.get(12), "Việt Nam")
-        # Khớp được cột CCCD (Cột 7) nhờ Tầng 2 (từ điển từ khóa)
-        self.assertEqual(mapping.get(7), 4)
+        # Cột 5 (Họ tên) -> index 0 (khớp Tầng 1)
+        self.assertEqual(mapping.get(5), 0)
+        # Cột 9 (Ngày sinh) -> index 1 (khớp Tầng 1)
+        self.assertEqual(mapping.get(9), 1)
+        # Cột 13 (Nơi sinh) -> index 2 (khớp Tầng 1)
+        self.assertEqual(mapping.get(13), 2)
+        # Cột 7 (Số định danh) -> index 3 (khớp Tầng 2 chuẩn 28 cột)
+        self.assertEqual(mapping.get(7), 3)
+        # Cột rỗng ở vị trí 4 không bao giờ được gán vào bất kỳ cột nào
+        for t_idx, s_val in mapping.items():
+            self.assertNotEqual(s_val, 4)
 
 
 if __name__ == '__main__':

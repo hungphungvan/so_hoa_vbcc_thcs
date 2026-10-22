@@ -101,7 +101,7 @@ VNI_REGEX = re.compile("|".join(re.escape(k) for k in VNI_TO_UNI_MAP.keys()))
 
 # Biểu thức chính quy phát hiện dấu hiệu đặc thù của bảng mã VNI-Windows
 VNI_EXCLUSIVE_PATTERN = re.compile(
-    r"(?i:[aeouyöô][ùøûï]|a[êeéèúüëâáàåãä]|e[âáàåãä]|o[âåãä]|öô|ñ|ö)"
+    r"(?i:[aeouyöô][ùøûï]|a[êeéèúüëâáàåãä]|e[âáàåãä]|o[âåãä]|öô|ñ)"
 )
 
 def is_vni(text: str) -> bool:
@@ -123,14 +123,14 @@ def is_tcvn3(text: str) -> bool:
     """Kiểm tra xem chuỗi có dấu hiệu mã hóa TCVN3 (ABC/.VnTime) hay không."""
     if not text or not isinstance(text, str) or text.isascii():
         return False
-    # Nếu chuỗi chứa các ký tự đặc trưng riêng của Unicode tiếng Việt -> chắc chắn là Unicode
-    if any(c in UNI_EXCLUSIVE for c in text):
-        return False
     # Ưu tiên kiểm tra VNI trước nếu có dấu hiệu ghép đôi
     if is_vni(text):
         return False
-    # Nếu chuỗi chứa bất kỳ ký tự đặc thù độc quyền nào của TCVN3 -> là TCVN3
-    return any(c in TCVN3_EXCLUSIVE for c in text)
+    tcvn3_count = sum(1 for c in text if c in TCVN3_EXCLUSIVE)
+    if tcvn3_count == 0:
+        return False
+    uni_count = sum(1 for c in text if c in UNI_EXCLUSIVE)
+    return tcvn3_count >= uni_count
 
 def tcvn3_to_unicode(text: str) -> str:
     """Chuyển đổi chuỗi từ bảng mã TCVN3 (ABC/.VnTime) sang Unicode dựng sẵn."""
