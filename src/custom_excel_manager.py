@@ -39,6 +39,18 @@ NAME_KEYWORDS = [
     "tên", "ten", "tên thí sinh", "tên người học"
 ]
 
+# Các từ khóa đặc trưng nhận diện mẫu chuẩn 28 cột (Mau_DS_Cap_Bang_THCS.xlsx)
+STANDARD_28_SIGNATURES = [
+    "stt", "số hiệu bằng", "số vào sổ gốc cấp văn bằng", "số vào sổ", "tên văn bằng",
+    "họ, chữ đệm và tên", "mã người học", "số định danh cá nhân", "hộ chiếu",
+    "ngày, tháng, năm sinh", "giới tính", "dân tộc", "quốc tịch", "nơi sinh",
+    "tên trường đã học", "niên khóa", "niên khoá", "điểm các môn thi", "hội đồng thi",
+    "địa danh nơi cơ quan cấp bằng đặt trụ sở", "ngày tháng năm cấp bằng", "tên cơ quan cấp bằng",
+    "chức danh người ký bằng", "tình trạng văn bằng", "ghi chú", "trạng thái số hóa",
+    "trạng thái số hoá", "thông tin chưa bảo đảm đầy đủ, chính xác và nguyên nhân",
+    "mã đơn vị", "tên đơn vị"
+]
+
 # Các họ phổ biến của Việt Nam phục vụ Heuristic dò tìm
 VIETNAMESE_SURNAMES = [
     "nguyễn", "nguyen", "trần", "tran", "lê", "le", "phạm", "pham", 
@@ -62,22 +74,25 @@ def is_valid_stt(val) -> bool:
     s_clean = re.sub(r'\.0+$', '', s)
     return s_clean.isdigit() and int(s_clean) > 0
 
+RE_HAS_LETTER = re.compile(r'[a-zA-ZÀ-ỹ]')
+NAME_EXCLUDE_KEYWORDS = (
+    "họ và tên", "họ tên", "họ, chữ đệm", "họ và chữ đệm", "tên học sinh", 
+    "họ tên học sinh", "người học", "thí sinh", "tiêu đề", "họ, tên", "tên người"
+)
+
 def is_valid_name(val) -> bool:
     """Kiểm tra ô có phải là Họ và tên người hợp lệ (chứa chữ cái, không rỗng, không phải header)."""
-    if val is None:
+    if val is None or isinstance(val, (int, float, bool)):
         return False
-    s = clean_whitespace(str(val))
-    if not s:
+    s = str(val).strip()
+    if len(s) < 2 or s.isdigit():
         return False
     s_lower = s.lower()
     # Không được là tiêu đề lặp lại hoặc chứa các từ khóa cột tiêu đề
-    if any(kw in s_lower for kw in [
-        "họ và tên", "họ tên", "họ, chữ đệm", "họ và chữ đệm", "tên học sinh", 
-        "họ tên học sinh", "người học", "thí sinh", "tiêu đề", "họ, tên", "tên người"
-    ]):
+    if any(kw in s_lower for kw in NAME_EXCLUDE_KEYWORDS):
         return False
     # Bắt buộc phải chứa ký tự chữ cái tiếng Việt hoặc Latin
-    return bool(re.search(r'[a-zA-ZÀ-ỹ]', s))
+    return bool(RE_HAS_LETTER.search(s))
 
 # Từ khóa nhận dạng sub-header trong tiêu đề đa tầng
 SUB_HEADER_KEYWORDS = [
@@ -186,7 +201,23 @@ def detect_header_and_columns(ws, max_scan_rows: int = 25) -> dict:
                 row_str.append(auto_convert_legacy_encoding(clean_whitespace(str(c or ''))))
         row_lower = [s.lower() for s in row_str]
 
-        # Kiểm tra xem dòng có chứa STT hoặc Họ và tên không
+        # 1. Nhận diện ưu tiên tuyệt đối: Cấu trúc mẫu chuẩn 28 cột (Mau_DS_Cap_Bang_THCS.xlsx)
+        std_28_score = sum(1 for kw in STANDARD_28_SIGNATURES if any(kw in s for s in row_lower))
+        if std_28_score >= 4:
+            best_header_idx = r_idx
+            best_headers = row_str
+            for c_i, s in enumerate(row_lower):
+                if any(kw == s or kw in s for kw in STT_KEYWORDS):
+                    stt_idx = c_i
+                    break
+            for c_i, s in enumerate(row_lower):
+                s_clean = s.strip()
+                if any(kw in s_clean for kw in ["họ, chữ đệm", "họ và tên", "họ tên"]) and "người ký" not in s_clean:
+                    name_idx = c_i
+                    break
+            break
+
+        # 2. Kiểm tra tổng quát: xem dòng có chứa STT hoặc Họ và tên không
         has_stt = any(any(kw == s or kw in s for kw in STT_KEYWORDS) for s in row_lower[:6])
         has_name = any(any(kw in s for kw in NAME_KEYWORDS) for s in row_lower)
         non_empty = sum(1 for s in row_str if s)
@@ -205,7 +236,7 @@ def detect_header_and_columns(ws, max_scan_rows: int = 25) -> dict:
             # Tìm cột Họ và tên sơ bộ (ưu tiên cột Họ đệm/Họ và tên trước, sau đó tới Tên)
             for c_i, s in enumerate(row_lower):
                 s_clean = s.strip()
-                if any(kw in s_clean for kw in ["họ và tên", "họ tên", "họ, chữ đệm", "họ và chữ đệm", "họ đệm", "họ, đệm", "họ và", "hodem", "ho dem", "họ lót"]):
+                if any(kw in s_clean for kw in ["họ và tên", "họ tên", "họ, chữ đệm", "họ và chữ đệm", "họ đệm", "họ, đệm", "họ và", "hodem", "ho dem", "họ lót"]) and "người ký" not in s_clean:
                     name_idx = c_i
                     break
             if name_idx == -1:
@@ -459,6 +490,8 @@ class ExcelSplitter:
                 raw_val = row[split_col_idx] if split_col_idx < len(row) else None
                 val_str = clean_whitespace(str(raw_val)) if not is_cell_empty(raw_val) else "(Gia_Tri_Trong)"
                 grouped_rows.setdefault(val_str, []).append(list(row))
+                if progress_callback and (total_extracted % 2000 == 0):
+                    progress_callback(total_extracted, 0, f"Đang phân tích dòng {total_extracted:,}...")
 
         log(f"✅ Đã thu nạp {total_extracted} dòng dữ liệu hợp lệ thuộc {len(grouped_rows)} nhóm.", "success")
 
@@ -759,6 +792,9 @@ class ExcelMerger:
                             row_data.append(src_desc)
 
                         ws_merged.append(row_data)
+
+                        if progress_callback and (total_merged_rows % 2000 == 0):
+                            progress_callback(f_idx, total_files, f"Đang gộp tệp {f_idx}/{total_files} ({p.name}) - Đã gộp {total_merged_rows:,} dòng...")
 
                 if sheet_row_count > 0 and len(candidate_sheets) > 1:
                     log(f"    -> Sheet '{ws_curr.title}': Đã lấy {sheet_row_count} học sinh.", "info")

@@ -119,6 +119,9 @@ class TestDialogs(unittest.TestCase):
         dlg_prof = ManageProfilesDialog(parent=self.root, profile_mgr=prof_mgr)
         self.assertIsNotNone(dlg_prof)
         self.assertTrue(hasattr(dlg_prof, 'tree'))
+        self.assertTrue(hasattr(dlg_prof, 'tree_fb'))
+        self.assertTrue(hasattr(dlg_prof, 'cb_fb_target'))
+        self.assertTrue(hasattr(dlg_prof, 'cb_fb_source'))
         dlg_prof.destroy()
 
     def test_column_mapping_dialog_with_extra_cols_filter(self):

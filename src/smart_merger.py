@@ -209,16 +209,16 @@ def compute_headers_signature(headers: list[str]) -> str:
     return hashlib.sha256(raw_sig.encode('utf-8')).hexdigest()[:16]
 
 def is_standard_28_headers(headers: list[str]) -> bool:
-    """Kiểm tra xem danh sách header có phải chính là mẫu chuẩn 28 cột hay không."""
+    """Kiểm tra xem danh sách header có phải chính là mẫu chuẩn 28 cột (Mau_DS_Cap_Bang_THCS.xlsx) hay không."""
     if len(headers) < 28:
         return False
     matches = 0
     for idx, col_def in enumerate(TARGET_COLUMNS):
         if idx < len(headers):
             score = compute_fuzzy_similarity(col_def["name"], headers[idx])
-            if score >= 0.85:
+            if score >= 0.80:
                 matches += 1
-    return matches >= 20
+    return matches >= 18
 
 def auto_suggest_mapping_with_details(
     source_headers: list[str],
@@ -1550,7 +1550,13 @@ class SmartMerger:
                             val_str = clean_whitespace(val_str)
 
                             # 2. Chuẩn hóa đặc thù theo từng cột
-                            if t_idx == 5: # Họ, chữ đệm và tên -> Title Case
+                            if t_idx == 4: # Tên văn bằng -> Luôn tự động điền chuẩn
+                                row_28[t_col_0] = "Bằng tốt nghiệp trung học cơ sở"
+                            elif t_idx in (2, 3, 6): # Số hiệu bằng, Số vào sổ, Mã người học -> làm sạch khoảng trắng
+                                row_28[t_col_0] = clean_whitespace(val_str)
+                            elif t_idx == 7: # Số định danh cá nhân (CCCD) -> làm sạch khoảng trắng
+                                row_28[t_col_0] = re.sub(r'\s+', '', clean_whitespace(val_str))
+                            elif t_idx == 5: # Họ, chữ đệm và tên -> Title Case
                                 row_28[t_col_0] = vietnamese_title_case(val_str)
                             elif t_idx in (9, 19): # Ngày sinh, Ngày cấp bằng -> format_date_to_text
                                 row_28[t_col_0] = format_date_to_text(raw_val)
@@ -1565,7 +1571,7 @@ class SmartMerger:
                             else:
                                 row_28[t_col_0] = val_str
                         else:
-                            row_28[t_col_0] = None
+                            row_28[t_col_0] = "Bằng tốt nghiệp trung học cơ sở" if t_idx == 4 else None
 
                         # Xử lý các giá trị mặc định nếu để trống
                         if row_28[t_col_0] is None or row_28[t_col_0] == "":
@@ -1597,20 +1603,18 @@ class SmartMerger:
                     if renumber_stt or row_28[0] is None or row_28[0] == "":
                         row_28[0] = total_extracted_rows
 
-                    # Ghi vào worksheet đích
-                    ws_dst.append(row_28)
-                    c_row = ws_dst.max_row
-                    dst_cells = ws_dst[c_row]
+                    # Đảm bảo các cột Text lưu dưới dạng chuỗi (bảo toàn số 0 ở đầu: CCCD, Mã định danh...)
+                    for c_i in TEXT_COLS_28:
+                        idx_0 = c_i - 1
+                        if row_28[idx_0] is not None and row_28[idx_0] != "":
+                            row_28[idx_0] = str(row_28[idx_0])
 
-                    for c_i in range(1, 29):
-                        cell = dst_cells[c_i - 1]
-                        if self.cached_fonts and c_i - 1 < len(self.cached_fonts) and self.cached_fonts[c_i - 1]:
-                            cell.font = self.cached_fonts[c_i - 1]
-                        if c_i in TEXT_COLS_28:
-                            cell.number_format = '@'
-                            if cell.value is not None:
-                                cell.data_type = 's'
-                                cell.value = str(cell.value)
+                    # Ghi trực tiếp dòng vào worksheet đích (tối ưu tốc độ cao: loại bỏ lặp per-cell lookup)
+                    ws_dst.append(row_28)
+
+                    # Báo cáo tiến độ thời gian thực định kỳ mỗi 1.000 dòng
+                    if progress_callback and (total_extracted_rows % 1000 == 0):
+                        progress_callback(f_idx, total_files, f"Đang ghép tệp {f_idx}/{total_files} ({p.name}) - Đã thu nạp {total_extracted_rows:,} dòng...")
 
                 sheets_processed += 1
                 log(f"    -> Sheet '{ws_curr.title}': Đã ghép {sheet_rows_extracted} học sinh hợp lệ.", "info")

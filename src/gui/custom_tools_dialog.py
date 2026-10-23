@@ -30,6 +30,7 @@ from src.smart_merger import (
 )
 from src.gui.column_mapping_dialog import ColumnMappingDialog
 from src.file_converter import FileFormatConverter
+from src.data_inspector import DataInspector
 
 def open_path_in_os(path: Path):
     """Mở file hoặc thư mục bằng trình quản lý tệp của hệ điều hành (macOS Finder / Windows Explorer)."""
@@ -78,7 +79,7 @@ class CustomToolsView(ttk.Frame):
         self.merge_all_sheets_var = tk.BooleanVar(value=True)
         self.last_merge_output_file: Path | None = None
 
-        # Biến Tab 3 (Ghép & Chuẩn hóa vào Mẫu chuẩn 28 cột)
+        # Biến Tab 1 (Ghép & Chuẩn hóa vào Mẫu chuẩn 28 cột - SmartMerger)
         self.smart_merger = SmartMerger()
         self.smart_files_list: list[Path] = []
         self.smart_out_var = tk.StringVar()
@@ -88,13 +89,30 @@ class CustomToolsView(ttk.Frame):
         self.last_smart_output_file: Path | None = None
         self.smart_cancel_requested = False
 
-        # Biến Tab 4 (Chuyển đổi định dạng tệp cũ .doc, .xls)
+        # Biến Tab 2 (Kiểm tra & Chuẩn hoá dữ liệu 28 cột)
+        self.inspector = DataInspector()
+        self.inspect_files_list: list[Path] = []
+        self.inspect_out_dir_var = tk.StringVar()
+        self.inspect_auto_open_var = tk.BooleanVar(value=True)
+        self.last_inspect_output_file: Path | None = None
+        self.inspect_cancel_requested = False
+
+        # Biến Tab 4-1 (Chuyển đổi định dạng tệp cũ .doc, .xls)
         self.convert_files_list: list[Path] = []
         self.convert_use_custom_dir = tk.BooleanVar(value=False)
         self.convert_custom_dir_var = tk.StringVar()
         self.convert_delete_source_var = tk.BooleanVar(value=False)
         self.convert_skip_existing_var = tk.BooleanVar(value=True)
         self.last_convert_dir: Path | None = None
+
+        # Biến Tab 4-2 (Chuyển VNI, TCVN -> UNICODE)
+        self.encoding_files_list: list[Path] = []
+        self.encoding_overwrite_var = tk.BooleanVar(value=False)
+        self.last_encoding_output_file: Path | None = None
+        self.encoding_cancel_requested = False
+
+        # Quản lý tệp vừa được tạo mới nhất toàn hệ thống
+        self.last_created_file: Path | None = None
 
         self._build_ui()
         self._start_queue_poller()
@@ -103,53 +121,62 @@ class CustomToolsView(ttk.Frame):
         p = self.palette
 
         # 1. Header Banner
-        hdr_frame = tk.Frame(self, bg=p.HEADER_BANNER_BG, padx=16, pady=8)
-        hdr_frame.pack(fill=tk.X)
+        self.hdr_frame = tk.Frame(self, bg=p.HEADER_BANNER_BG, padx=16, pady=8)
+        self.hdr_frame.pack(fill=tk.X)
 
-        title_lbl = tk.Label(
-            hdr_frame,
-            text="🛠️ CÔNG CỤ & BỘ TIỆN ÍCH MỞ RỘNG (EXCEL & WORD)",
+        self.title_lbl = tk.Label(
+            self.hdr_frame,
+            text="🛠️ SOHOATHCS - HỆ THỐNG XỬ LÝ & SỐ HÓA VĂN BẰNG THCS",
             font=FONT_TITLE,
             bg=p.HEADER_BANNER_BG,
             fg=p.HEADER_BANNER_FG
         )
-        title_lbl.pack(anchor=tk.W)
+        self.title_lbl.pack(anchor=tk.W)
 
-        sub_lbl = tk.Label(
-            hdr_frame,
-            text="Tách file theo cột, Gộp file cùng mẫu, Ghép & Chuẩn hóa mẫu 28 cột, và Chuyển đổi định dạng tệp cũ (.doc, .xls)",
-            font=FONT_SUBTITLE,
-            bg=p.HEADER_BANNER_BG,
-            fg=p.HEADER_SUB_FG
-        )
-        sub_lbl.pack(anchor=tk.W, pady=(2, 0))
-
-        # 2. Main Notebook (3 Tabs)
+        # 2. Main Notebook (4 Tabs chính)
         main_container = ttk.Frame(self, style="Window.TFrame", padding=6)
         main_container.pack(fill=tk.BOTH, expand=True)
 
         self.notebook = ttk.Notebook(main_container)
         self.notebook.pack(fill=tk.BOTH, expand=True)
 
-        # Tab 1: Tách file
-        self.tab_split = ttk.Frame(self.notebook, padding=6)
-        self.notebook.add(self.tab_split, text="  📤 TÁCH TỆP THEO CỘT  ")
-        self._build_tab_split(self.tab_split)
-
-        # Tab 2: Gộp file cùng cấu trúc
-        self.tab_merge = ttk.Frame(self.notebook, padding=6)
-        self.notebook.add(self.tab_merge, text="  📥 NHẬP / GỘP CÙNG CẤU TRÚC  ")
-        self._build_tab_merge(self.tab_merge)
-
-        # Tab 3: Ghép & Chuẩn hóa thông minh vào mẫu chuẩn 28 cột
+        # Tab 1: Gộp vào mẫu chuẩn 28 cột
         self.tab_smart = ttk.Frame(self.notebook, padding=6)
-        self.notebook.add(self.tab_smart, text="  🧩 GHÉP & CHUẨN HÓA (MẪU CHUẨN)  ")
+        self.notebook.add(self.tab_smart, text="  📊 1. GỘP VÀO MẪU CHUẨN  ")
         self._build_tab_smart(self.tab_smart)
 
-        # Tab 4: Chuyển đổi định dạng tệp cũ (.doc, .xls)
-        self.tab_convert = ttk.Frame(self.notebook, padding=6)
-        self.notebook.add(self.tab_convert, text="  🔄 CHUYỂN ĐỔI ĐỊNH DẠNG CŨ (.doc, .xls)  ")
+        # Tab 2: Kiểm tra & Chuẩn hoá (Mới)
+        self.tab_inspect = ttk.Frame(self.notebook, padding=6)
+        self.notebook.add(self.tab_inspect, text="  🔍 2. KIỂM TRA & CHUẨN HOÁ  ")
+        self._build_tab_inspect(self.tab_inspect)
+
+        # Tab 3: Tách / Ghép
+        self.tab_split_merge = ttk.Frame(self.notebook, padding=4)
+        self.notebook.add(self.tab_split_merge, text="  📤 3. TÁCH / GHÉP  ")
+        sub_nb_sm = ttk.Notebook(self.tab_split_merge)
+        sub_nb_sm.pack(fill=tk.BOTH, expand=True)
+
+        self.tab_split = ttk.Frame(sub_nb_sm, padding=4)
+        sub_nb_sm.add(self.tab_split, text="  📤 3.1. Tách tệp theo cột  ")
+        self._build_tab_split(self.tab_split)
+
+        self.tab_merge = ttk.Frame(sub_nb_sm, padding=4)
+        sub_nb_sm.add(self.tab_merge, text="  📥 3.2. Ghép cùng cấu trúc  ")
+        self._build_tab_merge(self.tab_merge)
+
+        # Tab 4: Đổi đuôi & Chuyển mã
+        self.tab_convert_enc = ttk.Frame(self.notebook, padding=4)
+        self.notebook.add(self.tab_convert_enc, text="  🔄 4. ĐỔI ĐUÔI & CHUYỂN MÃ  ")
+        sub_nb_ce = ttk.Notebook(self.tab_convert_enc)
+        sub_nb_ce.pack(fill=tk.BOTH, expand=True)
+
+        self.tab_convert = ttk.Frame(sub_nb_ce, padding=4)
+        sub_nb_ce.add(self.tab_convert, text="  📄 4.1. Chuyển đổi sang docx/xlsx  ")
         self._build_tab_convert(self.tab_convert)
+
+        self.tab_encoding = ttk.Frame(sub_nb_ce, padding=4)
+        sub_nb_ce.add(self.tab_encoding, text="  🔤 4.2. Chuyển VNI, TCVN ➔ UNICODE  ")
+        self._build_tab_encoding(self.tab_encoding)
 
         # 3. Vùng Console Log chung ở dưới cùng
         log_frame = ttk.LabelFrame(main_container, text="Nhật ký hoạt động & Thông báo", padding=4)
@@ -169,6 +196,26 @@ class CustomToolsView(ttk.Frame):
         self.log_text.tag_config("success", foreground=p.SUCCESS)
         self.log_text.tag_config("warning", foreground=p.WARNING)
         self.log_text.tag_config("error", foreground=p.DANGER)
+
+    def apply_theme(self, is_dark: bool):
+        """Cập nhật giao diện Sáng / Tối."""
+        self.is_dark = is_dark
+        self.palette = get_theme_palette(self.is_dark)
+        p = self.palette
+        if hasattr(self, 'hdr_frame'):
+            self.hdr_frame.configure(bg=p.HEADER_BANNER_BG)
+        if hasattr(self, 'title_lbl'):
+            self.title_lbl.configure(bg=p.HEADER_BANNER_BG, fg=p.HEADER_BANNER_FG)
+        if hasattr(self, 'log_text'):
+            self.log_text.configure(
+                bg=p.LOG_BG,
+                fg=p.LOG_FG,
+                insertbackground=p.LOG_FG
+            )
+            self.log_text.tag_config("info", foreground=p.LOG_FG)
+            self.log_text.tag_config("success", foreground=p.SUCCESS)
+            self.log_text.tag_config("warning", foreground=p.WARNING)
+            self.log_text.tag_config("error", foreground=p.DANGER)
 
     # =========================================================================
     # TAB 1: TÁCH FILE THEO CỘT
@@ -1440,8 +1487,527 @@ class CustomToolsView(ttk.Frame):
                 self.convert_status_lbl.config(text="❌ Lỗi khi chuyển đổi định dạng!", foreground=self.palette.DANGER)
                 self._log(f"❌ Lỗi khi chuyển đổi định dạng: {err}\n{trace}", "error")
                 messagebox.showerror("Lỗi chuyển đổi", f"Đã xảy ra lỗi khi chuyển đổi tệp:\n{err}", parent=self)
+            elif msg_type == "inspect_prog":
+                val, msg = item[1], item[2]
+                self.inspect_prog_bar["value"] = val
+                self.inspect_status_lbl.config(text=f"⏳ {msg}...", foreground=self.palette.PRIMARY)
+                self._log(f"  {msg}", "info")
+            elif msg_type == "inspect_file_done":
+                f_p, res = item[1], item[2]
+                st = res.get("status")
+                r_cnt = res.get("total_rows", 0)
+                e_cnt = res.get("error_count", 0)
+                w_cnt = res.get("warning_count", 0)
+                for child in self.inspect_tree.get_children():
+                    vals = list(self.inspect_tree.item(child, "values"))
+                    if str(f_p) in vals or f_p.name in vals:
+                        vals[2] = "✅ Hoàn tất" if st == "success" else f"❌ {st}"
+                        vals[3] = f"{r_cnt:,}"
+                        vals[4] = f"{e_cnt}" if e_cnt > 0 else "0"
+                        vals[5] = f"{w_cnt}" if w_cnt > 0 else "0"
+                        self.inspect_tree.item(child, values=vals)
+            elif msg_type == "inspect_done":
+                out_p, total_files, t_rows, t_err, t_warn, t_valid = item[1], item[2], item[3], item[4], item[5], item[6]
+                self.inspect_prog_bar["value"] = 100
+                self.btn_run_inspect.config(state=tk.NORMAL)
+                self.btn_cancel_inspect.config(state=tk.DISABLED)
+                if out_p:
+                    self.btn_open_inspect_res.config(state=tk.NORMAL)
+                    self.last_inspect_output_file = out_p
+                    self.last_created_file = out_p
+                self.inspect_status_lbl.config(text=f"✅ Đã kiểm tra xong ({t_rows:,} dòng)!", foreground=self.palette.SUCCESS)
+                self.inspect_summary_lbl.config(
+                    text=f"Tổng: {t_rows:,} dòng | Hợp lệ: {t_valid:,} | Cảnh báo: {t_warn:,} | Lỗi: {t_err:,}",
+                    foreground=self.palette.DANGER if t_err > 0 else (self.palette.WARNING if t_warn > 0 else self.palette.SUCCESS)
+                )
+                self._log(f"🎉 Hoàn tất kiểm tra & chuẩn hoá: {t_rows:,} dòng (Hợp lệ: {t_valid:,}, Cảnh báo: {t_warn:,}, Lỗi: {t_err:,})", "success" if t_err == 0 else "warning")
+                msg_body = f"Đã kiểm tra xong dữ liệu 28 cột!\n\n• Tổng số dòng: {t_rows:,}\n• Hợp lệ: {t_valid:,}\n• Cảnh báo: {t_warn:,}\n• Lỗi: {t_err:,}"
+                if out_p:
+                    msg_body += f"\n\nTệp kết quả: {out_p.name}"
+                messagebox.showinfo("Hoàn tất Kiểm tra & Chuẩn hoá", msg_body, parent=self)
+            elif msg_type == "inspect_error":
+                err, trace = item[1], item[2]
+                self.btn_run_inspect.config(state=tk.NORMAL)
+                self.btn_cancel_inspect.config(state=tk.DISABLED)
+                self.inspect_status_lbl.config(text="❌ Lỗi khi kiểm tra dữ liệu!", foreground=self.palette.DANGER)
+                self._log(f"❌ Lỗi khi kiểm tra dữ liệu: {err}\n{trace}", "error")
+                messagebox.showerror("Lỗi kiểm tra", f"Đã xảy ra lỗi khi kiểm tra và chuẩn hoá file:\n{err}", parent=self)
+            elif msg_type == "encoding_prog":
+                val, msg = item[1], item[2]
+                self.encoding_prog_bar["value"] = val
+                self.encoding_status_lbl.config(text=f"⏳ {msg}...", foreground=self.palette.PRIMARY)
+                self._log(f"  {msg}", "info")
+            elif msg_type == "encoding_file_done":
+                f_p, ok, out_p, msg_text, cell_count = item[1], item[2], item[3], item[4], item[5]
+                for child in self.encoding_tree.get_children():
+                    vals = list(self.encoding_tree.item(child, "values"))
+                    if str(f_p) in vals or f_p.name in vals:
+                        vals[2] = "✅ Thành công" if ok else "❌ Lỗi"
+                        vals[3] = f"{cell_count:,} ô" if ok else msg_text
+                        self.encoding_tree.item(child, values=vals)
+            elif msg_type == "encoding_done":
+                succ, fail, tot_cells, last_out = item[1], item[2], item[3], item[4]
+                self.encoding_prog_bar["value"] = 100
+                self.btn_run_encoding.config(state=tk.NORMAL)
+                self.btn_cancel_encoding.config(state=tk.DISABLED)
+                if last_out:
+                    self.btn_open_encoding_res.config(state=tk.NORMAL)
+                    self.last_encoding_output_file = last_out
+                    self.last_created_file = last_out
+                self.encoding_status_lbl.config(text=f"✅ Đã chuyển đổi {tot_cells:,} ô sang Unicode!", foreground=self.palette.SUCCESS)
+                self._log(f"🎉 Hoàn tất chuyển mã: {succ} tệp thành công, {fail} lỗi, tổng {tot_cells:,} ô đã chuyển sang Unicode.", "success" if fail == 0 else "warning")
+                messagebox.showinfo(
+                    "Hoàn tất Chuyển mã Unicode",
+                    f"Đã hoàn thành chuyển đổi bảng mã sang Unicode!\n\n"
+                    f"• Số tệp thành công: {succ}\n"
+                    f"• Số tệp lỗi: {fail}\n"
+                    f"• Tổng số ô đã đổi sang Unicode: {tot_cells:,}",
+                    parent=self
+                )
+            elif msg_type == "encoding_error":
+                err, trace = item[1], item[2]
+                self.btn_run_encoding.config(state=tk.NORMAL)
+                self.btn_cancel_encoding.config(state=tk.DISABLED)
+                self.encoding_status_lbl.config(text="❌ Lỗi khi chuyển mã!", foreground=self.palette.DANGER)
+                self._log(f"❌ Lỗi khi chuyển đổi bảng mã: {err}\n{trace}", "error")
+                messagebox.showerror("Lỗi chuyển mã", f"Đã xảy ra lỗi khi chuyển đổi bảng mã:\n{err}", parent=self)
 
         self.after(100, self._start_queue_poller)
+
+    # =========================================================================
+    # TAB 2: KIỂM TRA & CHUẨN HOÁ DỮ LIỆU (28 CỘT CHUẨN)
+    # =========================================================================
+    def _build_tab_inspect(self, parent):
+        p = self.palette
+
+        # Khung Điều khiển & Tiến trình (Ở ĐÁY)
+        ctrl_card = ttk.LabelFrame(parent, text="2. Tùy chọn & Bắt đầu kiểm tra", padding=8)
+        ctrl_card.pack(side=tk.BOTTOM, fill=tk.X, pady=(4, 2))
+
+        r_opt = ttk.Frame(ctrl_card)
+        r_opt.pack(fill=tk.X, pady=(0, 4))
+
+        ttk.Label(r_opt, text="Thư mục lưu:", font=FONT_LABEL).pack(side=tk.LEFT, padx=(0, 4))
+        self.inspect_out_entry = ttk.Entry(r_opt, textvariable=self.inspect_out_dir_var, font=FONT_LABEL)
+        self.inspect_out_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 6))
+        ttk.Button(r_opt, text="📁 Chọn...", command=self._on_choose_inspect_out_dir).pack(side=tk.LEFT, padx=(0, 10))
+
+        ttk.Checkbutton(
+            r_opt,
+            text="Tự động mở tệp Excel kết quả sau khi kiểm tra xong",
+            variable=self.inspect_auto_open_var
+        ).pack(side=tk.LEFT)
+
+        r_prog = ttk.Frame(ctrl_card)
+        r_prog.pack(fill=tk.X, pady=(2, 4))
+
+        self.inspect_prog_bar = ttk.Progressbar(r_prog, orient=tk.HORIZONTAL, mode='determinate')
+        self.inspect_prog_bar.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
+
+        self.inspect_status_lbl = ttk.Label(r_prog, text="Sẵn sàng", font=FONT_LABEL_BOLD, foreground=p.PRIMARY)
+        self.inspect_status_lbl.pack(side=tk.RIGHT)
+
+        r_btn = ttk.Frame(ctrl_card)
+        r_btn.pack(fill=tk.X, pady=(2, 0))
+
+        self.btn_open_inspect_res = ttk.Button(
+            r_btn,
+            text="📄 Mở file Excel vừa tạo",
+            command=self._open_last_inspect_file,
+            state="disabled"
+        )
+        self.btn_open_inspect_res.pack(side=tk.LEFT, padx=(0, 6))
+
+        self.inspect_summary_lbl = ttk.Label(r_btn, text="", font=FONT_LABEL_BOLD)
+        self.inspect_summary_lbl.pack(side=tk.LEFT, padx=10)
+
+        self.btn_cancel_inspect = ttk.Button(
+            r_btn,
+            text="🛑 HỦY",
+            command=self._cancel_inspect,
+            state="disabled"
+        )
+        self.btn_cancel_inspect.pack(side=tk.RIGHT, padx=(6, 0))
+
+        self.btn_run_inspect = ttk.Button(
+            r_btn,
+            text="⚡ BẮT ĐẦU KIỂM TRA & CHUẨN HOÁ",
+            command=self._start_inspect_thread,
+            style="Action.TButton"
+        )
+        self.btn_run_inspect.pack(side=tk.RIGHT)
+
+        # Khung Danh sách tệp nguồn (Ở TRÊN, CO DÃN)
+        top_card = ttk.LabelFrame(parent, text="1. Danh sách tệp Excel 28 cột cần kiểm tra", padding=6)
+        top_card.pack(side=tk.TOP, fill=tk.BOTH, expand=True, pady=(2, 2))
+
+        btn_row = ttk.Frame(top_card)
+        btn_row.pack(fill=tk.X, pady=(0, 4))
+
+        ttk.Button(btn_row, text="📂 Chọn tệp Excel...", command=self._on_choose_inspect_files).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(btn_row, text="📁 Chọn cả thư mục...", command=self._on_choose_inspect_folder).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(btn_row, text="❌ Xóa danh sách", command=self._clear_inspect_list).pack(side=tk.LEFT, padx=(0, 16))
+
+        self.inspect_files_count_lbl = ttk.Label(btn_row, text="Chưa chọn tệp nào", font=FONT_LABEL_BOLD)
+        self.inspect_files_count_lbl.pack(side=tk.LEFT)
+
+        i_cols = ("stt", "file_name", "status", "rows", "errors", "warnings")
+        self.inspect_tree = ttk.Treeview(top_card, columns=i_cols, show="headings", height=5)
+        self.inspect_tree.heading("stt", text="STT")
+        self.inspect_tree.heading("file_name", text="Tên tệp Excel")
+        self.inspect_tree.heading("status", text="Trạng thái kiểm tra")
+        self.inspect_tree.heading("rows", text="Số dòng")
+        self.inspect_tree.heading("errors", text="Số lỗi")
+        self.inspect_tree.heading("warnings", text="Số cảnh báo")
+
+        self.inspect_tree.column("stt", width=45, anchor=tk.CENTER)
+        self.inspect_tree.column("file_name", width=360, anchor=tk.W)
+        self.inspect_tree.column("status", width=180, anchor=tk.CENTER)
+        self.inspect_tree.column("rows", width=90, anchor=tk.CENTER)
+        self.inspect_tree.column("errors", width=80, anchor=tk.CENTER)
+        self.inspect_tree.column("warnings", width=100, anchor=tk.CENTER)
+
+        i_sb = ttk.Scrollbar(top_card, orient=tk.VERTICAL, command=self.inspect_tree.yview)
+        self.inspect_tree.configure(yscrollcommand=i_sb.set)
+        self.inspect_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        i_sb.pack(side=tk.RIGHT, fill=tk.Y)
+
+    def _on_choose_inspect_files(self):
+        files = filedialog.askopenfilenames(
+            title="Chọn các tệp Excel 28 cột cần kiểm tra",
+            filetypes=[("Excel Files", "*.xlsx;*.xls")],
+            parent=self
+        )
+        if not files:
+            return
+        for f in files:
+            p = Path(f)
+            if p not in self.inspect_files_list:
+                self.inspect_files_list.append(p)
+        self._refresh_inspect_tree()
+
+    def _on_choose_inspect_folder(self):
+        f_dir = filedialog.askdirectory(title="Chọn thư mục chứa tệp Excel cần kiểm tra", parent=self)
+        if not f_dir:
+            return
+        p_dir = Path(f_dir)
+        found = list(p_dir.glob("*.xlsx")) + list(p_dir.glob("*.xls"))
+        for f in found:
+            if not f.name.startswith("~$") and f not in self.inspect_files_list:
+                self.inspect_files_list.append(f)
+        self._refresh_inspect_tree()
+
+    def _clear_inspect_list(self):
+        self.inspect_files_list.clear()
+        self._refresh_inspect_tree()
+        self.inspect_summary_lbl.config(text="")
+        self.btn_open_inspect_res.config(state=tk.DISABLED)
+
+    def _refresh_inspect_tree(self):
+        for item in self.inspect_tree.get_children():
+            self.inspect_tree.delete(item)
+        for idx, f in enumerate(self.inspect_files_list, start=1):
+            self.inspect_tree.insert("", tk.END, values=(idx, f.name, "Chờ kiểm tra", "---", "---", "---"))
+        count = len(self.inspect_files_list)
+        self.inspect_files_count_lbl.config(
+            text=f"Đã chọn {count} tệp Excel" if count > 0 else "Chưa chọn tệp nào",
+            foreground=self.palette.SUCCESS if count > 0 else self.palette.TEXT_MUTED
+        )
+
+    def _on_choose_inspect_out_dir(self):
+        d = filedialog.askdirectory(title="Chọn thư mục lưu tệp kết quả kiểm tra", parent=self)
+        if d:
+            self.inspect_out_dir_var.set(d)
+
+    def _open_last_inspect_file(self):
+        if self.last_inspect_output_file and self.last_inspect_output_file.exists():
+            open_path_in_os(self.last_inspect_output_file)
+        else:
+            messagebox.showinfo("Thông báo", "Chưa có tệp kết quả nào hoặc tệp không tồn tại.", parent=self)
+
+    def _cancel_inspect(self):
+        self.inspect_cancel_requested = True
+        self.inspect_status_lbl.config(text="Đang dừng tiến trình...", foreground=self.palette.WARNING)
+
+    def _start_inspect_thread(self):
+        if not self.inspect_files_list:
+            messagebox.showwarning("Chưa chọn tệp", "Vui lòng chọn ít nhất một tệp Excel để kiểm tra!", parent=self)
+            return
+
+        self.inspect_cancel_requested = False
+        self.btn_run_inspect.config(state=tk.DISABLED)
+        self.btn_cancel_inspect.config(state=tk.NORMAL)
+        self.inspect_prog_bar["value"] = 0
+        self.inspect_status_lbl.config(text="Bắt đầu kiểm tra...", foreground=self.palette.PRIMARY)
+
+        files = list(self.inspect_files_list)
+        out_dir_str = self.inspect_out_dir_var.get().strip()
+        out_dir = Path(out_dir_str) if out_dir_str else None
+        auto_open = self.inspect_auto_open_var.get()
+
+        t = threading.Thread(
+            target=self._run_inspect_worker,
+            args=(files, out_dir, auto_open),
+            daemon=True
+        )
+        t.start()
+
+    def _run_inspect_worker(self, files: list[Path], out_dir: Path | None, auto_open: bool):
+        try:
+            total_files = len(files)
+            last_out: Path | None = None
+            sum_rows = 0
+            sum_errors = 0
+            sum_warnings = 0
+            sum_valid = 0
+
+            for idx, f in enumerate(files, start=1):
+                if self.inspect_cancel_requested:
+                    self.msg_queue.put(("log", f"🛑 Đã dừng kiểm tra theo yêu cầu tại tệp {f.name}.", "warning"))
+                    break
+
+                prog_pct = int(((idx - 1) / total_files) * 100)
+                self.msg_queue.put(("inspect_prog", prog_pct, f"[{idx}/{total_files}] Đang kiểm tra: {f.name}"))
+                self.msg_queue.put(("log", f"🔍 [{idx}/{total_files}] Bắt đầu kiểm tra dữ liệu: {f.name}...", "info"))
+
+                if out_dir:
+                    out_dir.mkdir(parents=True, exist_ok=True)
+                    out_file = out_dir / f"{f.stem}_DaKiemTra.xlsx"
+                else:
+                    out_file = f.parent / f"{f.stem}_DaKiemTra.xlsx"
+
+                def p_cb(cur, tot, msg):
+                    file_prog = int(((idx - 1) / total_files + (cur / tot) / total_files) * 100)
+                    self.msg_queue.put(("inspect_prog", file_prog, f"[{idx}/{total_files}] {f.name}: dòng {cur}/{tot}"))
+
+                res = self.inspector.process_file(
+                    input_file=f,
+                    output_file=out_file,
+                    progress_callback=p_cb,
+                    cancel_token=lambda: self.inspect_cancel_requested
+                )
+
+                if res.get("status") == "success":
+                    last_out = out_file
+                    r_cnt = res.get("total_rows", 0)
+                    e_cnt = res.get("error_count", 0)
+                    w_cnt = res.get("warning_count", 0)
+                    v_cnt = res.get("valid_count", 0)
+
+                    sum_rows += r_cnt
+                    sum_errors += e_cnt
+                    sum_warnings += w_cnt
+                    sum_valid += v_cnt
+
+                    self.msg_queue.put(("inspect_file_done", f, res))
+                    self.msg_queue.put(("log", f"  ✅ {f.name}: {r_cnt:,} dòng (Hợp lệ: {v_cnt:,}, Cảnh báo: {w_cnt:,}, Lỗi: {e_cnt:,}) ➔ Lưu tại: {out_file.name}", "success" if e_cnt == 0 else "warning"))
+                else:
+                    self.msg_queue.put(("inspect_file_done", f, res))
+                    self.msg_queue.put(("log", f"  ❌ Lỗi khi kiểm tra {f.name}: {res.get('message')}", "error"))
+
+            self.msg_queue.put(("inspect_done", last_out, total_files, sum_rows, sum_errors, sum_warnings, sum_valid))
+
+            if auto_open and last_out and last_out.exists() and total_files == 1:
+                open_path_in_os(last_out)
+
+        except Exception as e:
+            trace = traceback.format_exc()
+            self.msg_queue.put(("inspect_error", str(e), trace))
+
+    # =========================================================================
+    # SUB-TAB 4.2: CHUYỂN VNI, TCVN ➔ UNICODE
+    # =========================================================================
+    def _build_tab_encoding(self, parent):
+        p = self.palette
+
+        ctrl_card = ttk.LabelFrame(parent, text="2. Tùy chọn & Bắt đầu chuyển mã", padding=8)
+        ctrl_card.pack(side=tk.BOTTOM, fill=tk.X, pady=(4, 2))
+
+        r_opt = ttk.Frame(ctrl_card)
+        r_opt.pack(fill=tk.X, pady=(0, 4))
+
+        ttk.Checkbutton(
+            r_opt,
+            text="Ghi đè trực tiếp lên tệp gốc (mặc định tạo tệp mới có đuôi _Unicode.xlsx)",
+            variable=self.encoding_overwrite_var
+        ).pack(side=tk.LEFT)
+
+        r_prog = ttk.Frame(ctrl_card)
+        r_prog.pack(fill=tk.X, pady=(2, 4))
+
+        self.encoding_prog_bar = ttk.Progressbar(r_prog, orient=tk.HORIZONTAL, mode='determinate')
+        self.encoding_prog_bar.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
+
+        self.encoding_status_lbl = ttk.Label(r_prog, text="Sẵn sàng", font=FONT_LABEL_BOLD, foreground=p.PRIMARY)
+        self.encoding_status_lbl.pack(side=tk.RIGHT)
+
+        r_btn = ttk.Frame(ctrl_card)
+        r_btn.pack(fill=tk.X, pady=(2, 0))
+
+        self.btn_open_encoding_res = ttk.Button(
+            r_btn,
+            text="📄 Mở tệp vừa chuyển đổi",
+            command=self._open_last_encoding_file,
+            state="disabled"
+        )
+        self.btn_open_encoding_res.pack(side=tk.LEFT, padx=(0, 6))
+
+        self.btn_cancel_encoding = ttk.Button(
+            r_btn,
+            text="🛑 HỦY",
+            command=self._cancel_encoding,
+            state="disabled"
+        )
+        self.btn_cancel_encoding.pack(side=tk.RIGHT, padx=(6, 0))
+
+        self.btn_run_encoding = ttk.Button(
+            r_btn,
+            text="⚡ BẮT ĐẦU CHUYỂN MÃ UNICODE",
+            command=self._start_encoding_thread,
+            style="Action.TButton"
+        )
+        self.btn_run_encoding.pack(side=tk.RIGHT)
+
+        # Khung danh sách tệp
+        top_card = ttk.LabelFrame(parent, text="1. Danh sách tệp Excel (.xlsx) cần chuyển mã sang Unicode", padding=6)
+        top_card.pack(side=tk.TOP, fill=tk.BOTH, expand=True, pady=(2, 2))
+
+        btn_row = ttk.Frame(top_card)
+        btn_row.pack(fill=tk.X, pady=(0, 4))
+
+        ttk.Button(btn_row, text="📂 Chọn tệp Excel...", command=self._on_choose_encoding_files).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(btn_row, text="📁 Chọn cả thư mục...", command=self._on_choose_encoding_folder).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(btn_row, text="❌ Xóa danh sách", command=self._clear_encoding_list).pack(side=tk.LEFT, padx=(0, 16))
+
+        self.encoding_files_count_lbl = ttk.Label(btn_row, text="Chưa chọn tệp nào", font=FONT_LABEL_BOLD)
+        self.encoding_files_count_lbl.pack(side=tk.LEFT)
+
+        e_cols = ("stt", "file_name", "status", "cells")
+        self.encoding_tree = ttk.Treeview(top_card, columns=e_cols, show="headings", height=5)
+        self.encoding_tree.heading("stt", text="STT")
+        self.encoding_tree.heading("file_name", text="Tên tệp Excel")
+        self.encoding_tree.heading("status", text="Trạng thái")
+        self.encoding_tree.heading("cells", text="Số ô đã chuyển sang Unicode")
+
+        self.encoding_tree.column("stt", width=50, anchor=tk.CENTER)
+        self.encoding_tree.column("file_name", width=420, anchor=tk.W)
+        self.encoding_tree.column("status", width=200, anchor=tk.CENTER)
+        self.encoding_tree.column("cells", width=180, anchor=tk.CENTER)
+
+        e_sb = ttk.Scrollbar(top_card, orient=tk.VERTICAL, command=self.encoding_tree.yview)
+        self.encoding_tree.configure(yscrollcommand=e_sb.set)
+        self.encoding_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        e_sb.pack(side=tk.RIGHT, fill=tk.Y)
+
+    def _on_choose_encoding_files(self):
+        files = filedialog.askopenfilenames(
+            title="Chọn các tệp Excel cần chuyển mã sang Unicode",
+            filetypes=[("Excel OpenXML", "*.xlsx")],
+            parent=self
+        )
+        if not files:
+            return
+        for f in files:
+            p = Path(f)
+            if p not in self.encoding_files_list:
+                self.encoding_files_list.append(p)
+        self._refresh_encoding_tree()
+
+    def _on_choose_encoding_folder(self):
+        f_dir = filedialog.askdirectory(title="Chọn thư mục chứa tệp Excel cần chuyển mã", parent=self)
+        if not f_dir:
+            return
+        p_dir = Path(f_dir)
+        found = list(p_dir.glob("*.xlsx"))
+        for f in found:
+            if not f.name.startswith("~$") and f not in self.encoding_files_list:
+                self.encoding_files_list.append(f)
+        self._refresh_encoding_tree()
+
+    def _clear_encoding_list(self):
+        self.encoding_files_list.clear()
+        self._refresh_encoding_tree()
+        self.btn_open_encoding_res.config(state=tk.DISABLED)
+
+    def _refresh_encoding_tree(self):
+        for item in self.encoding_tree.get_children():
+            self.encoding_tree.delete(item)
+        for idx, f in enumerate(self.encoding_files_list, start=1):
+            self.encoding_tree.insert("", tk.END, values=(idx, f.name, "Chờ chuyển mã", "---"))
+        count = len(self.encoding_files_list)
+        self.encoding_files_count_lbl.config(
+            text=f"Đã chọn {count} tệp Excel" if count > 0 else "Chưa chọn tệp nào",
+            foreground=self.palette.SUCCESS if count > 0 else self.palette.TEXT_MUTED
+        )
+
+    def _open_last_encoding_file(self):
+        if self.last_encoding_output_file and self.last_encoding_output_file.exists():
+            open_path_in_os(self.last_encoding_output_file)
+        else:
+            messagebox.showinfo("Thông báo", "Chưa có tệp kết quả nào hoặc tệp không tồn tại.", parent=self)
+
+    def _cancel_encoding(self):
+        self.encoding_cancel_requested = True
+        self.encoding_status_lbl.config(text="Đang dừng tiến trình...", foreground=self.palette.WARNING)
+
+    def _start_encoding_thread(self):
+        if not self.encoding_files_list:
+            messagebox.showwarning("Chưa chọn tệp", "Vui lòng chọn ít nhất một tệp Excel để chuyển mã!", parent=self)
+            return
+
+        self.encoding_cancel_requested = False
+        self.btn_run_encoding.config(state=tk.DISABLED)
+        self.btn_cancel_encoding.config(state=tk.NORMAL)
+        self.encoding_prog_bar["value"] = 0
+        self.encoding_status_lbl.config(text="Bắt đầu chuyển mã...", foreground=self.palette.PRIMARY)
+
+        files = list(self.encoding_files_list)
+        overwrite = self.encoding_overwrite_var.get()
+
+        t = threading.Thread(
+            target=self._run_encoding_worker,
+            args=(files, overwrite),
+            daemon=True
+        )
+        t.start()
+
+    def _run_encoding_worker(self, files: list[Path], overwrite: bool):
+        try:
+            total_files = len(files)
+            last_out: Path | None = None
+            succ_count = 0
+            fail_count = 0
+            total_cells = 0
+
+            for idx, f in enumerate(files, start=1):
+                if self.encoding_cancel_requested:
+                    self.msg_queue.put(("log", f"🛑 Đã dừng chuyển mã theo yêu cầu tại tệp {f.name}.", "warning"))
+                    break
+
+                prog_pct = int(((idx - 1) / total_files) * 100)
+                self.msg_queue.put(("encoding_prog", prog_pct, f"[{idx}/{total_files}] Đang chuyển mã: {f.name}"))
+                self.msg_queue.put(("log", f"🔤 [{idx}/{total_files}] Đang quét và chuyển mã Unicode: {f.name}...", "info"))
+
+                out_p = f if overwrite else f.parent / f"{f.stem}_Unicode.xlsx"
+
+                ok, final_out, msg_text, cell_count = FileFormatConverter.convert_excel_encoding_to_unicode(f, out_p)
+                if ok:
+                    succ_count += 1
+                    total_cells += cell_count
+                    last_out = final_out
+                    self.msg_queue.put(("encoding_file_done", f, True, final_out, msg_text, cell_count))
+                    self.msg_queue.put(("log", f"  ✅ {f.name}: Đã chuyển đổi {cell_count:,} ô sang Unicode chuẩn. ➔ Lưu: {final_out.name}", "success"))
+                else:
+                    fail_count += 1
+                    self.msg_queue.put(("encoding_file_done", f, False, None, msg_text, 0))
+                    self.msg_queue.put(("log", f"  ❌ Lỗi khi chuyển mã {f.name}: {msg_text}", "error"))
+
+            self.msg_queue.put(("encoding_done", succ_count, fail_count, total_cells, last_out))
+
+        except Exception as e:
+            trace = traceback.format_exc()
+            self.msg_queue.put(("encoding_error", str(e), trace))
+
 
 
 class ManageProfilesDialog(tk.Toplevel):
@@ -1451,8 +2017,8 @@ class ManageProfilesDialog(tk.Toplevel):
         self.palette = get_theme_palette(is_dark)
         self.profile_mgr = profile_mgr
         self.title("⚙️ Quản lý Tri Thức Ánh Xạ & Quy Tắc Dự Phòng")
-        self.geometry("860x540")
-        self.minsize(700, 420)
+        self.geometry("920x620")
+        self.minsize(780, 500)
         self.configure(bg=self.palette.WINDOW_BG)
         self.transient(parent)
         self.grab_set()
@@ -1460,13 +2026,26 @@ class ManageProfilesDialog(tk.Toplevel):
         self._build_ui()
         self._refresh_profiles()
         self._refresh_fallbacks()
+        self._center_window(parent)
+
+    def _center_window(self, parent):
+        self.update_idletasks()
+        w, h = 920, 620
+        if parent and parent.winfo_exists():
+            x = parent.winfo_rootx() + (parent.winfo_width() // 2) - (w // 2)
+            y = parent.winfo_rooty() + (parent.winfo_height() // 2) - (h // 2)
+            self.geometry(f"{w}x{h}+{max(0, x)}+{max(0, y)}")
+        else:
+            sw = self.winfo_screenwidth()
+            sh = self.winfo_screenheight()
+            self.geometry(f"{w}x{h}+{(sw - w) // 2}+{(sh - h) // 2}")
 
     def _build_ui(self):
         p = self.palette
 
         # Header
         h_frame = tk.Frame(self, bg=p.HEADER_BANNER_BG, padx=14, pady=10)
-        h_frame.pack(fill=tk.X)
+        h_frame.pack(side=tk.TOP, fill=tk.X)
         tk.Label(
             h_frame,
             text="⚙️ QUẢN LÝ TRI THỨC ÁNH XẠ & QUY TẮC CỘT DỰ PHÒNG",
@@ -1482,9 +2061,14 @@ class ManageProfilesDialog(tk.Toplevel):
             fg=p.HEADER_SUB_FG
         ).pack(anchor=tk.W, pady=(2, 0))
 
-        # Notebook tabs
+        # Bottom close button (pack FIRST so it stays pinned at bottom)
+        b_frame = ttk.Frame(self, padding=(10, 8))
+        b_frame.pack(side=tk.BOTTOM, fill=tk.X)
+        ttk.Button(b_frame, text="Đóng", command=self.destroy).pack(side=tk.RIGHT)
+
+        # Notebook tabs (takes remaining space)
         self.notebook = ttk.Notebook(self)
-        self.notebook.pack(fill=tk.BOTH, expand=True, padx=8, pady=(8, 4))
+        self.notebook.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=8, pady=(8, 4))
 
         # Tab 1: Từ điển biến thể cột đã học
         self.tab_profiles = ttk.Frame(self.notebook, padding=6)
@@ -1496,18 +2080,22 @@ class ManageProfilesDialog(tk.Toplevel):
         self.notebook.add(self.tab_fallback, text="🔄 Quy tắc Cột dự phòng (Fallback)")
         self._build_tab_fallback(self.tab_fallback)
 
-        # Bottom close button
-        b_frame = ttk.Frame(self, padding=(10, 6))
-        b_frame.pack(fill=tk.X)
-        ttk.Button(b_frame, text="Đóng", command=self.destroy).pack(side=tk.RIGHT)
-
     def _build_tab_profiles(self, container):
         p = self.palette
+
+        # Bottom button bar (pinned to bottom of tab)
+        btn_bar = ttk.Frame(container, padding=(0, 6))
+        btn_bar.pack(side=tk.BOTTOM, fill=tk.X)
+        ttk.Button(btn_bar, text="🗑️ Xóa các Profile đã chọn", command=self._delete_selected_profiles).pack(side=tk.LEFT)
+        ttk.Button(btn_bar, text="⚠️ Xóa TẤT CẢ Profile", command=self._delete_all_profiles).pack(side=tk.LEFT, padx=(8, 0))
+        ttk.Button(btn_bar, text="🔄 Làm mới", command=self._refresh_profiles).pack(side=tk.LEFT, padx=(8, 0))
+
+        # Treeview in middle
         tree_card = ttk.Frame(container)
-        tree_card.pack(fill=tk.BOTH, expand=True)
+        tree_card.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
         cols = ("stt", "name", "cols", "mapped", "date")
-        self.tree = ttk.Treeview(tree_card, columns=cols, show="headings", selectmode="extended")
+        self.tree = ttk.Treeview(tree_card, columns=cols, show="headings", selectmode="extended", height=8)
         self.tree.heading("stt", text="STT")
         self.tree.heading("name", text="Tên Profile đã lưu")
         self.tree.heading("cols", text="Số cột nguồn")
@@ -1525,30 +2113,54 @@ class ManageProfilesDialog(tk.Toplevel):
         self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         sb.pack(side=tk.RIGHT, fill=tk.Y)
 
-        btn_bar = ttk.Frame(container, padding=(0, 6))
-        btn_bar.pack(fill=tk.X)
-        ttk.Button(btn_bar, text="🗑️ Xóa các Profile đã chọn", command=self._delete_selected_profiles).pack(side=tk.LEFT)
-        ttk.Button(btn_bar, text="⚠️ Xóa TẤT CẢ Profile", command=self._delete_all_profiles).pack(side=tk.LEFT, padx=(8, 0))
-        ttk.Button(btn_bar, text="🔄 Làm mới", command=self._refresh_profiles).pack(side=tk.LEFT, padx=(8, 0))
-
     def _build_tab_fallback(self, container):
         p = self.palette
 
-        # Info card
+        # Info card at top
         info_lbl = ttk.Label(
             container,
             text="💡 Quy tắc dự phòng cho phép một cột đích tự động lấy dữ liệu từ cột khác nếu file Excel nguồn không có cột riêng biệt.\nVí dụ chuẩn: Cột 17 (Hội đồng thi) tự động dự phòng lấy từ Cột 14 (Tên trường đã học).",
             font=FONT_MUTED,
             foreground=p.PRIMARY
         )
-        info_lbl.pack(anchor=tk.W, pady=(0, 6))
+        info_lbl.pack(side=tk.TOP, anchor=tk.W, pady=(0, 6))
 
-        # Fallback treeview
+        # Form thêm/sửa quy tắc (pinned to bottom of tab, above close bar)
+        form_frame = ttk.LabelFrame(container, text="➕ Thêm / Cập nhật Quy tắc Dự phòng", padding=10)
+        form_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(6, 2))
+
+        col_options = [f"Cột {c['idx']}: {c['name']}" for c in TARGET_COLUMNS]
+
+        row1 = ttk.Frame(form_frame)
+        row1.pack(fill=tk.X, pady=2)
+
+        ttk.Label(row1, text="Nếu Cột đích:", font=FONT_LABEL).pack(side=tk.LEFT)
+        self.cb_fb_target = ttk.Combobox(row1, values=col_options, state="readonly", width=25)
+        self.cb_fb_target.pack(side=tk.LEFT, padx=(4, 10))
+        # Mặc định chọn Cột 17
+        for opt in col_options:
+            if opt.startswith("Cột 17:"):
+                self.cb_fb_target.set(opt)
+                break
+
+        ttk.Label(row1, text="trống ➔ Dự phòng lấy từ:", font=FONT_LABEL).pack(side=tk.LEFT)
+        self.cb_fb_source = ttk.Combobox(row1, values=col_options, state="readonly", width=25)
+        self.cb_fb_source.pack(side=tk.LEFT, padx=(4, 10))
+        # Mặc định chọn Cột 14
+        for opt in col_options:
+            if opt.startswith("Cột 14:"):
+                self.cb_fb_source.set(opt)
+                break
+
+        ttk.Button(row1, text="💾 Lưu quy tắc", command=self._add_fallback_rule).pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Button(row1, text="🗑️ Xóa quy tắc đã chọn", command=self._delete_selected_fallback).pack(side=tk.RIGHT)
+
+        # Fallback treeview (takes remaining middle space)
         tree_card = ttk.Frame(container)
-        tree_card.pack(fill=tk.BOTH, expand=True)
+        tree_card.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
         cols = ("target", "fallback", "desc")
-        self.tree_fb = ttk.Treeview(tree_card, columns=cols, show="headings")
+        self.tree_fb = ttk.Treeview(tree_card, columns=cols, show="headings", height=7)
         self.tree_fb.heading("target", text="Cột đích cần dữ liệu")
         self.tree_fb.heading("fallback", text="Dự phòng lấy từ Cột")
         self.tree_fb.heading("desc", text="Mô tả hành vi khi ghép file")
@@ -1562,35 +2174,6 @@ class ManageProfilesDialog(tk.Toplevel):
         self.tree_fb.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         sb.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # Form thêm/sửa quy tắc
-        form_frame = ttk.LabelFrame(container, text="➕ Thêm / Cập nhật Quy tắc Dự phòng", padding=8)
-        form_frame.pack(fill=tk.X, pady=(6, 0))
-
-        col_options = [f"Cột {c['idx']}: {c['name']}" for c in TARGET_COLUMNS]
-
-        row1 = ttk.Frame(form_frame)
-        row1.pack(fill=tk.X)
-
-        ttk.Label(row1, text="Nếu Cột đích:", font=FONT_LABEL).pack(side=tk.LEFT)
-        self.cb_fb_target = ttk.Combobox(row1, values=col_options, state="readonly", width=26)
-        self.cb_fb_target.pack(side=tk.LEFT, padx=(4, 12))
-        # Mặc định chọn Cột 17
-        for opt in col_options:
-            if opt.startswith("Cột 17:"):
-                self.cb_fb_target.set(opt)
-                break
-
-        ttk.Label(row1, text="trống ➔ Dự phòng lấy từ:", font=FONT_LABEL).pack(side=tk.LEFT)
-        self.cb_fb_source = ttk.Combobox(row1, values=col_options, state="readonly", width=26)
-        self.cb_fb_source.pack(side=tk.LEFT, padx=(4, 12))
-        # Mặc định chọn Cột 14
-        for opt in col_options:
-            if opt.startswith("Cột 14:"):
-                self.cb_fb_source.set(opt)
-                break
-
-        ttk.Button(row1, text="💾 Lưu quy tắc", command=self._add_fallback_rule).pack(side=tk.LEFT, padx=(6, 0))
-        ttk.Button(row1, text="🗑️ Xóa quy tắc đã chọn", command=self._delete_selected_fallback).pack(side=tk.RIGHT)
 
     def _refresh_profiles(self):
         for item in self.tree.get_children():

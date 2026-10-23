@@ -29,6 +29,12 @@ try:
 except ImportError:
     HAS_WIN32COM = False
 
+from src.normalizer import (
+    auto_convert_legacy_encoding,
+    is_tcvn3,
+    is_vni
+)
+
 
 class FileFormatConverter:
     """
@@ -1164,3 +1170,60 @@ class FileFormatConverter:
             "failed": failed_count,
             "results": results
         }
+
+    @staticmethod
+    def convert_excel_encoding_to_unicode(
+        xlsx_path: Path | str,
+        output_path: Path | str | None = None
+    ) -> tuple[bool, Path | None, str, int]:
+        """
+        Quét toàn bộ ô trong tệp .xlsx và tự động chuyển đổi các ô dính bảng mã TCVN3/VNI sang Unicode.
+        Nếu font chữ là .VnTime hoặc VNI-Times, tự động chuyển sang Times New Roman.
+        Trả về (success, output_path, message, converted_cells_count).
+        """
+        p = Path(xlsx_path)
+        if not p.exists() or p.suffix.lower() != ".xlsx":
+            return False, None, f"Tệp không hợp lệ: {p.name}", 0
+
+        out_p = Path(output_path) if output_path else p.parent / f"{p.stem}_Unicode.xlsx"
+
+        try:
+            wb = openpyxl.load_workbook(p, data_only=False)
+        except Exception as e:
+            return False, None, f"Không thể đọc tệp Excel: {e}", 0
+
+        converted_count = 0
+        try:
+            for ws in wb.worksheets:
+                for row in ws.iter_rows():
+                    for cell in row:
+                        val = cell.value
+                        if isinstance(val, str) and val.strip():
+                            if is_tcvn3(val) or is_vni(val):
+                                converted_val = auto_convert_legacy_encoding(val)
+                                if converted_val != val:
+                                    cell.value = converted_val
+                                    converted_count += 1
+
+                        # Sửa font nếu là font cổ TCVN3 / VNI
+                        if cell.font and cell.font.name:
+                            f_name_lower = cell.font.name.lower()
+                            if f_name_lower.startswith(".vn") or f_name_lower.startswith("vni-"):
+                                new_font = Font(
+                                    name="Times New Roman",
+                                    size=cell.font.size,
+                                    bold=cell.font.bold,
+                                    italic=cell.font.italic,
+                                    color=cell.font.color
+                                )
+                                cell.font = new_font
+
+            wb.save(out_p)
+            wb.close()
+            return True, out_p, f"Đã chuyển đổi thành công {converted_count} ô sang Unicode chuẩn.", converted_count
+        except Exception as e:
+            try:
+                wb.close()
+            except Exception:
+                pass
+            return False, None, f"Lỗi chuyển đổi mã Unicode: {e}", 0

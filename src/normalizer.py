@@ -158,13 +158,24 @@ def clean_whitespace(value):
     if isinstance(value, float):
         if math.isnan(value):
             return ""
+        if value.is_integer():
+            return str(int(value))
+        return str(value)
     if isinstance(value, str):
+        if not value:
+            return ""
+        # Đường dẫn siêu tốc cho chuỗi ASCII (số, ngày chuẩn, mã, CCCD, chuỗi không dấu)
+        if value.isascii():
+            cleaned = " ".join(value.split())
+            if cleaned.lower() in ("none", "nan", "null", "<na>"):
+                return ""
+            return cleaned
         if is_vni(value):
             value = vni_to_unicode(value)
         elif is_tcvn3(value):
             value = tcvn3_to_unicode(value)
         cleaned = unicodedata.normalize('NFC', value)
-        cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+        cleaned = " ".join(cleaned.split())
         if cleaned.lower() in ("none", "nan", "null", "<na>"):
             return ""
         return cleaned
@@ -277,7 +288,7 @@ def check_dob_validity(val):
     if is_cell_empty(val):
         return False, 1, "Thiếu ngày sinh"
     
-    s = str(val).strip().strip("'\"`’‘“”, ")
+    s = re.sub(r"['\"`’‘“”]", "", str(val)).strip()
     m = re.match(r'^(\d{2})/(\d{2})/(\d{4})$', s)
     if not m:
         return False, 1, "Sai định dạng ngày sinh"
@@ -339,15 +350,15 @@ def format_date_to_text(value):
     if not val_str or val_str.lower() in ("none", "nan", "null"):
         return ""
 
-    # Loại bỏ dấu nháy đơn (apostrophe), nháy kép, dấu phẩy thừa do người dùng gõ text trong Excel (ví dụ '04/07/1994)
-    val_str = val_str.strip("'\"`’‘“”, \t\r\n")
+    # Loại bỏ mọi dấu nháy đơn, nháy kép, dấu nháy cong rải rác trong chuỗi (ví dụ '19/05/1969 hay 19/'05/1969)
+    val_str = re.sub(r"['\"`’‘“”]", "", val_str).strip()
     if not val_str:
         return ""
 
     val_clean = re.sub(r'\.0+$', '', val_str)
     # Cắt bỏ phần giờ nếu có (ví dụ ISO datetime: "2022-06-25 00:00:00" -> "2022-06-25")
     val_clean = re.sub(r'\s+\d{1,2}:\d{2}(:\d{2})?(\.\d+)?$', '', val_clean)
-    val_clean = val_clean.strip("'\"`’‘“”, ")
+    val_clean = val_clean.strip()
 
     # 3. Xử lý dạng số liền 7-8 chữ số (ví dụ: 19061998 hoặc 1061998)
     if val_clean.isdigit() and len(val_clean) in (7, 8):
