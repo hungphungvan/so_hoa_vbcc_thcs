@@ -397,6 +397,9 @@ class LookupManager:
         s_clean = re.sub(r'\.0+$', '', s)
         if s_clean in self.gender_map:
             return self.gender_map[s_clean]
+        s_no_zero = s_clean.lstrip("0")
+        if s_no_zero and s_no_zero in self.gender_map:
+            return self.gender_map[s_no_zero]
         s_lower = s_clean.lower()
         if s_lower == "nam":
             return "Nam"
@@ -416,6 +419,9 @@ class LookupManager:
         s_clean = re.sub(r'\.0+$', '', s)
         if s_clean in self.ethnic_map:
             return self.ethnic_map[s_clean]
+        s_no_zero = s_clean.lstrip("0")
+        if s_no_zero and s_no_zero in self.ethnic_map:
+            return self.ethnic_map[s_no_zero]
         return s_clean
 
     def map_nationality(self, val) -> str:
@@ -428,6 +434,9 @@ class LookupManager:
         s_clean = re.sub(r'\.0+$', '', s)
         if s_clean in self.nationality_map:
             return self.nationality_map[s_clean]
+        s_no_zero = s_clean.lstrip("0")
+        if s_no_zero and s_no_zero in self.nationality_map:
+            return self.nationality_map[s_no_zero]
         if s_clean.lower() in ("việt nam", "viet nam", "vn"):
             return "Việt Nam"
         return s_clean
@@ -442,6 +451,9 @@ class LookupManager:
         s_clean = re.sub(r'\.0+$', '', s)
         if s_clean in self.birthplace_map:
             return self.birthplace_map[s_clean]
+        s_no_zero = s_clean.lstrip("0")
+        if s_no_zero and s_no_zero in self.birthplace_map:
+            return self.birthplace_map[s_no_zero]
         return s_clean
 
     def get_all_schools(self) -> list[str]:

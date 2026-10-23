@@ -17,12 +17,15 @@ import openpyxl
 from openpyxl.styles import Font
 from openpyxl.utils import column_index_from_string
 
-from src.lookup_manager import find_data_file, get_persistent_data_dir
+from src.lookup_manager import LookupManager, find_data_file, get_persistent_data_dir
 from src.normalizer import (
     clean_whitespace,
     vietnamese_title_case,
     format_date_to_text,
-    auto_convert_legacy_encoding
+    auto_convert_legacy_encoding,
+    normalize_ethnic,
+    normalize_nationality,
+    normalize_birthplace
 )
 from src.custom_excel_manager import (
     is_valid_stt,
@@ -1181,8 +1184,19 @@ class SmartMerger:
     - Tái sử dụng 100% quy tắc lọc dữ liệu học sinh hợp lệ và chuẩn hóa encoding/date/title_case.
     """
 
-    def __init__(self, profile_mgr: MappingProfileManager | None = None):
+    def __init__(
+        self,
+        profile_mgr: MappingProfileManager | None = None,
+        lookup_mgr: LookupManager | None = None
+    ):
         self.profile_mgr = profile_mgr or MappingProfileManager()
+        if lookup_mgr is not None:
+            self.lookup_mgr = lookup_mgr
+        else:
+            try:
+                self.lookup_mgr = LookupManager()
+            except Exception:
+                self.lookup_mgr = None
         self.template_path = find_data_file("Mau_DS_Cap_Bang_THCS.xlsx")
         self.template_bytes: bytes | None = None
         self.cached_fonts: list[Font | None] = []
@@ -1540,6 +1554,14 @@ class SmartMerger:
                                 row_28[t_col_0] = vietnamese_title_case(val_str)
                             elif t_idx in (9, 19): # Ngày sinh, Ngày cấp bằng -> format_date_to_text
                                 row_28[t_col_0] = format_date_to_text(raw_val)
+                            elif t_idx == 10: # Giới tính -> ánh xạ mã số (1->Nam, 2->Khác, 3->Nữ) & chuẩn hóa
+                                row_28[t_col_0] = self.lookup_mgr.map_gender(val_str) if self.lookup_mgr else val_str
+                            elif t_idx == 11: # Dân tộc -> ánh xạ mã số & Title Case
+                                row_28[t_col_0] = normalize_ethnic(val_str, self.lookup_mgr)
+                            elif t_idx == 12: # Quốc tịch -> ánh xạ mã số & Title Case
+                                row_28[t_col_0] = normalize_nationality(val_str, self.lookup_mgr)
+                            elif t_idx == 13: # Nơi sinh -> ánh xạ mã số & chuẩn hóa địa danh hành chính
+                                row_28[t_col_0] = normalize_birthplace(val_str, self.lookup_mgr)
                             else:
                                 row_28[t_col_0] = val_str
                         else:
@@ -1555,14 +1577,21 @@ class SmartMerger:
                                     row_28[t_col_0] = format_date_to_text(c_str)
                                 elif t_idx == 5:
                                     row_28[t_col_0] = vietnamese_title_case(c_str)
+                                elif t_idx == 10:
+                                    row_28[t_col_0] = self.lookup_mgr.map_gender(c_str) if self.lookup_mgr else clean_whitespace(c_str)
+                                elif t_idx == 11:
+                                    row_28[t_col_0] = normalize_ethnic(c_str, self.lookup_mgr)
+                                elif t_idx == 12:
+                                    row_28[t_col_0] = normalize_nationality(c_str, self.lookup_mgr)
+                                elif t_idx == 13:
+                                    row_28[t_col_0] = normalize_birthplace(c_str, self.lookup_mgr)
                                 else:
                                     row_28[t_col_0] = clean_whitespace(c_str)
                             elif fill_defaults:
-                                # 2. Giá trị mặc định chuẩn của hệ thống (nếu bật fill_defaults)
-                                if t_idx == 4: # Tên văn bằng
-                                    row_28[t_col_0] = "Bằng tốt nghiệp trung học cơ sở"
-                                elif t_idx == 12: # Quốc tịch
-                                    row_28[t_col_0] = "Việt Nam"
+                                # 2. Giá trị mặc định chuẩn của hệ thống từ danh sách cấu hình TARGET_COLUMNS (nếu bật fill_defaults)
+                                sys_def = target_col.get("default", "")
+                                if t_idx != 1 and sys_def:
+                                    row_28[t_col_0] = sys_def
 
                     # Đánh lại STT tăng dần 1..N (hoặc tự điền nếu sheet nguồn không có STT)
                     if renumber_stt or row_28[0] is None or row_28[0] == "":

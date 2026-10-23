@@ -161,6 +161,7 @@ class TestSmartMerger(unittest.TestCase):
         self.assertEqual(r3[9], "Nam") # Giới tính
         self.assertEqual(r3[11], "Việt Nam") # Quốc tịch điền mặc định
         self.assertEqual(r3[12], "Hà Nội") # Nơi sinh
+        self.assertEqual(r3[24], "Đã số hoá đầy đủ, chính xác") # Cột 25 điền mặc định từ TARGET_COLUMNS
 
         # Kiểm tra học sinh 3 từ file 2 (LE VAN CUONG -> Lê Văn Cường, STT = 3)
         r5 = [ws_res.cell(5, c).value for c in range(1, 29)]
@@ -169,6 +170,7 @@ class TestSmartMerger(unittest.TestCase):
         self.assertEqual(r5[6], "001205009999") # CCCD bảo toàn số 0 đầu
         self.assertEqual(r5[3], "Bằng tốt nghiệp trung học cơ sở")
         self.assertEqual(r5[11], "Việt Nam")
+        self.assertEqual(r5[24], "Đã số hoá đầy đủ, chính xác")
 
         wb_res.close()
 
@@ -278,6 +280,7 @@ class TestSmartMerger(unittest.TestCase):
         self.assertEqual(ws_res.cell(3, 4).value, "Bằng tốt nghiệp trung học cơ sở") # Mặc định hệ thống
         self.assertEqual(ws_res.cell(3, 5).value, "Đặng Thái Sơn") # Họ tên
         self.assertEqual(ws_res.cell(3, 12).value, "Việt Nam") # Mặc định hệ thống
+        self.assertEqual(ws_res.cell(3, 25).value, "Đã số hoá đầy đủ, chính xác") # Mặc định hệ thống từ TARGET_COLUMNS
 
         wb_res.close()
 
@@ -600,6 +603,55 @@ class TestSmartMerger(unittest.TestCase):
         # Phải dừng ngay tại file 1, KHÔNG được mở file 2
         self.assertEqual(len(callback_history), 1)
         self.assertEqual(callback_history[0], file1.name)
+
+    def test_code_lookup_mapping_in_smart_merger(self):
+        """Kiểm tra tự động tra cứu mã số (Giới tính, Dân tộc, Quốc tịch, Nơi sinh) trong Sub-tab 3."""
+        file_codes = self.tmp_dir / "src_codes.xlsx"
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "DS_MaSo"
+        ws.append(["STT", "Họ và tên", "Ngày sinh", "Giới tính", "Dân tộc", "Quốc tịch", "Nơi sinh"])
+        # Học sinh 1: nhập mã số nguyên / chuỗi có số 0 ở đầu
+        # Gioi_Tinh: 1 -> Nam; Dan_Toc: 29 -> Kinh; Quoc_Tich: 83 -> Việt Nam; Noi_Sinh: 3 -> Thành phố Hải Phòng
+        ws.append([1, "nguyễn văn an", "15/05/2008", 1, 29, 83, 3])
+        # Học sinh 2: nhập chuỗi có số 0 đứng đầu ("03" -> Nữ, "01" -> Mạ, "83" -> Việt Nam, "01" -> Tỉnh Bắc Ninh)
+        ws.append([2, "trần thị bình", "20/10/2008", "03", "01", "83", "01"])
+        wb.save(file_codes)
+        wb.close()
+
+        out_f = self.tmp_dir / "Out_Codes.xlsx"
+        merger = SmartMerger(profile_mgr=self.profile_mgr)
+        res = merger.process_merge_and_standardize(
+            source_files=[file_codes],
+            output_file_path=out_f,
+            mapping_callback=None,
+            renumber_stt=True,
+            fill_defaults=True,
+            merge_all_sheets=True
+        )
+
+        self.assertEqual(res["status"], "success")
+        self.assertEqual(res["total_rows"], 2)
+
+        wb_res = openpyxl.load_workbook(out_f, data_only=True)
+        ws_res = wb_res.active
+
+        # Kiểm tra học sinh 1 (Dòng 3)
+        self.assertEqual(ws_res.cell(3, 5).value, "Nguyễn Văn An")
+        self.assertEqual(ws_res.cell(3, 10).value, "Nam")
+        self.assertEqual(ws_res.cell(3, 11).value, "Kinh")
+        self.assertEqual(ws_res.cell(3, 12).value, "Việt Nam")
+        self.assertEqual(ws_res.cell(3, 13).value, "Thành phố Hải Phòng")
+        self.assertEqual(ws_res.cell(3, 25).value, "Đã số hoá đầy đủ, chính xác")
+
+        # Kiểm tra học sinh 2 (Dòng 4)
+        self.assertEqual(ws_res.cell(4, 5).value, "Trần Thị Bình")
+        self.assertEqual(ws_res.cell(4, 10).value, "Nữ")
+        self.assertEqual(ws_res.cell(4, 11).value, "Mạ")
+        self.assertEqual(ws_res.cell(4, 12).value, "Việt Nam")
+        self.assertEqual(ws_res.cell(4, 13).value, "Tỉnh Bắc Ninh")
+
+        wb_res.close()
 
 
 if __name__ == '__main__':
