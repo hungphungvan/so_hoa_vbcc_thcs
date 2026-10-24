@@ -34,7 +34,6 @@ from src.data_inspector import DataInspector
 from src.ocr_processor import (
     OCRProcessor,
     OCRConfigManager,
-    AVAILABLE_OCR_MODELS,
     DEFAULT_BASE_URL,
     DEFAULT_MODEL_NAME,
 )
@@ -156,12 +155,32 @@ class CustomToolsView(ttk.Frame):
         )
         self.title_lbl.pack(anchor=tk.W)
 
-        # 2. Main Notebook (4 Tabs chính)
+        # 2. Main Container
         main_container = ttk.Frame(self, style="Window.TFrame", padding=6)
         main_container.pack(fill=tk.BOTH, expand=True)
 
+        # 3. Vùng Console Log chung ở dưới cùng (GHIM TRƯỚC VỚI side=tk.BOTTOM ĐỂ ĐẢM BẢO ĐỦ CHIỀU CAO HIỂN THỊ)
+        log_frame = ttk.LabelFrame(main_container, text="Nhật ký hoạt động & Thông báo", padding=4)
+        log_frame.pack(side=tk.BOTTOM, fill=tk.X, expand=False, pady=(4, 0))
+
+        self.log_text = ScrolledText(
+            log_frame,
+            height=7,
+            font=FONT_LOG,
+            bg=p.LOG_BG,
+            fg=p.LOG_FG,
+            insertbackground=p.LOG_FG,
+            wrap=tk.WORD
+        )
+        self.log_text.pack(fill=tk.BOTH, expand=True)
+        self.log_text.tag_config("info", foreground=p.LOG_FG)
+        self.log_text.tag_config("success", foreground=p.SUCCESS)
+        self.log_text.tag_config("warning", foreground=p.WARNING)
+        self.log_text.tag_config("error", foreground=p.DANGER)
+
+        # 4. Main Notebook (5 Tabs chính - chiếm phần diện tích phía trên)
         self.notebook = ttk.Notebook(main_container)
-        self.notebook.pack(fill=tk.BOTH, expand=True)
+        self.notebook.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
         # Tab 1: Gộp vào mẫu chuẩn 28 cột
         self.tab_smart = ttk.Frame(self.notebook, padding=6)
@@ -205,25 +224,6 @@ class CustomToolsView(ttk.Frame):
         self.tab_ocr = ttk.Frame(self.notebook, padding=6)
         self.notebook.add(self.tab_ocr, text="  📷 5. OCR  ")
         self._build_tab_ocr(self.tab_ocr)
-
-        # 3. Vùng Console Log chung ở dưới cùng
-        log_frame = ttk.LabelFrame(main_container, text="Nhật ký hoạt động & Thông báo", padding=4)
-        log_frame.pack(fill=tk.BOTH, expand=False, pady=(4, 0))
-
-        self.log_text = ScrolledText(
-            log_frame,
-            height=3,
-            font=FONT_LOG,
-            bg=p.LOG_BG,
-            fg=p.LOG_FG,
-            insertbackground=p.LOG_FG,
-            wrap=tk.WORD
-        )
-        self.log_text.pack(fill=tk.BOTH, expand=True)
-        self.log_text.tag_config("info", foreground=p.LOG_FG)
-        self.log_text.tag_config("success", foreground=p.SUCCESS)
-        self.log_text.tag_config("warning", foreground=p.WARNING)
-        self.log_text.tag_config("error", foreground=p.DANGER)
 
     def apply_theme(self, is_dark: bool):
         """Cập nhật giao diện Sáng / Tối."""
@@ -2116,8 +2116,8 @@ class CustomToolsView(ttk.Frame):
         self.ocr_base_url_entry.pack(side=tk.LEFT, padx=(0, 12))
 
         ttk.Label(r_api, text="Model:", font=FONT_LABEL_BOLD).pack(side=tk.LEFT, padx=(0, 4))
-        self.ocr_model_cb = ttk.Combobox(r_api, textvariable=self.ocr_model_var, values=AVAILABLE_OCR_MODELS, font=FONT_LABEL, width=24)
-        self.ocr_model_cb.pack(side=tk.LEFT, padx=(0, 8))
+        self.ocr_model_entry = ttk.Entry(r_api, textvariable=self.ocr_model_var, font=FONT_LABEL, width=26)
+        self.ocr_model_entry.pack(side=tk.LEFT, padx=(0, 8))
 
         ttk.Button(r_api, text="💾 Lưu cấu hình", command=self._on_save_ocr_config).pack(side=tk.RIGHT)
 

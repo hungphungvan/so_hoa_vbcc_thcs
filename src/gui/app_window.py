@@ -37,11 +37,11 @@ class MainWindow:
         sw = self.root.winfo_screenwidth()
         sh = self.root.winfo_screenheight()
         win_w = min(1280, max(1040, sw - 40))
-        win_h = min(820, max(680, sh - 80))
+        win_h = min(880, max(720, sh - 60))
         x = max(0, (sw - win_w) // 2)
         y = max(0, (sh - win_h - 40) // 2)
         self.root.geometry(f"{win_w}x{win_h}+{x}+{y}")
-        self.root.minsize(1000, 620)
+        self.root.minsize(1000, 660)
 
         # Quản lý giao diện Sáng / Tối (Dark Mode)
         self.is_dark = IS_DARK
