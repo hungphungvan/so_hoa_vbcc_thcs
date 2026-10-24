@@ -31,7 +31,7 @@ class MainWindow:
     """
     def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title(f"{APP_NAME} - v{APP_VERSION} (Số hóa Văn bằng THCS)")
+        self.root.title(f"{APP_NAME} - v{APP_VERSION} (SOHOAVB - HỆ THỐNG XỬ LÝ & SỐ HÓA VĂN BẰNG)")
 
         # Đặt kích thước và vị trí cửa sổ tối ưu đa nền tảng
         sw = self.root.winfo_screenwidth()

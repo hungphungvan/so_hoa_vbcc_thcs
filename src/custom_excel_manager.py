@@ -5,6 +5,8 @@ import copy
 import sys
 import re
 import math
+import difflib
+import unicodedata
 from pathlib import Path
 from typing import Any
 import openpyxl
@@ -174,11 +176,126 @@ def is_cell_empty(val) -> bool:
     s = str(val).strip()
     return s == "" or s.lower() == "none"
 
+
+# Các cụm từ trong tiêu đề cột KHÔNG PHẢI là tên học sinh (tránh nhận nhầm 'Tên văn bằng', 'Tên trường', 'Tên đơn vị', 'Người ký'...)
+NON_STUDENT_NAME_EXCLUSIONS = (
+    "van bang", "nguoi ky", "ky bang", "truong", "co quan", "don vi",
+    "hoi dong", "dan toc", "quoc tich", "mon thi", "trang thai", "tinh trang",
+    "dia danh", "nguyen nhan", "so hieu", "so vao so", "ma nguoi hoc", "dinh danh"
+)
+
+STT_FUZZY_ANCHORS = ("stt", "so thu tu", "so tt", "thu tu", "tt")
+
+NAME_FUZZY_ANCHORS_TIER1 = (
+    "ho chu dem va ten",
+    "ho va ten",
+    "ho ten",
+    "ho ten hoc sinh",
+    "ho ten thi sinh",
+    "ho va chu dem",
+    "ho chu dem",
+    "ho dem",
+    "hodem",
+    "ho lot",
+)
+
+NAME_FUZZY_ANCHORS_TIER2 = (
+    "ten hoc sinh",
+    "ten thi sinh",
+    "ten nguoi hoc",
+    "ten",
+)
+
+
+def _remove_accents(text: str) -> str:
+    """Loại bỏ dấu tiếng Việt phục vụ so khớp mờ."""
+    if not text:
+        return ""
+    s = str(text).replace("đ", "d").replace("Đ", "D")
+    nfd = unicodedata.normalize("NFD", s)
+    return "".join(ch for ch in nfd if unicodedata.category(ch) != "Mn")
+
+
+def _norm_header_fuzzy(text: str) -> str:
+    """Chuẩn hóa nhãn cột phục vụ so khớp mờ (bỏ dấu, chữ thường, bỏ phần trong ngoặc, thay ký tự đặc biệt bằng khoảng trắng)."""
+    if not text:
+        return ""
+    s = re.sub(r"\([^)]*\)|\[[^\]]*\]", " ", str(text))
+    s = _remove_accents(auto_convert_legacy_encoding(s)).lower()
+    s = re.sub(r"[^a-z0-9\s]", " ", s)
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def _fuzzy_similarity_header(h1: str, h2: str) -> float:
+    """Tính điểm tương đồng mờ (0.0 -> 1.0) giữa hai tiêu đề đã chuẩn hóa."""
+    n1 = _norm_header_fuzzy(h1)
+    n2 = _norm_header_fuzzy(h2)
+    if not n1 or not n2:
+        return 0.0
+    if n1 == n2:
+        return 1.0
+    c1 = n1.replace(" ", "")
+    c2 = n2.replace(" ", "")
+    if c1 == c2:
+        return 0.98
+
+    toks1 = set(n1.split())
+    toks2 = set(n2.split())
+    inter = toks1.intersection(toks2)
+    jaccard = len(inter) / len(toks1.union(toks2)) if (toks1 and toks2) else 0.0
+
+    subset_score = 0.0
+    if toks1 and toks2 and (toks1.issubset(toks2) or toks2.issubset(toks1)):
+        subset_score = 0.72 + 0.23 * (min(len(toks1), len(toks2)) / max(len(toks1), len(toks2)))
+
+    seq = difflib.SequenceMatcher(None, n1, n2).ratio()
+    seq_c = difflib.SequenceMatcher(None, c1, c2).ratio() * 0.92
+    return max(jaccard * 0.95, subset_score, seq, seq_c)
+
+
+def _fuzzy_find_stt_and_name_columns(headers: list[str]) -> tuple[int, int]:
+    """
+    Tìm cột STT và cột Họ và tên bằng thuật toán so khớp mờ (Fuzzy Matching),
+    loại trừ triệt để các cột chứa chữ 'Tên' nhưng không phải tên người (như 'Tên văn bằng', 'Tên trường', 'Tên đơn vị'...).
+    """
+    best_stt_idx = -1
+    best_stt_score = 0.0
+
+    best_name_idx = -1
+    best_name_score = 0.0
+
+    for c_i, raw_h in enumerate(headers):
+        norm_h = _norm_header_fuzzy(raw_h)
+        if not norm_h:
+            continue
+
+        # 1. Tính điểm khớp mờ cho cột STT
+        if not any(ex in norm_h for ex in ("trang thai", "tinh trang", "thong tin", "dan toc", "quoc tich", "truong")):
+            stt_sc = max(_fuzzy_similarity_header(norm_h, anc) for anc in STT_FUZZY_ANCHORS)
+            if stt_sc > best_stt_score and stt_sc >= 0.72:
+                best_stt_score = stt_sc
+                best_stt_idx = c_i
+
+        # 2. Tính điểm khớp mờ cho cột Họ và tên (loại trừ 'Tên văn bằng', 'Tên trường', 'Người ký'...)
+        if any(ex in norm_h for ex in NON_STUDENT_NAME_EXCLUSIONS):
+            continue
+
+        t1_sc = max(_fuzzy_similarity_header(norm_h, anc) for anc in NAME_FUZZY_ANCHORS_TIER1)
+        t2_sc = max(_fuzzy_similarity_header(norm_h, anc) for anc in NAME_FUZZY_ANCHORS_TIER2) * 0.90
+        name_sc = max(t1_sc, t2_sc)
+
+        if name_sc > best_name_score and name_sc >= 0.65:
+            best_name_score = name_sc
+            best_name_idx = c_i
+
+    return best_stt_idx, best_name_idx
+
+
 def detect_header_and_columns(ws, max_scan_rows: int = 25) -> dict:
     """
     Quét tìm dòng tiêu đề và xác định tọa độ cột:
     - Hỗ trợ tiêu đề đơn dòng VÀ tiêu đề đa dòng (2 hoặc nhiều dòng merge với nhau).
-    - Tự động quét ws.merged_cells và kết hợp tên cha - con (vd: 'Ngày tháng năm sinh - Ngày').
+    - Tự động nhận diện cột STT và cột Họ và tên bằng so khớp mờ (Fuzzy Matching).
     - Dòng tiêu đề chính (header_row_idx: dòng cuối cùng của khối tiêu đề để dữ liệu bắt đầu sau đó)
     - Danh sách nhãn cột (raw_headers, formatted_headers)
     - Tọa độ cột STT (stt_col_idx, 0-based)
@@ -208,45 +325,18 @@ def detect_header_and_columns(ws, max_scan_rows: int = 25) -> dict:
         if std_28_score >= 4:
             best_header_idx = r_idx
             best_headers = row_str
-            for c_i, s in enumerate(row_lower):
-                if any(kw == s or kw in s for kw in STT_KEYWORDS):
-                    stt_idx = c_i
-                    break
-            for c_i, s in enumerate(row_lower):
-                s_clean = s.strip()
-                if any(kw in s_clean for kw in ["họ, chữ đệm", "họ và tên", "họ tên"]) and "người ký" not in s_clean:
-                    name_idx = c_i
-                    break
             break
 
-        # 2. Kiểm tra tổng quát: xem dòng có chứa STT hoặc Họ và tên không
-        has_stt = any(any(kw == s or kw in s for kw in STT_KEYWORDS) for s in row_lower[:6])
-        has_name = any(any(kw in s for kw in NAME_KEYWORDS) for s in row_lower)
+        # 2. Kiểm tra tổng quát bằng so khớp mờ: xem dòng có chứa STT hoặc Họ và tên không
+        cand_stt_idx, cand_name_idx = _fuzzy_find_stt_and_name_columns(row_str)
+        has_stt = (0 <= cand_stt_idx < 6) or any(any(kw == s or kw in s for kw in STT_KEYWORDS) for s in row_lower[:6])
+        has_name = (cand_name_idx >= 0)
         non_empty = sum(1 for s in row_str if s)
 
         # Dòng tiêu đề thật sự phải có ít nhất 2 cột có nội dung và có STT hoặc Họ tên
         if (has_stt and has_name and non_empty >= 2) or ((has_stt or has_name) and non_empty >= 3):
             best_header_idx = r_idx
             best_headers = row_str
-
-            # Tìm cột STT sơ bộ
-            for c_i, s in enumerate(row_lower):
-                if any(kw == s or kw in s for kw in STT_KEYWORDS):
-                    stt_idx = c_i
-                    break
-
-            # Tìm cột Họ và tên sơ bộ (ưu tiên cột Họ đệm/Họ và tên trước, sau đó tới Tên)
-            for c_i, s in enumerate(row_lower):
-                s_clean = s.strip()
-                if any(kw in s_clean for kw in ["họ và tên", "họ tên", "họ, chữ đệm", "họ và chữ đệm", "họ đệm", "họ, đệm", "họ và", "hodem", "ho dem", "họ lót"]) and "người ký" not in s_clean:
-                    name_idx = c_i
-                    break
-            if name_idx == -1:
-                for c_i, s in enumerate(row_lower):
-                    s_clean = s.strip()
-                    if s_clean in ["tên", "ten", "tên học sinh", "tên thí sinh", "tên người học"] or any(kw in s_clean for kw in ["tên học sinh", "tên thí sinh"]):
-                        name_idx = c_i
-                        break
             break
 
     # Nếu không tìm thấy theo từ khóa, mặc định lấy dòng 1 hoặc 2
@@ -276,20 +366,12 @@ def detect_header_and_columns(ws, max_scan_rows: int = 25) -> dict:
         name = h if h else f"Cột {col_letter}"
         formatted_headers.append(f"[{col_letter}] {name}")
 
-    # Tìm lại cột STT và Họ và tên từ danh sách header hoàn chỉnh
-    row_lower = [s.lower() for s in best_headers]
-    for c_i, s in enumerate(row_lower):
-        if any(kw == s or kw in s for kw in STT_KEYWORDS):
-            stt_idx = c_i
-            break
+    # Tìm cột STT và Họ và tên bằng thuật toán so khớp mờ từ danh sách header hoàn chỉnh
+    fuzzy_stt_idx, fuzzy_name_idx = _fuzzy_find_stt_and_name_columns(best_headers)
+    stt_idx = fuzzy_stt_idx if fuzzy_stt_idx >= 0 else 0
+    name_idx = fuzzy_name_idx
 
-    name_idx = -1
-    for c_i, s in enumerate(row_lower):
-        if any(kw in s for kw in NAME_KEYWORDS):
-            name_idx = c_i
-            break
-
-    # Fallback Heuristic tìm cột Họ và tên nếu chưa thấy ở header
+    # Fallback Heuristic tìm cột Họ và tên dựa trên dữ liệu thực tế nếu chưa thấy ở header
     if name_idx == -1:
         name_idx = _heuristic_find_name_column(ws, header_end_row, stt_idx)
         if name_idx == -1 and len(best_headers) > 4:

@@ -265,5 +265,26 @@ class TestModule3(unittest.TestCase):
         self.assertTrue(ws_out.cell(3, 4).fill.fgColor.rgb.endswith("FFF59D"))
         wb_out.close()
 
+    def test_fuzzy_detect_name_column_not_confused_by_ten_van_bang(self):
+        """Kiểm tra nhận diện cột Họ và tên bằng khớp mờ: trên mẫu 28 cột phải chọn đúng Cột E (index 4), không nhận nhầm Cột D ('Tên văn bằng')."""
+        from src.custom_excel_manager import detect_header_and_columns
+
+        wb_tpl = openpyxl.load_workbook("data/Mau_DS_Cap_Bang_THCS.xlsx", data_only=True)
+        ws_tpl = wb_tpl.active
+        info = detect_header_and_columns(ws_tpl)
+        wb_tpl.close()
+
+        self.assertEqual(info["stt_col_idx"], 0)   # Cột A: STT
+        self.assertEqual(info["name_col_idx"], 4)  # Cột E: Họ, chữ đệm và tên (KHÔNG phải Cột D index 3: Tên văn bằng)
+
+        # Kiểm tra khớp mờ với tiêu đề kiểu OCR ('stt', 'sbd', 'ho_ten')
+        wb_ocr = openpyxl.Workbook()
+        ws_ocr = wb_ocr.active
+        ws_ocr.append(["stt", "sbd", "ho_ten", "ngay_sinh", "hoi_dong_thi"])
+        info_ocr = detect_header_and_columns(ws_ocr)
+        wb_ocr.close()
+        self.assertEqual(info_ocr["stt_col_idx"], 0)
+        self.assertEqual(info_ocr["name_col_idx"], 2)
+
 if __name__ == "__main__":
     unittest.main()

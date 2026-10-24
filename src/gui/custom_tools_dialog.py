@@ -148,7 +148,7 @@ class CustomToolsView(ttk.Frame):
 
         self.title_lbl = tk.Label(
             self.hdr_frame,
-            text="🛠️ SOHOATHCS - HỆ THỐNG XỬ LÝ & SỐ HÓA VĂN BẰNG THCS",
+            text="🛠️ SOHOAVB - HỆ THỐNG XỬ LÝ & SỐ HÓA VĂN BẰNG",
             font=FONT_TITLE,
             bg=p.HEADER_BANNER_BG,
             fg=p.HEADER_BANNER_FG
