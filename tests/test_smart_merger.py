@@ -161,7 +161,7 @@ class TestSmartMerger(unittest.TestCase):
         self.assertEqual(r3[9], "Nam") # Giới tính
         self.assertEqual(r3[11], "Việt Nam") # Quốc tịch điền mặc định
         self.assertEqual(r3[12], "Hà Nội") # Nơi sinh
-        self.assertEqual(r3[24], "Đã số hoá đầy đủ, chính xác") # Cột 25 điền mặc định từ TARGET_COLUMNS
+        self.assertEqual(r3[24], "Đã số hóa đầy đủ, chính xác") # Cột 25 điền mặc định từ TARGET_COLUMNS
 
         # Kiểm tra học sinh 3 từ file 2 (LE VAN CUONG -> Lê Văn Cường, STT = 3)
         r5 = [ws_res.cell(5, c).value for c in range(1, 29)]
@@ -170,7 +170,7 @@ class TestSmartMerger(unittest.TestCase):
         self.assertEqual(r5[6], "001205009999") # CCCD bảo toàn số 0 đầu
         self.assertEqual(r5[3], "Bằng tốt nghiệp trung học cơ sở")
         self.assertEqual(r5[11], "Việt Nam")
-        self.assertEqual(r5[24], "Đã số hoá đầy đủ, chính xác")
+        self.assertEqual(r5[24], "Đã số hóa đầy đủ, chính xác")
 
         wb_res.close()
 
@@ -280,7 +280,7 @@ class TestSmartMerger(unittest.TestCase):
         self.assertEqual(ws_res.cell(3, 4).value, "Bằng tốt nghiệp trung học cơ sở") # Mặc định hệ thống
         self.assertEqual(ws_res.cell(3, 5).value, "Đặng Thái Sơn") # Họ tên
         self.assertEqual(ws_res.cell(3, 12).value, "Việt Nam") # Mặc định hệ thống
-        self.assertEqual(ws_res.cell(3, 25).value, "Đã số hoá đầy đủ, chính xác") # Mặc định hệ thống từ TARGET_COLUMNS
+        self.assertEqual(ws_res.cell(3, 25).value, "Đã số hóa đầy đủ, chính xác") # Mặc định hệ thống từ TARGET_COLUMNS
 
         wb_res.close()
 
@@ -642,7 +642,7 @@ class TestSmartMerger(unittest.TestCase):
         self.assertEqual(ws_res.cell(3, 11).value, "Kinh")
         self.assertEqual(ws_res.cell(3, 12).value, "Việt Nam")
         self.assertEqual(ws_res.cell(3, 13).value, "Thành phố Hải Phòng")
-        self.assertEqual(ws_res.cell(3, 25).value, "Đã số hoá đầy đủ, chính xác")
+        self.assertEqual(ws_res.cell(3, 25).value, "Đã số hóa đầy đủ, chính xác")
 
         # Kiểm tra học sinh 2 (Dòng 4)
         self.assertEqual(ws_res.cell(4, 5).value, "Trần Thị Bình")

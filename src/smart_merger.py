@@ -65,7 +65,7 @@ TARGET_COLUMNS = [
     {"idx": 22, "field": "nguoi_ky", "name": "Họ, chữ đệm, tên người ký bằng", "required": False, "default": "", "type": "text"},
     {"idx": 23, "field": "tinh_trang_van_bang", "name": "Tình trạng văn bằng", "required": False, "default": "", "type": "text"},
     {"idx": 24, "field": "ghi_chu", "name": "Ghi chú", "required": False, "default": "", "type": "text"},
-    {"idx": 25, "field": "trang_thai", "name": "Trạng thái số hóa", "required": False, "default": "Đã số hoá đầy đủ, chính xác", "type": "text"},
+    {"idx": 25, "field": "trang_thai", "name": "Trạng thái số hóa", "required": False, "default": "Đã số hóa đầy đủ, chính xác", "type": "text"},
     {"idx": 26, "field": "ly_do_loi", "name": "Thông tin chưa bảo đảm đầy đủ, chính xác và nguyên nhân", "required": False, "default": "", "type": "text"},
     {"idx": 27, "field": "ma_don_vi", "name": "Mã đơn vị", "required": False, "default": "", "type": "text"},
     {"idx": 28, "field": "ten_don_vi", "name": "Tên đơn vị", "required": False, "default": "", "type": "text"}

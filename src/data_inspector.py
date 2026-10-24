@@ -151,8 +151,8 @@ def validate_student_record(
     data[18] = grad_formatted
 
     # Cột 25 (Y, index 24): Trạng thái số hóa
-    if not data[24] or str(data[24]).strip() == "":
-        data[24] = "Đã số hoá đầy đủ, chính xác"
+    if not data[24] or str(data[24]).strip() == "" or str(data[24]).strip() in ("Đã số hoá đầy đủ, chính xác", "Đã số hoá đẩy đủ, chính xác"):
+        data[24] = "Đã số hóa đầy đủ, chính xác"
 
     # ==============================================================
     # BƯỚC 2: KIỂM TRA LỖI & CẢNH BÁO
