@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import io
+import copy
 import sys
 import re
 import math
@@ -447,29 +449,62 @@ class ExcelSplitter:
 
         wb_in = openpyxl.load_workbook(p, data_only=False)
         ws_in = wb_in[sheet_name] if (sheet_name and sheet_name in wb_in.sheetnames) else wb_in.active
+        target_sheet_title = ws_in.title
 
         info = detect_header_and_columns(ws_in)
         h_idx = header_row_idx or info["header_row_idx"]
         s_idx = stt_col_idx if stt_col_idx is not None else info["stt_col_idx"]
         n_idx = name_col_idx if name_col_idx is not None else info["name_col_idx"]
 
-        log(f"🔍 Bắt đầu phân tích tệp: {p.name} (Sheet: '{ws_in.title}')", "info")
+        log(f"🔍 Bắt đầu phân tích tệp: {p.name} (Sheet: '{target_sheet_title}')", "info")
         log(f"   Dòng tiêu đề: {h_idx} | Cột STT: {s_idx + 1} | Cột Họ tên: {n_idx + 1} | Cột tách: {split_col_idx + 1}", "info")
 
-        # 1. Trích xuất toàn bộ các dòng dữ liệu hợp lệ
-        best_header_row = [ws_in.cell(row=h_idx, column=c).value for c in range(1, ws_in.max_column + 1)] if ws_in.max_column else []
-        grouped_rows: dict[str, list[list]] = {}
+        # Xác định dòng cuối cùng của khối Header (bao gồm các ô merge dọc từ h_idx và dòng đánh số thứ tự cột (1), (2)... nếu có)
+        header_block_end_row = h_idx
+        for rng in ws_in.merged_cells.ranges:
+            if rng.min_row <= h_idx and h_idx < rng.max_row <= h_idx + 3:
+                if rng.max_row > header_block_end_row:
+                    header_block_end_row = rng.max_row
+
+        max_col = min(ws_in.max_column or 1, 150)
+        if header_block_end_row + 1 <= ws_in.max_row:
+            next_row_vals = [ws_in.cell(row=header_block_end_row + 1, column=c).value for c in range(1, max_col + 1)]
+            if _is_index_row(next_row_vals):
+                header_block_end_row += 1
+
+        # Hỗ trợ đọc giá trị đã tính toán nếu tệp có chứa công thức (formula)
+        wb_val = None
+        ws_val = None
+
+        def get_evaluated_val(r_i: int, c_i: int, cell_obj):
+            nonlocal wb_val, ws_val
+            if cell_obj.data_type == 'f':
+                if wb_val is None:
+                    wb_val = openpyxl.load_workbook(p, data_only=True)
+                    ws_val = wb_val[target_sheet_title] if target_sheet_title in wb_val.sheetnames else wb_val.active
+                v = ws_val.cell(row=r_i, column=c_i).value
+                return v if v is not None else cell_obj.value
+            return cell_obj.value
+
+        # 1. Trích xuất toàn bộ các dòng dữ liệu hợp lệ kèm định dạng (style, data_type, row_height)
+        best_header_row = [ws_in.cell(row=h_idx, column=c).value for c in range(1, max_col + 1)]
+        grouped_rows: dict[str, list[dict]] = {}
         total_extracted = 0
         empty_stt_consecutive = 0
 
-        for row in ws_in.iter_rows(min_row=h_idx + 1, values_only=True):
+        for r_idx in range(header_block_end_row + 1, (ws_in.max_row or 0) + 1):
             if check_cancel and check_cancel():
                 log("⏹ Quá trình tách tệp đã dừng theo yêu cầu.", "warning")
                 wb_in.close()
+                if wb_val is not None:
+                    wb_val.close()
                 return {"status": "cancelled", "files": []}
 
-            cell_stt = row[s_idx] if s_idx < len(row) else None
-            cell_name = row[n_idx] if n_idx < len(row) else None
+            row_cells = [ws_in.cell(row=r_idx, column=c) for c in range(1, max_col + 1)]
+            row_vals = [get_evaluated_val(r_idx, c_i, cell) for c_i, cell in enumerate(row_cells, start=1)]
+
+            cell_stt = row_vals[s_idx] if s_idx < len(row_vals) else None
+            cell_name = row_vals[n_idx] if n_idx < len(row_vals) else None
 
             # Quy tắc dừng sớm: 15 dòng liên tiếp có STT trống
             if is_cell_empty(cell_stt):
@@ -481,17 +516,35 @@ class ExcelSplitter:
                 empty_stt_consecutive = 0
 
             # Bỏ qua dòng trùng lặp tiêu đề
-            if is_header_duplicate_row(row, best_header_row, s_idx, n_idx):
+            if is_header_duplicate_row(row_vals, best_header_row, s_idx, n_idx):
                 continue
 
             # Quy tắc dòng hợp lệ: Có STT hợp lệ VÀ Có Họ tên hợp lệ
             if is_valid_stt(cell_stt) and is_valid_name(cell_name):
                 total_extracted += 1
-                raw_val = row[split_col_idx] if split_col_idx < len(row) else None
+                raw_val = row_vals[split_col_idx] if split_col_idx < len(row_vals) else None
                 val_str = clean_whitespace(str(raw_val)) if not is_cell_empty(raw_val) else "(Gia_Tri_Trong)"
-                grouped_rows.setdefault(val_str, []).append(list(row))
+
+                cells_snapshot = [
+                    (
+                        row_vals[c_i],
+                        cell.data_type if cell.data_type != 'f' else None,
+                        copy.copy(cell._style) if cell.has_style else None
+                    )
+                    for c_i, cell in enumerate(row_cells)
+                ]
+                r_dim = ws_in.row_dimensions.get(r_idx)
+                r_height = r_dim.height if r_dim is not None else None
+
+                grouped_rows.setdefault(val_str, []).append({
+                    "cells": cells_snapshot,
+                    "height": r_height
+                })
                 if progress_callback and (total_extracted % 2000 == 0):
                     progress_callback(total_extracted, 0, f"Đang phân tích dòng {total_extracted:,}...")
+
+        if wb_val is not None:
+            wb_val.close()
 
         log(f"✅ Đã thu nạp {total_extracted} dòng dữ liệu hợp lệ thuộc {len(grouped_rows)} nhóm.", "success")
 
@@ -499,21 +552,31 @@ class ExcelSplitter:
             wb_in.close()
             return {"status": "empty", "files": [], "total_rows": 0, "total_groups": 0}
 
-        # 2. Thu thập khối Header (Dòng 1 đến h_idx) kèm định dạng
-        header_rows_data = []
-        for r in range(1, h_idx + 1):
-            row_data = [ws_in.cell(row=r, column=c).value for c in range(1, ws_in.max_column + 1)]
-            header_rows_data.append(row_data)
+        # 2. Tạo bộ khung Template chuẩn (template_bytes) từ chính tệp gốc:
+        # Bảo toàn 100% Theme, Merged Cells của Header, Fonts, Fills, Borders, Alignments, Độ rộng cột, Chiều cao dòng Header, Page Setup
+        for s_name in list(wb_in.sheetnames):
+            if s_name != target_sheet_title:
+                del wb_in[s_name]
 
-        # Lưu lại độ rộng cột từ sheet gốc
-        col_widths = {}
-        for col_letter, col_dim in ws_in.column_dimensions.items():
-            if col_dim.width is not None:
-                col_widths[col_letter] = col_dim.width
+        ranges_to_unmerge = [
+            str(rng) for rng in list(ws_in.merged_cells.ranges)
+            if rng.min_row > header_block_end_row
+        ]
+        for rng_str in ranges_to_unmerge:
+            ws_in.unmerge_cells(rng_str)
 
+        if ws_in.max_row > header_block_end_row:
+            ws_in.delete_rows(header_block_end_row + 1, ws_in.max_row - header_block_end_row)
+
+        for r_k in [r for r in ws_in.row_dimensions if r > header_block_end_row]:
+            del ws_in.row_dimensions[r_k]
+
+        tmpl_buf = io.BytesIO()
+        wb_in.save(tmpl_buf)
         wb_in.close()
+        template_bytes = tmpl_buf.getvalue()
 
-        # 3. Xuất từng nhóm ra file riêng
+        # 3. Xuất từng nhóm ra file riêng (giữ nguyên toàn bộ định dạng gốc)
         created_files = []
         total_groups = len(grouped_rows)
 
@@ -528,25 +591,29 @@ class ExcelSplitter:
 
             out_file = out_dir / f"{safe_name}.xlsx"
 
-            # Tạo file mới và sao chép khối header
-            wb_out = openpyxl.Workbook()
+            # Khởi tạo workbook từ template_bytes của tệp gốc
+            wb_out = openpyxl.load_workbook(io.BytesIO(template_bytes))
             ws_out = wb_out.active
-            ws_out.title = "Data"
 
-            # Ghi khối header
-            for h_row in header_rows_data:
-                ws_out.append(h_row)
+            # Ghi dữ liệu học sinh kèm đúng định dạng ô và chiều cao dòng của tệp gốc
+            for idx, row_item in enumerate(rows_list, start=1):
+                out_r_idx = header_block_end_row + idx
+                cells_snapshot = row_item["cells"]
+                r_height = row_item["height"]
 
-            # Ghi dữ liệu học sinh
-            for idx, r_vals in enumerate(rows_list, start=1):
-                row_copy = list(r_vals)
-                if renumber_stt and s_idx < len(row_copy):
-                    row_copy[s_idx] = idx
-                ws_out.append(row_copy)
+                for c_zero_idx, (val, dtype, cell_style) in enumerate(cells_snapshot):
+                    dst_cell = ws_out.cell(row=out_r_idx, column=c_zero_idx + 1)
+                    if renumber_stt and c_zero_idx == s_idx:
+                        dst_cell.value = idx
+                    else:
+                        dst_cell.value = val
+                        if val is not None and dtype == 's':
+                            dst_cell.data_type = 's'
+                    if cell_style is not None:
+                        dst_cell._style = copy.copy(cell_style)
 
-            # Áp dụng độ rộng cột
-            for col_letter, w in col_widths.items():
-                ws_out.column_dimensions[col_letter].width = w
+                if r_height is not None:
+                    ws_out.row_dimensions[out_r_idx].height = r_height
 
             wb_out.save(out_file)
             wb_out.close()
@@ -687,30 +754,72 @@ class ExcelMerger:
         # 1. Đọc tệp mẫu (Master) để lấy cấu trúc Header và định dạng từ sheet chuẩn nhất
         wb_master = openpyxl.load_workbook(master_file, data_only=False)
         ws_master = find_best_data_sheet(wb_master, sheet_name)
+        master_sheet_title = ws_master.title
         m_info = detect_header_and_columns(ws_master)
         h_idx = m_info["header_row_idx"]
         s_idx = m_info["stt_col_idx"]
         n_idx = m_info["name_col_idx"]
 
-        log(f"📋 Sử dụng cấu trúc tiêu đề từ Sheet '{ws_master.title}' (Tệp: {master_file.name})", "info")
+        log(f"📋 Sử dụng cấu trúc tiêu đề từ Sheet '{master_sheet_title}' (Tệp: {master_file.name})", "info")
 
-        header_rows_data = []
-        for r in range(1, h_idx + 1):
-            row_data = [ws_master.cell(row=r, column=c).value for c in range(1, ws_master.max_column + 1)]
-            if add_source_col and r == h_idx:
-                row_data.append("Tệp nguồn gốc")
-            header_rows_data.append(row_data)
+        header_block_end_row = h_idx
+        for rng in ws_master.merged_cells.ranges:
+            if rng.min_row <= h_idx and h_idx < rng.max_row <= h_idx + 3:
+                if rng.max_row > header_block_end_row:
+                    header_block_end_row = rng.max_row
 
-        col_widths = {c: ws_master.column_dimensions[c].width for c in ws_master.column_dimensions if ws_master.column_dimensions[c].width}
-        wb_master.close()
+        master_max_col = max(len(m_info["raw_headers"]), min(ws_master.max_column or 1, 150))
+        if header_block_end_row + 1 <= ws_master.max_row:
+            next_row_vals = [ws_master.cell(row=header_block_end_row + 1, column=c).value for c in range(1, master_max_col + 1)]
+            if _is_index_row(next_row_vals):
+                header_block_end_row += 1
 
-        # 2. Tạo workbook gộp
-        wb_merged = openpyxl.Workbook()
-        ws_merged = wb_merged.active
-        ws_merged.title = "Data_Tong_Hop"
+        master_header_row = [ws_master.cell(row=h_idx, column=c).value for c in range(1, master_max_col + 1)]
+        while master_header_row and (master_header_row[-1] is None or str(master_header_row[-1]).strip() == ""):
+            master_header_row.pop()
+        base_col_count = len(master_header_row) or len(m_info["raw_headers"]) or (ws_master.max_column or 1)
 
-        for h_row in header_rows_data:
-            ws_merged.append(h_row)
+        # Lưu mẫu style của dòng dữ liệu đầu tiên từ Master để áp cho các dòng gộp
+        sample_row_styles = []
+        sample_row_dtypes = []
+        sample_row_height = None
+        sample_data_r = header_block_end_row + 1
+        if sample_data_r <= ws_master.max_row:
+            r_dim = ws_master.row_dimensions.get(sample_data_r)
+            sample_row_height = r_dim.height if r_dim is not None else None
+            for c in range(1, base_col_count + 1):
+                c_obj = ws_master.cell(row=sample_data_r, column=c)
+                sample_row_styles.append(copy.copy(c_obj._style) if c_obj.has_style else None)
+                sample_row_dtypes.append(c_obj.data_type if c_obj.data_type != 'f' else None)
+
+        # Biến wb_master thành wb_merged giữ nguyên định dạng gốc của khối Header
+        for s_name in list(wb_master.sheetnames):
+            if s_name != master_sheet_title:
+                del wb_master[s_name]
+
+        ranges_to_unmerge = [
+            str(rng) for rng in list(ws_master.merged_cells.ranges)
+            if rng.min_row > header_block_end_row
+        ]
+        for rng_str in ranges_to_unmerge:
+            ws_master.unmerge_cells(rng_str)
+
+        if ws_master.max_row > header_block_end_row:
+            ws_master.delete_rows(header_block_end_row + 1, ws_master.max_row - header_block_end_row)
+
+        for r_k in [r for r in ws_master.row_dimensions if r > header_block_end_row]:
+            del ws_master.row_dimensions[r_k]
+
+        wb_merged = wb_master
+        ws_merged = ws_master
+
+        if add_source_col:
+            src_col_idx = base_col_count + 1
+            hdr_src_cell = ws_merged.cell(row=h_idx, column=src_col_idx, value="Tệp nguồn gốc")
+            ref_hdr_cell = ws_merged.cell(row=h_idx, column=max(1, base_col_count))
+            if ref_hdr_cell.has_style:
+                hdr_src_cell._style = copy.copy(ref_hdr_cell._style)
+            ws_merged.column_dimensions[get_column_letter(src_col_idx)].width = 24
 
         # 3. Quét từng tệp và trích xuất dữ liệu
         total_merged_rows = 0
@@ -772,7 +881,7 @@ class ExcelMerger:
                         empty_stt_consecutive = 0
 
                     # Bỏ qua dòng trùng lặp tiêu đề
-                    if is_header_duplicate_row(row, header_rows_data[-1] if header_rows_data else None, curr_s_idx, curr_n_idx):
+                    if is_header_duplicate_row(row, master_header_row, curr_s_idx, curr_n_idx):
                         continue
 
                     # Điều kiện dòng hợp lệ: Có STT hợp lệ VÀ Có Họ tên hợp lệ
@@ -780,10 +889,12 @@ class ExcelMerger:
                         total_merged_rows += 1
                         sheet_row_count += 1
                         file_row_count += 1
-                        row_data = list(row)
+                        row_data = list(row[:base_col_count])
+                        if len(row_data) < base_col_count:
+                            row_data.extend([None] * (base_col_count - len(row_data)))
 
                         # Đánh lại STT nếu được yêu cầu
-                        if renumber_stt and s_idx >= 0 and s_idx < len(row_data):
+                        if renumber_stt and 0 <= s_idx < len(row_data):
                             row_data[s_idx] = total_merged_rows
 
                         # Thêm cột nguồn (tên file + tên sheet nếu file có nhiều sheet)
@@ -791,7 +902,24 @@ class ExcelMerger:
                             src_desc = f"{p.name} ({ws_curr.title})" if len(candidate_sheets) > 1 else p.name
                             row_data.append(src_desc)
 
-                        ws_merged.append(row_data)
+                        out_r_idx = header_block_end_row + total_merged_rows
+                        for c_zero_idx, val in enumerate(row_data):
+                            dst_cell = ws_merged.cell(row=out_r_idx, column=c_zero_idx + 1)
+                            dst_cell.value = val
+                            if (
+                                not (renumber_stt and c_zero_idx == s_idx)
+                                and val is not None
+                                and c_zero_idx < len(sample_row_dtypes)
+                                and sample_row_dtypes[c_zero_idx] == 's'
+                            ):
+                                dst_cell.data_type = 's'
+                            if c_zero_idx < len(sample_row_styles) and sample_row_styles[c_zero_idx] is not None:
+                                dst_cell._style = copy.copy(sample_row_styles[c_zero_idx])
+                            elif sample_row_styles and sample_row_styles[-1] is not None:
+                                dst_cell._style = copy.copy(sample_row_styles[-1])
+
+                        if sample_row_height is not None:
+                            ws_merged.row_dimensions[out_r_idx].height = sample_row_height
 
                         if progress_callback and (total_merged_rows % 2000 == 0):
                             progress_callback(f_idx, total_files, f"Đang gộp tệp {f_idx}/{total_files} ({p.name}) - Đã gộp {total_merged_rows:,} dòng...")
@@ -803,10 +931,6 @@ class ExcelMerger:
             log(f"  📥 ({f_idx}/{total_files}) Đã gộp tổng cộng {file_row_count} dòng từ: {p.name}", "info")
             if progress_callback:
                 progress_callback(f_idx, total_files, f"Đang gộp ({f_idx}/{total_files}): {p.name}")
-
-        # Gán lại độ rộng cột từ tệp Master
-        for col_letter, w in col_widths.items():
-            ws_merged.column_dimensions[col_letter].width = w
 
         wb_merged.save(out_path)
         wb_merged.close()

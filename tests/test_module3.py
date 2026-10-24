@@ -187,5 +187,83 @@ class TestModule3(unittest.TestCase):
 
         print("--> Test ExcelMerger PASSED successfully!")
 
+    def test_split_preserves_original_excel_formatting(self):
+        """Kiểm tra tách file bảo toàn 100% định dạng gốc (merge cells, font, màu nền, border, number_format, chiều cao dòng)."""
+        from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
+
+        fmt_file = TEMP_DIR / "test_split_formatted.xlsx"
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "DS_Cap_Bang"
+
+        # Dòng 1: Banner gộp ô A1:F1, nền xanh, chữ Times New Roman 14 đậm
+        ws.append(["DANH SÁCH BẰNG TỐT NGHIỆP THCS", None, None, None, None, None])
+        ws.merge_cells("A1:F1")
+        ws.row_dimensions[1].height = 35.0
+        c_banner = ws.cell(1, 1)
+        c_banner.font = Font(name="Times New Roman", size=14, bold=True, color="FFFFFF")
+        c_banner.fill = PatternFill("solid", fgColor="397AC3")
+        c_banner.alignment = Alignment(horizontal="center", vertical="center")
+
+        # Dòng 2: Header
+        ws.append(["STT", "Số hiệu bằng", "Họ và tên", "Ngày sinh", "Tên trường", "Tên đơn vị"])
+        ws.row_dimensions[2].height = 28.0
+        thin_border = Border(
+            left=Side(style="thin"), right=Side(style="thin"),
+            top=Side(style="thin"), bottom=Side(style="thin")
+        )
+        for col_i in range(1, 7):
+            c_hdr = ws.cell(2, col_i)
+            c_hdr.font = Font(name="Times New Roman", size=12, bold=True)
+            c_hdr.fill = PatternFill("solid", fgColor="D9E1F2")
+            c_hdr.border = thin_border
+
+        # Dòng 3: Học sinh có định dạng Text @ (số 0 ở đầu) và ô tô vàng cảnh báo
+        ws.append([1, "001234", "Nguyễn Văn An", "15/05/2008", "THCS A", "Đơn vị 1"])
+        ws.row_dimensions[3].height = 22.0
+        for col_i in range(1, 7):
+            c_d = ws.cell(3, col_i)
+            c_d.font = Font(name="Times New Roman", size=11)
+            c_d.border = thin_border
+        ws.cell(3, 2).number_format = "@"
+        ws.cell(3, 2).data_type = "s"
+        ws.cell(3, 4).fill = PatternFill("solid", fgColor="FFF59D")
+
+        wb.save(fmt_file)
+        wb.close()
+
+        out_dir = TEMP_DIR / "test_out_split_fmt"
+        res = ExcelSplitter.split_file(
+            file_path=fmt_file,
+            split_col_idx=5,
+            output_dir=out_dir,
+            renumber_stt=True
+        )
+        self.assertEqual(res["status"], "success")
+
+        out_file = out_dir / "Đơn vị 1.xlsx"
+        self.assertTrue(out_file.exists())
+
+        wb_out = openpyxl.load_workbook(out_file)
+        ws_out = wb_out.active
+
+        # Kiểm tra tên sheet gốc, vùng gộp ô, chiều cao dòng, font, màu nền, border, định dạng text @
+        self.assertEqual(ws_out.title, "DS_Cap_Bang")
+        self.assertIn("A1:F1", [str(r) for r in ws_out.merged_cells.ranges])
+        self.assertEqual(ws_out.row_dimensions[1].height, 35.0)
+        self.assertEqual(ws_out.row_dimensions[2].height, 28.0)
+        self.assertEqual(ws_out.row_dimensions[3].height, 22.0)
+        self.assertEqual(ws_out.cell(1, 1).font.name, "Times New Roman")
+        self.assertEqual(ws_out.cell(1, 1).font.size, 14)
+        self.assertTrue(ws_out.cell(1, 1).font.bold)
+        self.assertTrue(ws_out.cell(1, 1).fill.fgColor.rgb.endswith("397AC3"))
+        self.assertEqual(ws_out.cell(2, 2).border.top.style, "thin")
+        self.assertEqual(ws_out.cell(3, 2).value, "001234")
+        self.assertEqual(ws_out.cell(3, 2).data_type, "s")
+        self.assertEqual(ws_out.cell(3, 2).number_format, "@")
+        self.assertEqual(ws_out.cell(3, 3).font.name, "Times New Roman")
+        self.assertTrue(ws_out.cell(3, 4).fill.fgColor.rgb.endswith("FFF59D"))
+        wb_out.close()
+
 if __name__ == "__main__":
     unittest.main()

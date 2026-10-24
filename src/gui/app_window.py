@@ -22,11 +22,12 @@ from src.gui.theme import (
 class MainWindow:
     """
     Cửa sổ chính của ứng dụng Số hóa Văn bằng THCS.
-    Tập trung vào 4 nhóm công cụ cốt lõi:
+    Tập trung vào 5 nhóm công cụ cốt lõi:
     - Tab 1: Gộp vào mẫu chuẩn 28 cột
     - Tab 2: Kiểm tra & Chuẩn hoá lỗi dữ liệu
     - Tab 3: Tách / Ghép tệp Excel
     - Tab 4: Đổi đuôi (.doc, .xls) & Chuyển mã sang Unicode
+    - Tab 5: OCR trích xuất ảnh sổ sang Excel
     """
     def __init__(self, root: tk.Tk):
         self.root = root
@@ -145,6 +146,8 @@ class MainWindow:
             last_f = getattr(self.custom_view, "last_merge_output_file", None)
         if not last_f:
             last_f = getattr(self.custom_view, "last_encoding_output_file", None)
+        if not last_f:
+            last_f = getattr(self.custom_view, "last_ocr_output_file", None)
 
         if last_f and Path(last_f).exists():
             open_path_in_os(Path(last_f))

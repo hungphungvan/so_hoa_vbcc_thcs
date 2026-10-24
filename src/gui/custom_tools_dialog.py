@@ -31,6 +31,13 @@ from src.smart_merger import (
 from src.gui.column_mapping_dialog import ColumnMappingDialog
 from src.file_converter import FileFormatConverter
 from src.data_inspector import DataInspector
+from src.ocr_processor import (
+    OCRProcessor,
+    OCRConfigManager,
+    AVAILABLE_OCR_MODELS,
+    DEFAULT_BASE_URL,
+    DEFAULT_MODEL_NAME,
+)
 
 def open_path_in_os(path: Path):
     """Mở file hoặc thư mục bằng trình quản lý tệp của hệ điều hành (macOS Finder / Windows Explorer)."""
@@ -111,6 +118,22 @@ class CustomToolsView(ttk.Frame):
         self.last_encoding_output_file: Path | None = None
         self.encoding_cancel_requested = False
 
+        # Biến Tab 5 (OCR trích xuất ảnh sổ sang Excel)
+        self.ocr_config_mgr = OCRConfigManager()
+        self.ocr_processor = OCRProcessor(config_mgr=self.ocr_config_mgr)
+        ocr_init_cfg = self.ocr_config_mgr.load_config()
+        self.ocr_api_key_var = tk.StringVar(value=ocr_init_cfg.get("api_key", ""))
+        self.ocr_base_url_var = tk.StringVar(value=ocr_init_cfg.get("base_url", DEFAULT_BASE_URL))
+        self.ocr_model_var = tk.StringVar(value=ocr_init_cfg.get("model_name", DEFAULT_MODEL_NAME))
+        self.ocr_show_key = False
+        init_prompt, init_prompt_src = self.ocr_config_mgr.resolve_prompt_for_folder(None)
+        self.ocr_prompt_text: str = init_prompt
+        self.ocr_prompt_source_var = tk.StringVar(value=init_prompt_src)
+        self.ocr_images_list: list[Path] = []
+        self.ocr_out_var = tk.StringVar()
+        self.last_ocr_output_file: Path | None = None
+        self.ocr_cancel_requested = False
+
         # Quản lý tệp vừa được tạo mới nhất toàn hệ thống
         self.last_created_file: Path | None = None
 
@@ -177,6 +200,11 @@ class CustomToolsView(ttk.Frame):
         self.tab_encoding = ttk.Frame(sub_nb_ce, padding=4)
         sub_nb_ce.add(self.tab_encoding, text="  🔤 4.2. Chuyển VNI, TCVN ➔ UNICODE  ")
         self._build_tab_encoding(self.tab_encoding)
+
+        # Tab 5: OCR trích xuất ảnh sổ sang Excel
+        self.tab_ocr = ttk.Frame(self.notebook, padding=6)
+        self.notebook.add(self.tab_ocr, text="  📷 5. OCR  ")
+        self._build_tab_ocr(self.tab_ocr)
 
         # 3. Vùng Console Log chung ở dưới cùng
         log_frame = ttk.LabelFrame(main_container, text="Nhật ký hoạt động & Thông báo", padding=4)
@@ -1571,6 +1599,61 @@ class CustomToolsView(ttk.Frame):
                 self.encoding_status_lbl.config(text="❌ Lỗi khi chuyển mã!", foreground=self.palette.DANGER)
                 self._log(f"❌ Lỗi khi chuyển đổi bảng mã: {err}\n{trace}", "error")
                 messagebox.showerror("Lỗi chuyển mã", f"Đã xảy ra lỗi khi chuyển đổi bảng mã:\n{err}", parent=self)
+            elif msg_type == "ocr_prog":
+                val, msg = item[1], item[2]
+                self.ocr_prog_bar["value"] = val
+                self.ocr_status_lbl.config(text=f"⏳ {msg}...", foreground=self.palette.PRIMARY)
+            elif msg_type == "ocr_file_status":
+                img_p, st_text, st_count = item[1], item[2], item[3]
+                for child in self.ocr_tree.get_children():
+                    vals = list(self.ocr_tree.item(child, "values"))
+                    if str(img_p) in vals or img_p.name in vals:
+                        vals[3] = st_text
+                        vals[4] = f"{st_count} HS" if st_count > 0 else "---"
+                        self.ocr_tree.item(child, values=vals)
+            elif msg_type == "ocr_done":
+                res = item[1]
+                self.ocr_prog_bar["value"] = 100
+                self.btn_run_ocr.config(state=tk.NORMAL)
+                self.btn_cancel_ocr.config(state=tk.DISABLED)
+                st = res.get("status")
+                out_p = res.get("output_file")
+                tot_stu = res.get("total_students", 0)
+                succ_img = res.get("success_images", 0)
+                tot_img = res.get("total_images", 0)
+                suspects = res.get("suspect_rows_count", 0)
+
+                if st == "success" and out_p:
+                    self.btn_open_ocr_file.config(state=tk.NORMAL)
+                    self.last_ocr_output_file = Path(out_p)
+                    self.last_created_file = Path(out_p)
+                    self.ocr_status_lbl.config(
+                        text=f"✅ Hoàn tất OCR: {tot_stu:,} học sinh ({succ_img}/{tot_img} ảnh)!",
+                        foreground=self.palette.SUCCESS
+                    )
+                    msg_lines = [
+                        f"Đã trích xuất thành công {tot_stu:,} học sinh từ {succ_img}/{tot_img} ảnh!",
+                        f"• Dòng cần kiểm tra lại (viết tay/mờ): {suspects}",
+                        f"• Tệp Excel: {Path(out_p).name}",
+                    ]
+                    messagebox.showinfo("Hoàn tất OCR", "\n".join(msg_lines), parent=self)
+                else:
+                    self.ocr_status_lbl.config(
+                        text="⚠️ Không trích xuất được học sinh nào!",
+                        foreground=self.palette.WARNING
+                    )
+                    messagebox.showwarning(
+                        "Không có dữ liệu OCR",
+                        res.get("message", "Không trích xuất được dữ liệu học sinh hợp lệ."),
+                        parent=self
+                    )
+            elif msg_type == "ocr_error":
+                err, trace = item[1], item[2]
+                self.btn_run_ocr.config(state=tk.NORMAL)
+                self.btn_cancel_ocr.config(state=tk.DISABLED)
+                self.ocr_status_lbl.config(text="❌ Lỗi khi chạy OCR!", foreground=self.palette.DANGER)
+                self._log(f"❌ Lỗi khi chạy OCR: {err}\n{trace}", "error")
+                messagebox.showerror("Lỗi OCR", f"Đã xảy ra lỗi trong quá trình chạy OCR:\n{err}", parent=self)
 
         self.after(100, self._start_queue_poller)
 
@@ -2007,6 +2090,417 @@ class CustomToolsView(ttk.Frame):
         except Exception as e:
             trace = traceback.format_exc()
             self.msg_queue.put(("encoding_error", str(e), trace))
+
+    # =========================================================================
+    # TAB 5: OCR TRÍCH XUẤT ẢNH SỔ SANG EXCEL
+    # =========================================================================
+    def _build_tab_ocr(self, parent):
+        p = self.palette
+
+        # 1. Khung Cấu hình API & Prompt (Đặt ở trên cùng)
+        cfg_card = ttk.LabelFrame(parent, text="1. Cấu hình AI OCR (API Key, Model & Prompt)", padding=6)
+        cfg_card.pack(side=tk.TOP, fill=tk.X, pady=(0, 4))
+
+        r_api = ttk.Frame(cfg_card)
+        r_api.pack(fill=tk.X, pady=(0, 4))
+
+        ttk.Label(r_api, text="API Key:", font=FONT_LABEL_BOLD).pack(side=tk.LEFT, padx=(0, 4))
+        self.ocr_api_key_entry = ttk.Entry(r_api, textvariable=self.ocr_api_key_var, font=FONT_LABEL, show="•", width=26)
+        self.ocr_api_key_entry.pack(side=tk.LEFT, padx=(0, 4))
+
+        self.btn_toggle_ocr_key = ttk.Button(r_api, text="👁️", width=3, command=self._toggle_ocr_api_key_visibility)
+        self.btn_toggle_ocr_key.pack(side=tk.LEFT, padx=(0, 12))
+
+        ttk.Label(r_api, text="Base URL:", font=FONT_LABEL).pack(side=tk.LEFT, padx=(0, 4))
+        self.ocr_base_url_entry = ttk.Entry(r_api, textvariable=self.ocr_base_url_var, font=FONT_LABEL, width=22)
+        self.ocr_base_url_entry.pack(side=tk.LEFT, padx=(0, 12))
+
+        ttk.Label(r_api, text="Model:", font=FONT_LABEL_BOLD).pack(side=tk.LEFT, padx=(0, 4))
+        self.ocr_model_cb = ttk.Combobox(r_api, textvariable=self.ocr_model_var, values=AVAILABLE_OCR_MODELS, font=FONT_LABEL, width=24)
+        self.ocr_model_cb.pack(side=tk.LEFT, padx=(0, 8))
+
+        ttk.Button(r_api, text="💾 Lưu cấu hình", command=self._on_save_ocr_config).pack(side=tk.RIGHT)
+
+        r_prompt = ttk.Frame(cfg_card)
+        r_prompt.pack(fill=tk.X)
+
+        ttk.Label(r_prompt, text="Prompt đang dùng:", font=FONT_LABEL_BOLD).pack(side=tk.LEFT, padx=(0, 6))
+        self.ocr_prompt_lbl = ttk.Label(r_prompt, textvariable=self.ocr_prompt_source_var, font=FONT_MUTED, foreground=p.PRIMARY)
+        self.ocr_prompt_lbl.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        ttk.Button(r_prompt, text="📂 Nạp file prompt.txt...", command=self._on_choose_ocr_prompt_file).pack(side=tk.RIGHT, padx=(6, 0))
+        ttk.Button(r_prompt, text="📝 Xem / Sửa Prompt...", command=self._open_ocr_prompt_dialog).pack(side=tk.RIGHT)
+
+        # 3. Khung Tùy chọn xuất file & Bắt đầu OCR (GHIM CỐ ĐỊNH Ở ĐÁY)
+        ctrl_card = ttk.LabelFrame(parent, text="3. Đầu ra & Thực thi OCR", padding=8)
+        ctrl_card.pack(side=tk.BOTTOM, fill=tk.X, pady=(4, 2))
+
+        r_out = ttk.Frame(ctrl_card)
+        r_out.pack(fill=tk.X, pady=(0, 4))
+
+        ttk.Label(r_out, text="Tệp Excel kết quả:", font=FONT_LABEL_BOLD).pack(side=tk.LEFT, padx=(0, 6))
+        self.ocr_out_entry = ttk.Entry(r_out, textvariable=self.ocr_out_var, font=FONT_LABEL)
+        self.ocr_out_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 6))
+        ttk.Button(r_out, text="💾 Lưu thành...", command=self._on_choose_ocr_output_path).pack(side=tk.LEFT)
+
+        self.ocr_prog_bar = ttk.Progressbar(ctrl_card, orient=tk.HORIZONTAL, mode="determinate")
+        self.ocr_prog_bar.pack(fill=tk.X, pady=(2, 6))
+
+        r_act = ttk.Frame(ctrl_card)
+        r_act.pack(fill=tk.X)
+
+        self.ocr_status_lbl = ttk.Label(r_act, text="Sẵn sàng chạy OCR.", font=FONT_LABEL_BOLD, foreground=p.PRIMARY)
+        self.ocr_status_lbl.pack(side=tk.LEFT)
+
+        self.btn_open_ocr_file = ttk.Button(
+            r_act,
+            text="📄 Mở file Excel vừa tạo",
+            command=self._open_last_ocr_file,
+            state=tk.DISABLED
+        )
+        self.btn_open_ocr_file.pack(side=tk.RIGHT, padx=(8, 0))
+
+        self.btn_cancel_ocr = ttk.Button(
+            r_act,
+            text="🛑 DỪNG",
+            command=self._cancel_ocr,
+            state=tk.DISABLED
+        )
+        self.btn_cancel_ocr.pack(side=tk.RIGHT, padx=(8, 0))
+
+        self.btn_run_ocr = ttk.Button(
+            r_act,
+            text="⚡ BẮT ĐẦU CHẠY OCR",
+            command=self._start_ocr_thread,
+            style="Action.TButton"
+        )
+        self.btn_run_ocr.pack(side=tk.RIGHT)
+
+        # 2. Khung Danh sách ảnh nguồn (Ở giữa, co dãn)
+        mid_card = ttk.LabelFrame(parent, text="2. Danh sách ảnh sổ gốc cần trích xuất (.jpg, .jpeg, .png, .heic, .heif)", padding=6)
+        mid_card.pack(side=tk.TOP, fill=tk.BOTH, expand=True, pady=(2, 2))
+
+        btn_row = ttk.Frame(mid_card)
+        btn_row.pack(fill=tk.X, pady=(0, 4))
+
+        ttk.Button(btn_row, text="📁 Chọn thư mục ảnh trường...", command=self._on_choose_ocr_folder).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(btn_row, text="🖼️ Chọn nhiều ảnh lẻ...", command=self._on_choose_ocr_files).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(btn_row, text="❌ Xóa danh sách", command=self._clear_ocr_list).pack(side=tk.LEFT, padx=(0, 16))
+
+        self.ocr_files_count_lbl = ttk.Label(btn_row, text="Chưa chọn ảnh nào", font=FONT_LABEL_BOLD)
+        self.ocr_files_count_lbl.pack(side=tk.LEFT)
+
+        o_cols = ("stt", "file_name", "size", "status", "students", "path")
+        self.ocr_tree = ttk.Treeview(mid_card, columns=o_cols, show="headings", height=5)
+        self.ocr_tree.heading("stt", text="STT")
+        self.ocr_tree.heading("file_name", text="Tên file ảnh (Sắp xếp tự nhiên)")
+        self.ocr_tree.heading("size", text="Kích thước")
+        self.ocr_tree.heading("status", text="Trạng thái OCR")
+        self.ocr_tree.heading("students", text="Số HS trích xuất")
+        self.ocr_tree.heading("path", text="Đường dẫn")
+
+        self.ocr_tree.column("stt", width=45, anchor=tk.CENTER)
+        self.ocr_tree.column("file_name", width=240, anchor=tk.W)
+        self.ocr_tree.column("size", width=95, anchor=tk.CENTER)
+        self.ocr_tree.column("status", width=180, anchor=tk.CENTER)
+        self.ocr_tree.column("students", width=120, anchor=tk.CENTER)
+        self.ocr_tree.column("path", width=280, anchor=tk.W)
+
+        o_sb = ttk.Scrollbar(mid_card, orient=tk.VERTICAL, command=self.ocr_tree.yview)
+        self.ocr_tree.configure(yscrollcommand=o_sb.set)
+        self.ocr_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        o_sb.pack(side=tk.RIGHT, fill=tk.Y)
+
+    def _toggle_ocr_api_key_visibility(self):
+        self.ocr_show_key = not self.ocr_show_key
+        self.ocr_api_key_entry.config(show="" if self.ocr_show_key else "•")
+
+    def _on_save_ocr_config(self):
+        api_key = self.ocr_api_key_var.get().strip()
+        base_url = self.ocr_base_url_var.get().strip() or DEFAULT_BASE_URL
+        model_name = self.ocr_model_var.get().strip() or DEFAULT_MODEL_NAME
+        self.ocr_config_mgr.save_config(
+            api_key=api_key,
+            base_url=base_url,
+            model_name=model_name,
+        )
+        self._log(f"💾 Đã lưu cấu hình OCR (Model: {model_name}, Base URL: {base_url}).", "success")
+        messagebox.showinfo("Đã lưu cấu hình", "Đã lưu cấu hình API Key, Base URL và Model thành công!", parent=self)
+
+    def _on_choose_ocr_prompt_file(self):
+        f = filedialog.askopenfilename(
+            title="Chọn tệp prompt.txt cho OCR",
+            filetypes=[("Text Files", "*.txt"), ("All Files", "*.*")],
+            parent=self
+        )
+        if not f:
+            return
+        try:
+            p = Path(f)
+            txt = p.read_text(encoding="utf-8").strip()
+            if txt:
+                self.ocr_prompt_text = txt
+                self.ocr_prompt_source_var.set(f"Tệp tùy chọn ({p.name})")
+                self._log(f"📝 Đã nạp nội dung Prompt từ tệp: {p}", "info")
+        except Exception as e:
+            messagebox.showerror("Lỗi đọc file", f"Không thể đọc tệp prompt:\n{e}", parent=self)
+
+    def _open_ocr_prompt_dialog(self):
+        dlg = OCRPromptDialog(
+            parent=self.winfo_toplevel(),
+            current_prompt=self.ocr_prompt_text,
+            default_prompt=self.ocr_config_mgr.get_default_prompt(),
+            is_dark=self.is_dark,
+        )
+        dlg.wait_window()
+        if dlg.saved_prompt is not None:
+            self.ocr_prompt_text = dlg.saved_prompt
+            self.ocr_prompt_source_var.set("Prompt tùy chỉnh trên giao diện")
+            self.ocr_config_mgr.save_config(
+                api_key=self.ocr_api_key_var.get().strip(),
+                base_url=self.ocr_base_url_var.get().strip(),
+                model_name=self.ocr_model_var.get().strip(),
+                custom_prompt=self.ocr_prompt_text,
+            )
+            self._log("📝 Đã cập nhật nội dung Prompt OCR.", "success")
+
+    def _on_choose_ocr_folder(self):
+        d = filedialog.askdirectory(title="Chọn thư mục chứa ảnh sổ gốc (vd: 01, 02)", parent=self)
+        if not d:
+            return
+        folder_p = Path(d)
+        scan_res = OCRProcessor.scan_images([folder_p])
+        if not scan_res:
+            messagebox.showinfo(
+                "Thông báo",
+                f"Thư mục '{folder_p.name}' trống hoặc không chứa tệp ảnh hợp lệ (.jpg, .jpeg, .png, .heic, .heif)!",
+                parent=self
+            )
+            return
+
+        self.ocr_images_list = [item["path"] for item in scan_res]
+        # Tự động tìm kiếm Prompt theo 3 cấp độ giống dự án so-hoa-vbcc
+        prompt_txt, prompt_src = self.ocr_config_mgr.resolve_prompt_for_folder(folder_p)
+        self.ocr_prompt_text = prompt_txt
+        self.ocr_prompt_source_var.set(prompt_src)
+
+        # Gợi ý đường dẫn lưu file kết quả mặc định: truong_<ten_thu_muc>_ketqua.xlsx
+        default_out = folder_p.parent / f"truong_{folder_p.name}_ketqua.xlsx"
+        self.ocr_out_var.set(str(default_out))
+
+        self._refresh_ocr_tree(scan_res)
+        self._log(
+            f"📁 Đã nạp {len(scan_res)} ảnh từ thư mục '{folder_p.name}' (Năm học: {folder_p.parent.name}). Nguồn prompt: {prompt_src}",
+            "info"
+        )
+
+    def _on_choose_ocr_files(self):
+        files = filedialog.askopenfilenames(
+            title="Chọn các tệp ảnh sổ gốc cần chạy OCR",
+            filetypes=[
+                ("Image Files", "*.jpg *.jpeg *.png *.heic *.heif *.JPG *.JPEG *.PNG *.HEIC *.HEIF"),
+                ("All Files", "*.*"),
+            ],
+            parent=self
+        )
+        if not files:
+            return
+        scan_res = OCRProcessor.scan_images([Path(f) for f in files])
+        if not scan_res:
+            return
+        self.ocr_images_list = [item["path"] for item in scan_res]
+        first_parent = self.ocr_images_list[0].parent
+        prompt_txt, prompt_src = self.ocr_config_mgr.resolve_prompt_for_folder(first_parent)
+        self.ocr_prompt_text = prompt_txt
+        self.ocr_prompt_source_var.set(prompt_src)
+        self.ocr_out_var.set(str(first_parent / f"truong_{first_parent.name}_ketqua.xlsx"))
+        self._refresh_ocr_tree(scan_res)
+
+    def _clear_ocr_list(self):
+        self.ocr_images_list.clear()
+        for item in self.ocr_tree.get_children():
+            self.ocr_tree.delete(item)
+        self.ocr_files_count_lbl.config(text="Chưa chọn ảnh nào", foreground=self.palette.TEXT_MUTED)
+        self.btn_open_ocr_file.config(state=tk.DISABLED)
+
+    def _refresh_ocr_tree(self, scan_data: list[dict] | None = None):
+        for item in self.ocr_tree.get_children():
+            self.ocr_tree.delete(item)
+
+        if not self.ocr_images_list:
+            self.ocr_files_count_lbl.config(text="Chưa chọn ảnh nào", foreground=self.palette.TEXT_MUTED)
+            return
+
+        items = scan_data or OCRProcessor.scan_images(self.ocr_images_list)
+        self.ocr_files_count_lbl.config(
+            text=f"Đã chọn {len(items)} ảnh (đã sắp xếp tự nhiên 1, 2, ..., 9, 10)",
+            foreground=self.palette.SUCCESS
+        )
+        for idx, it in enumerate(items, start=1):
+            self.ocr_tree.insert(
+                "",
+                tk.END,
+                values=(idx, it["name"], it["size_str"], it["status"], "---", str(it["path"]))
+            )
+
+    def _on_choose_ocr_output_path(self):
+        init_name = Path(self.ocr_out_var.get()).name if self.ocr_out_var.get() else "ketqua_ocr.xlsx"
+        f = filedialog.asksaveasfilename(
+            title="Lưu tệp Excel kết quả OCR thành",
+            initialfile=init_name,
+            defaultextension=".xlsx",
+            filetypes=[("Excel Files", "*.xlsx")],
+            parent=self
+        )
+        if f:
+            self.ocr_out_var.set(f)
+
+    def _open_last_ocr_file(self):
+        if self.last_ocr_output_file and self.last_ocr_output_file.exists():
+            open_path_in_os(self.last_ocr_output_file)
+        else:
+            messagebox.showinfo("Thông báo", "Chưa có tệp Excel kết quả OCR nào.", parent=self)
+
+    def _cancel_ocr(self):
+        if messagebox.askyesno("Xác nhận dừng OCR", "Bạn có chắc chắn muốn dừng tiến trình OCR đang chạy không?\n(Các ảnh đã đọc thành công trước đó vẫn sẽ được xuất ra file)", parent=self):
+            self.ocr_cancel_requested = True
+            self.btn_cancel_ocr.config(state=tk.DISABLED)
+            self.ocr_status_lbl.config(text="⏳ Đang dừng tiến trình OCR...", foreground=self.palette.WARNING)
+
+    def _start_ocr_thread(self):
+        if not self.ocr_images_list:
+            messagebox.showwarning("Chưa chọn ảnh", "Vui lòng chọn thư mục chứa ảnh hoặc các tệp ảnh cần chạy OCR!", parent=self)
+            return
+
+        api_key = self.ocr_api_key_var.get().strip()
+        if not api_key:
+            messagebox.showwarning("Thiếu API Key", "Vui lòng nhập API Key (CKEY_API_KEY) ở mục Cấu hình AI OCR!", parent=self)
+            return
+
+        out_path_str = self.ocr_out_var.get().strip()
+        if not out_path_str:
+            self._on_choose_ocr_output_path()
+            out_path_str = self.ocr_out_var.get().strip()
+            if not out_path_str:
+                return
+
+        base_url = self.ocr_base_url_var.get().strip() or DEFAULT_BASE_URL
+        model_name = self.ocr_model_var.get().strip() or DEFAULT_MODEL_NAME
+        prompt_text = self.ocr_prompt_text.strip() or self.ocr_config_mgr.get_default_prompt()
+
+        # Tự động lưu lại cấu hình hiện hành
+        self.ocr_config_mgr.save_config(api_key=api_key, base_url=base_url, model_name=model_name)
+
+        self.ocr_cancel_requested = False
+        self.btn_run_ocr.config(state=tk.DISABLED)
+        self.btn_cancel_ocr.config(state=tk.NORMAL)
+        self.btn_open_ocr_file.config(state=tk.DISABLED)
+        self.ocr_prog_bar["value"] = 0
+        self.ocr_status_lbl.config(text="⏳ Đang kết nối AI và trích xuất dữ liệu từ ảnh...", foreground=self.palette.WARNING)
+
+        images = list(self.ocr_images_list)
+        out_p = Path(out_path_str)
+
+        def run():
+            try:
+                def prog_cb(cur, tot, msg):
+                    val = (cur / tot * 100) if tot > 0 else 0
+                    self.msg_queue.put(("ocr_prog", val, msg))
+
+                def file_st_cb(img_p, st_str, count):
+                    self.msg_queue.put(("ocr_file_status", img_p, st_str, count))
+
+                res = self.ocr_processor.process_ocr_batch(
+                    image_paths=images,
+                    output_excel_path=out_p,
+                    prompt_text=prompt_text,
+                    api_key=api_key,
+                    base_url=base_url,
+                    model_name=model_name,
+                    progress_callback=prog_cb,
+                    file_status_callback=file_st_cb,
+                    log_callback=lambda m, l: self._log(m, l),
+                    cancel_token=lambda: self.ocr_cancel_requested,
+                )
+                self.msg_queue.put(("ocr_done", res))
+            except Exception as e:
+                trace = traceback.format_exc()
+                self.msg_queue.put(("ocr_error", str(e), trace))
+
+        threading.Thread(target=run, daemon=True).start()
+
+
+class OCRPromptDialog(tk.Toplevel):
+    """Hộp thoại Xem và Chỉnh sửa nội dung Prompt cho hệ thống AI OCR."""
+    def __init__(self, parent, current_prompt: str, default_prompt: str, is_dark: bool | None = None):
+        super().__init__(parent)
+        self.palette = get_theme_palette(is_dark)
+        self.default_prompt = default_prompt
+        self.saved_prompt: str | None = None
+
+        self.title("📝 Xem & Chỉnh sửa Prompt OCR")
+        self.geometry("820x560")
+        self.minsize(680, 420)
+        self.configure(bg=self.palette.WINDOW_BG)
+        self.transient(parent)
+        self.grab_set()
+
+        self._build_ui(current_prompt)
+        self._center_window(parent)
+
+    def _center_window(self, parent):
+        self.update_idletasks()
+        w, h = 820, 560
+        if parent and parent.winfo_exists():
+            x = parent.winfo_rootx() + (parent.winfo_width() // 2) - (w // 2)
+            y = parent.winfo_rooty() + (parent.winfo_height() // 2) - (h // 2)
+            self.geometry(f"{w}x{h}+{max(0, x)}+{max(0, y)}")
+
+    def _build_ui(self, current_prompt: str):
+        p = self.palette
+
+        h_frame = tk.Frame(self, bg=p.HEADER_BANNER_BG, padx=14, pady=8)
+        h_frame.pack(side=tk.TOP, fill=tk.X)
+        tk.Label(
+            h_frame,
+            text="📝 NỘI DUNG PROMPT CHỈ THỊ CHO AI OCR",
+            font=FONT_TITLE,
+            bg=p.HEADER_BANNER_BG,
+            fg=p.HEADER_BANNER_FG
+        ).pack(anchor=tk.W)
+
+        b_frame = ttk.Frame(self, padding=(12, 8))
+        b_frame.pack(side=tk.BOTTOM, fill=tk.X)
+
+        ttk.Button(b_frame, text="🔄 Khôi phục Mặc định", command=self._reset_default).pack(side=tk.LEFT)
+        ttk.Button(b_frame, text="Đóng", command=self.destroy).pack(side=tk.RIGHT)
+        ttk.Button(b_frame, text="✅ Lưu & Áp dụng Prompt", command=self._save, style="Action.TButton").pack(side=tk.RIGHT, padx=(0, 8))
+
+        body = ttk.Frame(self, padding=10)
+        body.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+
+        self.txt = ScrolledText(
+            body,
+            font=FONT_LOG,
+            bg=p.LOG_BG,
+            fg=p.LOG_FG,
+            insertbackground=p.LOG_FG,
+            wrap=tk.WORD
+        )
+        self.txt.pack(fill=tk.BOTH, expand=True)
+        self.txt.insert("1.0", current_prompt)
+
+    def _reset_default(self):
+        self.txt.delete("1.0", tk.END)
+        self.txt.insert("1.0", self.default_prompt)
+
+    def _save(self):
+        content = self.txt.get("1.0", tk.END).strip()
+        if not content:
+            messagebox.showwarning("Prompt trống", "Nội dung Prompt không được để trống!", parent=self)
+            return
+        self.saved_prompt = content
+        self.destroy()
 
 
 

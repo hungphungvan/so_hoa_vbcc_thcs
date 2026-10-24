@@ -1,7 +1,7 @@
 import unittest
 import tkinter as tk
 from src.gui.dialogs import DateFixDialog
-from src.gui.custom_tools_dialog import CustomToolsDialog, CustomToolsView, ManageProfilesDialog
+from src.gui.custom_tools_dialog import CustomToolsDialog, CustomToolsView, ManageProfilesDialog, OCRPromptDialog
 from src.gui.column_mapping_dialog import ColumnMappingDialog
 from src.smart_merger import MappingProfileManager
 from src.gui.export_dialog import ExportDialog
@@ -90,7 +90,14 @@ class TestDialogs(unittest.TestCase):
         self.assertTrue(hasattr(view, 'smart_files_list'))
         self.assertTrue(hasattr(view, 'btn_run_convert'))
         self.assertTrue(hasattr(view, 'convert_files_list'))
+        self.assertTrue(hasattr(view, 'tab_ocr'))
+        self.assertTrue(hasattr(view, 'btn_run_ocr'))
+        self.assertTrue(hasattr(view, 'ocr_tree'))
         view.destroy()
+
+        dlg_ocr_prompt = OCRPromptDialog(self.root, "Current prompt", "Default prompt")
+        self.assertIsNotNone(dlg_ocr_prompt)
+        dlg_ocr_prompt.destroy()
 
         dlg = CustomToolsDialog(self.root)
         self.assertIsNotNone(dlg)

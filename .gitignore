@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 *.so
 .venv/
+.env
 env/
 venv/
 ENV/
@@ -38,6 +39,7 @@ test_*.docx
 *.db-wal
 *.db-shm
 data/backups/
+data/ocr_config.json
 data/*.db
 data/*.db-wal
 data/*.db-shm
