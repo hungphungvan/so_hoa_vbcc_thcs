@@ -607,24 +607,27 @@ class MappingProfileManager:
                 "profiles": [],
                 "columns": {},
                 "fallback_columns": {"17": 14},
+                "ignored_sheet_names": [],
                 "updated_at": ""
             })
 
     def _load_raw(self) -> dict:
         try:
             if not self.storage_path.exists():
-                return {"version": "3.0", "profiles": [], "columns": {}, "fallback_columns": {"17": 14}}
+                return {"version": "3.0", "profiles": [], "columns": {}, "fallback_columns": {"17": 14}, "ignored_sheet_names": []}
             with open(self.storage_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 if not isinstance(data, dict):
-                    return {"version": "3.0", "profiles": [], "columns": {}, "fallback_columns": {"17": 14}}
+                    return {"version": "3.0", "profiles": [], "columns": {}, "fallback_columns": {"17": 14}, "ignored_sheet_names": []}
                 if "profiles" not in data:
                     data["profiles"] = []
                 if "version" not in data:
                     data["version"] = "3.0"
+                if "ignored_sheet_names" not in data or not isinstance(data["ignored_sheet_names"], list):
+                    data["ignored_sheet_names"] = []
                 return data
         except Exception:
-            return {"version": "3.0", "profiles": [], "columns": {}, "fallback_columns": {"17": 14}}
+            return {"version": "3.0", "profiles": [], "columns": {}, "fallback_columns": {"17": 14}, "ignored_sheet_names": []}
 
     def _save_raw(self, data: dict):
         with open(self.storage_path, "w", encoding="utf-8") as f:
@@ -667,6 +670,76 @@ class MappingProfileManager:
             self.set_fallback_columns(fbs)
             return True
         return False
+
+    # -------------------------------------------------------------------------
+    # QUẢN LÝ DANH SÁCH SHEET LUÔN BỎ QUA (Ignored Sheet Names)
+    # -------------------------------------------------------------------------
+
+    def get_ignored_sheet_names(self) -> list[str]:
+        """Lấy danh sách các tên Sheet được cấu hình luôn tự động bỏ qua."""
+        data = self._load_raw()
+        raw_list = data.get("ignored_sheet_names", [])
+        if not isinstance(raw_list, list):
+            return []
+        return [str(s).strip() for s in raw_list if str(s).strip()]
+
+    def is_sheet_ignored(self, sheet_name: str) -> bool:
+        """Kiểm tra một sheet có nằm trong danh sách tự động bỏ qua hay không."""
+        if not sheet_name:
+            return False
+        clean = sheet_name.strip().lower()
+        norm = normalize_text_for_match(sheet_name)
+        for s in self.get_ignored_sheet_names():
+            if not s:
+                continue
+            if s.strip().lower() == clean:
+                return True
+            if norm and normalize_text_for_match(s) == norm:
+                return True
+        return False
+
+    def add_ignored_sheet_name(self, sheet_name: str) -> bool:
+        """Thêm một tên sheet vào danh sách luôn tự động bỏ qua."""
+        sheet_name = (sheet_name or "").strip()
+        if not sheet_name:
+            return False
+        if self.is_sheet_ignored(sheet_name):
+            return False
+        data = self._load_raw()
+        ignored = data.get("ignored_sheet_names", [])
+        if not isinstance(ignored, list):
+            ignored = []
+        ignored.append(sheet_name)
+        data["ignored_sheet_names"] = ignored
+        data["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self._save_raw(data)
+        return True
+
+    def remove_ignored_sheet_name(self, sheet_name: str) -> bool:
+        """Xóa một tên sheet khỏi danh sách luôn tự động bỏ qua."""
+        sheet_name = (sheet_name or "").strip().lower()
+        data = self._load_raw()
+        ignored = data.get("ignored_sheet_names", [])
+        if not isinstance(ignored, list):
+            return False
+        new_ignored = [s for s in ignored if str(s).strip().lower() != sheet_name]
+        if len(new_ignored) != len(ignored):
+            data["ignored_sheet_names"] = new_ignored
+            data["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self._save_raw(data)
+            return True
+        return False
+
+    def set_ignored_sheet_names(self, sheet_names: list[str]) -> None:
+        """Cập nhật toàn bộ danh sách sheet luôn tự động bỏ qua."""
+        data = self._load_raw()
+        data["ignored_sheet_names"] = [str(s).strip() for s in sheet_names if str(s).strip()]
+        data["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self._save_raw(data)
+
+    def clear_ignored_sheet_names(self) -> None:
+        """Xóa toàn bộ danh sách sheet luôn tự động bỏ qua."""
+        self.set_ignored_sheet_names([])
 
     # -------------------------------------------------------------------------
     # QUẢN LÝ DANH SÁCH PROFILES ĐẢO NGƯỢC (Inverted Profiles)
@@ -1309,6 +1382,13 @@ class SmartMerger:
                 if check_cancel and check_cancel():
                     break
 
+                # 0. Kiểm tra nếu Sheet này nằm trong danh sách ghi nhớ luôn bỏ qua
+                sheet_title = (ws_curr.title or "").strip()
+                if self.profile_mgr.is_sheet_ignored(sheet_title):
+                    log(f"  ⏭️ Tự động bỏ qua Sheet '{sheet_title}' (thuộc danh sách ghi nhớ bỏ qua).", "info")
+                    sheets_skipped += 1
+                    continue
+
                 # 1. Quét tìm dòng tiêu đề và danh sách nhãn cột của sheet
                 header_info = detect_header_and_columns(ws_curr)
                 h_idx = header_info.get("header_row_idx", 1)
@@ -1394,6 +1474,7 @@ class SmartMerger:
                             confirmed_map = None
                             prof_name = None
                             custom_inverted = None
+                            remember_skip = False
 
                             if isinstance(cb_res, tuple):
                                 if cb_res[0] in ("cancel", "skip", "apply"):
@@ -1401,6 +1482,12 @@ class SmartMerger:
                                     confirmed_map = cb_res[1]
                                     prof_name = cb_res[2] if len(cb_res) > 2 else None
                                     custom_inverted = cb_res[3] if len(cb_res) > 3 else None
+                                    remember_skip = bool(cb_res[4]) if len(cb_res) > 4 else False
+                                elif len(cb_res) == 5:
+                                    c_map, p_name, _, is_skip, remember_skip = cb_res
+                                    action = "skip" if is_skip else "apply"
+                                    confirmed_map = c_map
+                                    prof_name = p_name
                                 elif len(cb_res) == 4:
                                     c_map, p_name, _, is_skip = cb_res
                                     if is_skip is True:
@@ -1431,7 +1518,11 @@ class SmartMerger:
                                     "sheets_skipped": sheets_skipped
                                 }
                             elif action == "skip" or confirmed_map is None:
-                                log(f"  ⏭️ Đã bỏ qua Sheet '{ws_curr.title}' theo lựa chọn của bạn.", "warning")
+                                if remember_skip:
+                                    self.profile_mgr.add_ignored_sheet_name(ws_curr.title)
+                                    log(f"  ⏭️ Đã bỏ qua Sheet '{ws_curr.title}' và lưu vào danh sách tự động bỏ qua cho những lần sau.", "warning")
+                                else:
+                                    log(f"  ⏭️ Đã bỏ qua Sheet '{ws_curr.title}' theo lựa chọn của bạn.", "warning")
                                 sheets_skipped += 1
                                 continue
 

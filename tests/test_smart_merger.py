@@ -653,6 +653,85 @@ class TestSmartMerger(unittest.TestCase):
 
         wb_res.close()
 
+    def test_ignored_sheet_names_management(self):
+        """Kiểm tra thêm, kiểm tra, xóa và dọn dẹp danh sách Sheet luôn bỏ qua."""
+        # Ban đầu danh sách rỗng
+        self.assertEqual(self.profile_mgr.get_ignored_sheet_names(), [])
+        self.assertFalse(self.profile_mgr.is_sheet_ignored("Bìa"))
+
+        # Thêm sheet
+        self.assertTrue(self.profile_mgr.add_ignored_sheet_name("Bìa"))
+        self.assertTrue(self.profile_mgr.add_ignored_sheet_name("Thống kê"))
+
+        # Không thêm trùng lặp (không phân biệt hoa thường)
+        self.assertFalse(self.profile_mgr.add_ignored_sheet_name("bìa"))
+        self.assertEqual(len(self.profile_mgr.get_ignored_sheet_names()), 2)
+
+        # Kiểm tra nhận diện mờ / chuẩn hóa
+        self.assertTrue(self.profile_mgr.is_sheet_ignored("Bìa"))
+        self.assertTrue(self.profile_mgr.is_sheet_ignored("bìa"))
+        self.assertTrue(self.profile_mgr.is_sheet_ignored(" BÌA "))
+        self.assertTrue(self.profile_mgr.is_sheet_ignored("Thống kê"))
+        self.assertFalse(self.profile_mgr.is_sheet_ignored("DS_HocSinh"))
+
+        # Xóa sheet
+        self.assertTrue(self.profile_mgr.remove_ignored_sheet_name("Bìa"))
+        self.assertFalse(self.profile_mgr.is_sheet_ignored("Bìa"))
+        self.assertEqual(len(self.profile_mgr.get_ignored_sheet_names()), 1)
+
+        # Xóa tất cả
+        self.profile_mgr.clear_ignored_sheet_names()
+        self.assertEqual(self.profile_mgr.get_ignored_sheet_names(), [])
+
+    def test_smart_merger_skips_ignored_sheet(self):
+        """Kiểm tra SmartMerger tự động lướt qua sheet nằm trong danh sách bỏ qua mà không hỏi mapping."""
+        # Tạo file excel có 2 sheet: 'Bìa' và 'Dữ liệu'
+        wb = openpyxl.Workbook()
+        ws_cover = wb.active
+        ws_cover.title = "Bìa"
+        ws_cover.append(["SỞ GD&ĐT HÀ NỘI"])
+        ws_cover.append(["BÁO CÁO TỔNG KẾT NĂM HỌC 2025-2026"])
+
+        ws_data = wb.create_sheet(title="Dữ liệu")
+        ws_data.append([col["name"] for col in TARGET_COLUMNS])
+        ws_data.append([
+            1, "01/01/2026", "001", "123", "Nguyễn Văn Test",
+            None, None, None, "01/01/2010", "Nam",
+            "Kinh", "Việt Nam", "Hà Nội", "THCS Test", None,
+            None, None, None, None, "2025-2026",
+            "Giỏi", None, None, None, None, None, None, "Phòng GD"
+        ])
+
+        excel_path = self.tmp_dir / "test_with_cover.xlsx"
+        wb.save(excel_path)
+        wb.close()
+
+        # Cấu hình bỏ qua sheet 'Bìa'
+        self.profile_mgr.add_ignored_sheet_name("Bìa")
+
+        out_f = self.tmp_dir / "out_skipped_test.xlsx"
+        merger = SmartMerger(profile_mgr=self.profile_mgr)
+
+        callback_called_for_cover = []
+
+        def dummy_cb(payload):
+            if payload["sheet_name"] == "Bìa":
+                callback_called_for_cover.append(True)
+            return ("apply", None, None)
+
+        res = merger.process_merge_and_standardize(
+            source_files=[excel_path],
+            output_file_path=out_f,
+            mapping_callback=dummy_cb,
+            merge_all_sheets=True
+        )
+
+        self.assertEqual(res["status"], "success")
+        self.assertEqual(res["total_rows"], 1)
+        self.assertEqual(res["sheets_skipped"], 1)
+        # Khẳng định không bị gọi callback hỏi ánh xạ cho sheet 'Bìa'
+        self.assertEqual(len(callback_called_for_cover), 0)
+
 
 if __name__ == '__main__':
     unittest.main()

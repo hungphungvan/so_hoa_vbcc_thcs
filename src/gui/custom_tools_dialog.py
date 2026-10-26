@@ -2520,6 +2520,7 @@ class ManageProfilesDialog(tk.Toplevel):
         self._build_ui()
         self._refresh_profiles()
         self._refresh_fallbacks()
+        self._refresh_ignored_sheets()
         self._center_window(parent)
 
     def _center_window(self, parent):
@@ -2573,6 +2574,11 @@ class ManageProfilesDialog(tk.Toplevel):
         self.tab_fallback = ttk.Frame(self.notebook, padding=6)
         self.notebook.add(self.tab_fallback, text="🔄 Quy tắc Cột dự phòng (Fallback)")
         self._build_tab_fallback(self.tab_fallback)
+
+        # Tab 3: Danh sách Sheet luôn bỏ qua
+        self.tab_ignored = ttk.Frame(self.notebook, padding=6)
+        self.notebook.add(self.tab_ignored, text="⏭️ Danh sách Sheet luôn bỏ qua")
+        self._build_tab_ignored_sheets(self.tab_ignored)
 
     def _build_tab_profiles(self, container):
         p = self.palette
@@ -2754,6 +2760,95 @@ class ManageProfilesDialog(tk.Toplevel):
         if messagebox.askyesno("Xác nhận xóa", f"Bạn có chắc chắn muốn xóa quy tắc dự phòng của Cột {t_idx} không?", parent=self):
             self.profile_mgr.delete_fallback_column(t_idx)
             self._refresh_fallbacks()
+
+    def _build_tab_ignored_sheets(self, container):
+        p = self.palette
+
+        # Khung hướng dẫn
+        info_frame = tk.Frame(container, bg=p.CARD_BG, padx=10, pady=8, highlightbackground=p.CARD_BORDER, highlightthickness=1)
+        info_frame.pack(side=tk.TOP, fill=tk.X, pady=(0, 8))
+        tk.Label(
+            info_frame,
+            text="💡 Các Sheet có tên trong danh sách này sẽ được hệ thống TỰ ĐỘNG BỎ QUA khi gộp vào mẫu chuẩn\n"
+                 "(Ví dụ: Bìa, Thống kê, Báo cáo, Tổng hợp...) mà không làm phiền mở hộp thoại hỏi ánh xạ.",
+            font=FONT_SUBTITLE,
+            bg=p.CARD_BG,
+            fg=p.MUTED,
+            justify=tk.LEFT
+        ).pack(anchor=tk.W)
+
+        # Thanh nhập thêm tên sheet thủ công
+        add_bar = ttk.Frame(container, padding=(0, 4))
+        add_bar.pack(side=tk.TOP, fill=tk.X, pady=(0, 6))
+
+        ttk.Label(add_bar, text="Tên Sheet cần bỏ qua:", font=FONT_LABEL).pack(side=tk.LEFT, padx=(0, 6))
+        self.new_ignored_sheet_var = tk.StringVar()
+        self.entry_new_ignored_sheet = ttk.Entry(add_bar, textvariable=self.new_ignored_sheet_var, width=32)
+        self.entry_new_ignored_sheet.pack(side=tk.LEFT, padx=(0, 8))
+        self.entry_new_ignored_sheet.bind("<Return>", lambda e: self._add_ignored_sheet())
+
+        ttk.Button(add_bar, text="➕ Thêm vào danh sách", command=self._add_ignored_sheet).pack(side=tk.LEFT)
+
+        # Thanh nút bấm dưới đáy
+        btn_bar = ttk.Frame(container, padding=(0, 6))
+        btn_bar.pack(side=tk.BOTTOM, fill=tk.X)
+        ttk.Button(btn_bar, text="🗑️ Xóa tên sheet đã chọn", command=self._delete_selected_ignored_sheet).pack(side=tk.LEFT)
+        ttk.Button(btn_bar, text="⚠️ Xóa TẤT CẢ", command=self._clear_all_ignored_sheets).pack(side=tk.LEFT, padx=(8, 0))
+        ttk.Button(btn_bar, text="🔄 Làm mới", command=self._refresh_ignored_sheets).pack(side=tk.LEFT, padx=(8, 0))
+
+        # Bảng Treeview danh sách tên sheet
+        tree_card = ttk.Frame(container)
+        tree_card.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+
+        cols = ("stt", "name")
+        self.tree_ignored = ttk.Treeview(tree_card, columns=cols, show="headings", selectmode="extended", height=8)
+        self.tree_ignored.heading("stt", text="STT")
+        self.tree_ignored.heading("name", text="Tên Sheet luôn tự động bỏ qua")
+        self.tree_ignored.column("stt", width=60, anchor=tk.CENTER)
+        self.tree_ignored.column("name", width=500, anchor=tk.W)
+
+        sb = ttk.Scrollbar(tree_card, orient=tk.VERTICAL, command=self.tree_ignored.yview)
+        self.tree_ignored.configure(yscrollcommand=sb.set)
+        self.tree_ignored.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
+
+    def _refresh_ignored_sheets(self):
+        for item in self.tree_ignored.get_children():
+            self.tree_ignored.delete(item)
+        names = self.profile_mgr.get_ignored_sheet_names()
+        for idx, name in enumerate(names, start=1):
+            self.tree_ignored.insert("", tk.END, iid=name, values=(idx, name))
+
+    def _add_ignored_sheet(self):
+        val = self.new_ignored_sheet_var.get().strip()
+        if not val:
+            messagebox.showwarning("Chưa nhập", "Vui lòng nhập tên sheet cần bỏ qua!", parent=self)
+            return
+        if self.profile_mgr.is_sheet_ignored(val):
+            messagebox.showinfo("Đã tồn tại", f"Tên sheet '{val}' đã có trong danh sách bỏ qua!", parent=self)
+            return
+        self.profile_mgr.add_ignored_sheet_name(val)
+        self.new_ignored_sheet_var.set("")
+        self._refresh_ignored_sheets()
+        messagebox.showinfo("Thành công", f"Đã thêm sheet '{val}' vào danh sách tự động bỏ qua!", parent=self)
+
+    def _delete_selected_ignored_sheet(self):
+        selected = self.tree_ignored.selection()
+        if not selected:
+            messagebox.showwarning("Chưa chọn", "Vui lòng chọn ít nhất một tên sheet trong bảng để xóa!", parent=self)
+            return
+        if messagebox.askyesno("Xác nhận xóa", f"Bạn có chắc muốn xóa {len(selected)} tên sheet đã chọn khỏi danh sách bỏ qua?", parent=self):
+            for sheet_name in selected:
+                self.profile_mgr.remove_ignored_sheet_name(sheet_name)
+            self._refresh_ignored_sheets()
+
+    def _clear_all_ignored_sheets(self):
+        names = self.profile_mgr.get_ignored_sheet_names()
+        if not names:
+            return
+        if messagebox.askyesno("Cảnh báo", "Bạn có chắc chắn muốn XÓA TẤT CẢ các tên sheet trong danh sách bỏ qua không?", parent=self):
+            self.profile_mgr.clear_ignored_sheet_names()
+            self._refresh_ignored_sheets()
 
 
 class CustomToolsDialog(tk.Toplevel):

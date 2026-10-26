@@ -120,6 +120,8 @@ class TestDialogs(unittest.TestCase):
         )
         self.assertTrue(hasattr(dlg_map, 'source_vars') or hasattr(dlg_map, 'target_vars'))
         self.assertEqual(len(dlg_map.source_vars), len(raw_headers))
+        self.assertTrue(hasattr(dlg_map, 'remember_skip_var'))
+        self.assertTrue(dlg_map.remember_skip_var.get())
         dlg_map.destroy()
 
         prof_mgr = MappingProfileManager()
@@ -127,6 +129,7 @@ class TestDialogs(unittest.TestCase):
         self.assertIsNotNone(dlg_prof)
         self.assertTrue(hasattr(dlg_prof, 'tree'))
         self.assertTrue(hasattr(dlg_prof, 'tree_fb'))
+        self.assertTrue(hasattr(dlg_prof, 'tree_ignored'))
         self.assertTrue(hasattr(dlg_prof, 'cb_fb_target'))
         self.assertTrue(hasattr(dlg_prof, 'cb_fb_source'))
         dlg_prof.destroy()

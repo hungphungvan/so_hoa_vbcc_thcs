@@ -357,6 +357,16 @@ class ColumnMappingDialog(tk.Toplevel):
         # Nút Bỏ qua sheet này
         ttk.Button(btn_bar, text="⏭️ Bỏ qua Sheet này", command=self._on_skip).pack(side=tk.LEFT, padx=(8, 0))
 
+        # Checkbox ghi nhớ tự động bỏ qua sheet này cho các lần sau
+        sheet_display = self.sheet_name if len(self.sheet_name) <= 25 else self.sheet_name[:22] + "..."
+        self.remember_skip_var = tk.BooleanVar(value=True)
+        self.chk_remember_skip = ttk.Checkbutton(
+            btn_bar,
+            text=f"Ghi nhớ tự động bỏ qua sheet '{sheet_display}' cho các lần sau",
+            variable=self.remember_skip_var
+        )
+        self.chk_remember_skip.pack(side=tk.LEFT, padx=(10, 0))
+
         # Nút Lưu & Áp dụng
         save_btn = ttk.Button(btn_bar, text="✅ Lưu Profile & Áp dụng", command=self._on_save_and_apply)
         save_btn.pack(side=tk.RIGHT)
@@ -495,7 +505,10 @@ class ColumnMappingDialog(tk.Toplevel):
 
     def _on_skip(self):
         """Bỏ qua sheet này."""
-        self.result = ("skip", None, None)
+        remember = bool(self.remember_skip_var.get()) if hasattr(self, 'remember_skip_var') else False
+        if remember and self.sheet_name and hasattr(self, 'profile_mgr') and self.profile_mgr:
+            self.profile_mgr.add_ignored_sheet_name(self.sheet_name)
+        self.result = ("skip", None, None, None, remember)
         self.grab_release()
         self.destroy()
 
