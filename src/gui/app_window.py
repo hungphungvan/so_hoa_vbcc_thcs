@@ -148,6 +148,8 @@ class MainWindow:
             last_f = getattr(self.custom_view, "last_encoding_output_file", None)
         if not last_f:
             last_f = getattr(self.custom_view, "last_ocr_output_file", None)
+        if not last_f:
+            last_f = getattr(self.custom_view, "last_ocr_patch_output_file", None)
 
         if last_f and Path(last_f).exists():
             open_path_in_os(Path(last_f))

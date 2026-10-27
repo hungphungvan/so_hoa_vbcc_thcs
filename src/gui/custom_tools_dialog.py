@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import os
 import sys
+from typing import Any, Callable
 import subprocess
 import threading
 import queue
 import traceback
 from pathlib import Path
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import ttk, filedialog, messagebox, simpledialog
 from tkinter.scrolledtext import ScrolledText
 import openpyxl
 
@@ -36,6 +37,12 @@ from src.ocr_processor import (
     OCRConfigManager,
     DEFAULT_BASE_URL,
     DEFAULT_MODEL_NAME,
+)
+from src.ocr_updater import (
+    AVAILABLE_MATCH_FIELDS,
+    DEFAULT_PATCH_PROMPT,
+    OCRColumnMappingManager,
+    OCRUpdaterProcessor,
 )
 
 def open_path_in_os(path: Path):
@@ -132,6 +139,24 @@ class CustomToolsView(ttk.Frame):
         self.ocr_out_var = tk.StringVar()
         self.last_ocr_output_file: Path | None = None
         self.ocr_cancel_requested = False
+
+        # Biến Tab 5.2 (Cập nhật sửa đổi & bổ sung từ ảnh)
+        self.ocr_updater = OCRUpdaterProcessor(config_mgr=self.ocr_config_mgr)
+        self.ocr_mapping_mgr = OCRColumnMappingManager()
+        self.ocr_patch_profile_var = tk.StringVar(value=self.ocr_mapping_mgr.get_active_profile_name())
+        self.ocr_patch_excel_var = tk.StringVar()
+        self.ocr_patch_images_list: list[Path] = []
+        self.ocr_patch_out_var = tk.StringVar()
+        self.ocr_patch_auto_append_var = tk.BooleanVar(value=True)
+        self.ocr_match_stt_var = tk.BooleanVar(value=False)
+        self.ocr_match_so_hieu_var = tk.BooleanVar(value=False)
+        self.ocr_match_so_vao_so_var = tk.BooleanVar(value=False)
+        self.ocr_match_ho_ten_var = tk.BooleanVar(value=True)
+        self.ocr_match_ngay_sinh_var = tk.BooleanVar(value=True)
+        self.ocr_match_ten_truong_var = tk.BooleanVar(value=False)
+        self.ocr_patch_manual_review_var = tk.BooleanVar(value=True)
+        self.last_ocr_patch_output_file: Path | None = None
+        self.ocr_patch_cancel_requested = False
 
         # Quản lý tệp vừa được tạo mới nhất toàn hệ thống
         self.last_created_file: Path | None = None
@@ -1654,6 +1679,80 @@ class CustomToolsView(ttk.Frame):
                 self.ocr_status_lbl.config(text="❌ Lỗi khi chạy OCR!", foreground=self.palette.DANGER)
                 self._log(f"❌ Lỗi khi chạy OCR: {err}\n{trace}", "error")
                 messagebox.showerror("Lỗi OCR", f"Đã xảy ra lỗi trong quá trình chạy OCR:\n{err}", parent=self)
+            elif msg_type == "ocr_patch_prog":
+                val, msg = item[1], item[2]
+                if hasattr(self, "ocr_patch_prog_bar"):
+                    self.ocr_patch_prog_bar["value"] = val
+                if hasattr(self, "ocr_patch_status_lbl"):
+                    self.ocr_patch_status_lbl.config(text=f"⏳ {msg}...", foreground=self.palette.PRIMARY)
+            elif msg_type == "ocr_patch_done":
+                res = item[1]
+                if hasattr(self, "ocr_patch_prog_bar"):
+                    self.ocr_patch_prog_bar["value"] = 100
+                if hasattr(self, "btn_run_ocr_patch"):
+                    self.btn_run_ocr_patch.config(state=tk.NORMAL)
+                if hasattr(self, "btn_cancel_ocr_patch"):
+                    self.btn_cancel_ocr_patch.config(state=tk.DISABLED)
+                st = res.get("status")
+                out_p = res.get("output_file")
+                mod_count = res.get("modified_students", 0)
+                add_count = res.get("added_students", 0)
+                unmatch_count = res.get("unmatched_records", 0)
+                tot_img = res.get("total_images", 0)
+                succ_img = res.get("success_images", 0)
+
+                if st == "success" and out_p:
+                    if hasattr(self, "btn_open_ocr_patch_file"):
+                        self.btn_open_ocr_patch_file.config(state=tk.NORMAL)
+                    self.last_ocr_patch_output_file = Path(out_p)
+                    self.last_created_file = Path(out_p)
+                    if hasattr(self, "ocr_patch_status_lbl"):
+                        self.ocr_patch_status_lbl.config(
+                            text=f"✅ Hoàn tất: Sửa {mod_count} HS, thêm mới {add_count} HS ({succ_img}/{tot_img} ảnh)!",
+                            foreground=self.palette.SUCCESS
+                        )
+                    msg_lines = [
+                        f"Đã cập nhật danh sách thành công từ {succ_img}/{tot_img} ảnh!",
+                        f"• Số học sinh được sửa đổi ô: {mod_count:,}",
+                        f"• Số học sinh bổ sung mới: {add_count:,}",
+                        f"• Số bản ghi không khớp: {unmatch_count:,}",
+                        f"• Đã tạo sheet 'Lich_Su_Thay_Doi' để kiểm tra đối soát chi tiết.",
+                        f"• Tệp Excel đã lưu: {Path(out_p).name}",
+                    ]
+                    messagebox.showinfo("Hoàn tất Cập nhật danh sách", "\n".join(msg_lines), parent=self)
+                else:
+                    if hasattr(self, "ocr_patch_status_lbl"):
+                        self.ocr_patch_status_lbl.config(
+                            text="⚠️ Không thể cập nhật danh sách!",
+                            foreground=self.palette.WARNING
+                        )
+                    messagebox.showwarning(
+                        "Không có dữ liệu cập nhật",
+                        res.get("message", "Không thể cập nhật danh sách từ ảnh."),
+                        parent=self
+                    )
+            elif msg_type == "ocr_patch_error":
+                err, trace = item[1], item[2]
+                if hasattr(self, "btn_run_ocr_patch"):
+                    self.btn_run_ocr_patch.config(state=tk.NORMAL)
+                if hasattr(self, "btn_cancel_ocr_patch"):
+                    self.btn_cancel_ocr_patch.config(state=tk.DISABLED)
+                if hasattr(self, "ocr_patch_status_lbl"):
+                    self.ocr_patch_status_lbl.config(text="❌ Lỗi khi cập nhật danh sách!", foreground=self.palette.DANGER)
+                self._log(f"❌ Lỗi khi cập nhật danh sách: {err}\n{trace}", "error")
+                messagebox.showerror("Lỗi Cập nhật danh sách", f"Đã xảy ra lỗi:\n{err}", parent=self)
+            elif msg_type == "ocr_patch_review_req":
+                review_data, ev, res_container = item[1], item[2], item[3]
+                try:
+                    dlg = ReviewPatchDialog(self.winfo_toplevel(), review_data, is_dark=self.is_dark)
+                    dlg.wait_window()
+                    res_container.clear()
+                    res_container.update(dlg.result)
+                except Exception as e:
+                    self._log(f"⚠️ Lỗi hộp thoại duyệt: {e}", "warning")
+                    res_container["action"] = "apply"
+                finally:
+                    ev.set()
 
         self.after(100, self._start_queue_poller)
 
@@ -2092,9 +2191,21 @@ class CustomToolsView(ttk.Frame):
             self.msg_queue.put(("encoding_error", str(e), trace))
 
     # =========================================================================
-    # TAB 5: OCR TRÍCH XUẤT ẢNH SỔ SANG EXCEL
+    # TAB 5: OCR TRÍCH XUẤT ẢNH SỔ & CẬP NHẬT SỬA ĐỔI
     # =========================================================================
     def _build_tab_ocr(self, parent):
+        sub_nb_ocr = ttk.Notebook(parent)
+        sub_nb_ocr.pack(fill=tk.BOTH, expand=True)
+
+        self.tab_ocr_extract = ttk.Frame(sub_nb_ocr, padding=4)
+        sub_nb_ocr.add(self.tab_ocr_extract, text="  📷 5.1. Trích xuất toàn bộ sổ ra Excel  ")
+        self._build_subtab_ocr_extract(self.tab_ocr_extract)
+
+        self.tab_ocr_patch = ttk.Frame(sub_nb_ocr, padding=4)
+        sub_nb_ocr.add(self.tab_ocr_patch, text="  ✏️ 5.2. Cập nhật sửa đổi & bổ sung từ ảnh  ")
+        self._build_subtab_ocr_patch(self.tab_ocr_patch)
+
+    def _build_subtab_ocr_extract(self, parent):
         p = self.palette
 
         # 1. Khung Cấu hình API & Prompt (Đặt ở trên cùng)
@@ -2428,6 +2539,950 @@ class CustomToolsView(ttk.Frame):
                 self.msg_queue.put(("ocr_error", str(e), trace))
 
         threading.Thread(target=run, daemon=True).start()
+
+    # =========================================================================
+    # TAB 5.2: CẬP NHẬT SỬA ĐỔI & BỔ SUNG TỪ ẢNH CHỤP
+    # =========================================================================
+    def _build_subtab_ocr_patch(self, parent):
+        p = self.palette
+
+        # 1. Khung 1: Chọn tệp Excel 28 cột cần sửa đổi
+        excel_card = ttk.LabelFrame(parent, text="1. Tệp danh sách Excel 28 cột chuẩn cần sửa đổi", padding=6)
+        excel_card.pack(side=tk.TOP, fill=tk.X, pady=(0, 2))
+
+        r_ex = ttk.Frame(excel_card)
+        r_ex.pack(fill=tk.X)
+
+        ttk.Label(r_ex, text="Tệp Excel danh sách:", font=FONT_LABEL_BOLD).pack(side=tk.LEFT, padx=(0, 6))
+        self.ocr_patch_excel_entry = ttk.Entry(r_ex, textvariable=self.ocr_patch_excel_var, font=FONT_LABEL)
+        self.ocr_patch_excel_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 6))
+        ttk.Button(r_ex, text="📂 Chọn tệp...", command=self._on_choose_ocr_patch_excel).pack(side=tk.LEFT)
+
+        self.ocr_patch_excel_info_lbl = ttk.Label(excel_card, text="Chưa chọn tệp Excel danh sách", font=FONT_MUTED, foreground=p.MUTED)
+        self.ocr_patch_excel_info_lbl.pack(anchor=tk.W, pady=(2, 0))
+
+        # 2. Khung 2: Danh sách ảnh chụp các trang có đánh dấu sửa đổi/bổ sung (ĐẶT Ở TRÊN ĐỂ DỄ THẤY & KHÔNG BỊ CO LẠI)
+        img_card = ttk.LabelFrame(parent, text="2. Ảnh chụp các trang có đánh dấu sửa đổi hoặc bổ sung", padding=6)
+        img_card.pack(side=tk.TOP, fill=tk.BOTH, expand=True, pady=(2, 2))
+
+        btn_row = ttk.Frame(img_card)
+        btn_row.pack(fill=tk.X, pady=(0, 4))
+
+        ttk.Button(btn_row, text="📁 Chọn thư mục ảnh...", command=self._on_choose_ocr_patch_folder).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(btn_row, text="🖼️ Chọn nhiều ảnh...", command=self._on_choose_ocr_patch_files).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(btn_row, text="❌ Xóa danh sách", command=self._clear_ocr_patch_list).pack(side=tk.LEFT, padx=(0, 16))
+
+        self.ocr_patch_files_count_lbl = ttk.Label(btn_row, text="Chưa chọn ảnh nào", font=FONT_LABEL_BOLD, foreground=p.PRIMARY)
+        self.ocr_patch_files_count_lbl.pack(side=tk.LEFT)
+
+        p_cols = ("stt", "file_name", "size", "status", "path")
+        self.ocr_patch_tree = ttk.Treeview(img_card, columns=p_cols, show="headings", height=4)
+        self.ocr_patch_tree.heading("stt", text="STT")
+        self.ocr_patch_tree.heading("file_name", text="Tên file ảnh")
+        self.ocr_patch_tree.heading("size", text="Kích thước")
+        self.ocr_patch_tree.heading("status", text="Trạng thái")
+        self.ocr_patch_tree.heading("path", text="Đường dẫn")
+
+        self.ocr_patch_tree.column("stt", width=45, anchor=tk.CENTER)
+        self.ocr_patch_tree.column("file_name", width=260, anchor=tk.W)
+        self.ocr_patch_tree.column("size", width=100, anchor=tk.CENTER)
+        self.ocr_patch_tree.column("status", width=160, anchor=tk.CENTER)
+        self.ocr_patch_tree.column("path", width=320, anchor=tk.W)
+
+        p_sb = ttk.Scrollbar(img_card, orient=tk.VERTICAL, command=self.ocr_patch_tree.yview)
+        self.ocr_patch_tree.configure(yscrollcommand=p_sb.set)
+        self.ocr_patch_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        p_sb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # 3. Khung 3: Cấu hình Ánh xạ Cột (Tên cột trên ảnh ➔ 28 Cột chuẩn - Chuẩn xác 100%)
+        map_card = ttk.LabelFrame(parent, text="3. Cấu hình Ánh xạ Cột (Ảnh ➔ 28 Cột chuẩn - Chuẩn xác 100%)", padding=6)
+        map_card.pack(side=tk.TOP, fill=tk.X, pady=(2, 2))
+
+        r_map = ttk.Frame(map_card)
+        r_map.pack(fill=tk.X)
+
+        ttk.Label(r_map, text="Hồ sơ ánh xạ (Profile):", font=FONT_LABEL_BOLD).pack(side=tk.LEFT, padx=(0, 6))
+        self.ocr_patch_profile_cb = ttk.Combobox(
+            r_map,
+            textvariable=self.ocr_patch_profile_var,
+            values=self.ocr_mapping_mgr.list_profiles(),
+            state="readonly",
+            width=26,
+            font=FONT_LABEL
+        )
+        self.ocr_patch_profile_cb.pack(side=tk.LEFT, padx=(0, 10))
+        self.ocr_patch_profile_cb.bind("<<ComboboxSelected>>", self._on_ocr_patch_profile_changed)
+
+        ttk.Button(
+            r_map,
+            text="⚙️ Cấu hình Ánh xạ & Sửa tên cột...",
+            command=self._open_ocr_mapping_dialog
+        ).pack(side=tk.LEFT, padx=(0, 12))
+
+        active_p = self.ocr_mapping_mgr.get_active_profile_name()
+        active_cnt = len(self.ocr_mapping_mgr.get_mapping(active_p))
+        self.ocr_patch_mapping_info_lbl = ttk.Label(
+            r_map,
+            text=f"🎯 Đang dùng {active_cnt} quy tắc ánh xạ (Chuẩn xác 100%, không đoán mò)",
+            font=FONT_LABEL_BOLD,
+            foreground=p.PRIMARY
+        )
+        self.ocr_patch_mapping_info_lbl.pack(side=tk.LEFT)
+
+        # 4. Khung 4: Chiến lược định vị & So khớp dòng học sinh
+        match_card = ttk.LabelFrame(parent, text="4. Chiến lược định vị học sinh & Quy tắc cập nhật", padding=6)
+        match_card.pack(side=tk.TOP, fill=tk.X, pady=(2, 2))
+
+        chk_row = ttk.Frame(match_card)
+        chk_row.pack(fill=tk.X, pady=(0, 2))
+
+        ttk.Label(chk_row, text="Khớp theo:", font=FONT_LABEL_BOLD, foreground=p.PRIMARY).pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Checkbutton(chk_row, text="Họ tên (Cột 5)", variable=self.ocr_match_ho_ten_var).pack(side=tk.LEFT, padx=(0, 12))
+        ttk.Checkbutton(chk_row, text="Ngày sinh (Cột 9)", variable=self.ocr_match_ngay_sinh_var).pack(side=tk.LEFT, padx=(0, 12))
+        ttk.Checkbutton(chk_row, text="STT (Cột 1)", variable=self.ocr_match_stt_var).pack(side=tk.LEFT, padx=(0, 12))
+        ttk.Checkbutton(chk_row, text="Số hiệu (Cột 2)", variable=self.ocr_match_so_hieu_var).pack(side=tk.LEFT, padx=(0, 12))
+        ttk.Checkbutton(chk_row, text="Số vào sổ (Cột 3)", variable=self.ocr_match_so_vao_so_var).pack(side=tk.LEFT, padx=(0, 12))
+        ttk.Checkbutton(chk_row, text="Trường (Cột 14)", variable=self.ocr_match_ten_truong_var).pack(side=tk.LEFT)
+
+        r_opt2 = ttk.Frame(match_card)
+        r_opt2.pack(fill=tk.X)
+        ttk.Checkbutton(
+            r_opt2,
+            text="➕ Tự động bổ sung dòng mới (Tô màu xanh)",
+            variable=self.ocr_patch_auto_append_var
+        ).pack(side=tk.LEFT, padx=(0, 16))
+        ttk.Checkbutton(
+            r_opt2,
+            text="🔍 Bật hộp thoại duyệt & chỉnh sửa thủ công từng học sinh (Kiểm soát 100%)",
+            variable=self.ocr_patch_manual_review_var
+        ).pack(side=tk.LEFT)
+
+        # 5. Khung 5: Đầu ra & Thực thi (GHIM CỐ ĐỊNH Ở ĐÁY)
+        ctrl_card = ttk.LabelFrame(parent, text="5. Đầu ra & Thực thi Cập nhật", padding=6)
+        ctrl_card.pack(side=tk.BOTTOM, fill=tk.X, pady=(2, 0))
+
+        r_out = ttk.Frame(ctrl_card)
+        r_out.pack(fill=tk.X, pady=(0, 2))
+
+        ttk.Label(r_out, text="Tệp Excel kết quả:", font=FONT_LABEL_BOLD).pack(side=tk.LEFT, padx=(0, 6))
+        self.ocr_patch_out_entry = ttk.Entry(r_out, textvariable=self.ocr_patch_out_var, font=FONT_LABEL)
+        self.ocr_patch_out_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 6))
+        ttk.Button(r_out, text="💾 Lưu thành...", command=self._on_choose_ocr_patch_output_path).pack(side=tk.LEFT)
+
+        self.ocr_patch_prog_bar = ttk.Progressbar(ctrl_card, orient=tk.HORIZONTAL, mode="determinate")
+        self.ocr_patch_prog_bar.pack(fill=tk.X, pady=(2, 3))
+
+        r_act = ttk.Frame(ctrl_card)
+        r_act.pack(fill=tk.X)
+
+        self.ocr_patch_status_lbl = ttk.Label(r_act, text="Sẵn sàng cập nhật dữ liệu từ ảnh.", font=FONT_LABEL_BOLD, foreground=p.PRIMARY)
+        self.ocr_patch_status_lbl.pack(side=tk.LEFT)
+
+        self.btn_open_ocr_patch_file = ttk.Button(
+            r_act,
+            text="📄 Mở file Excel vừa tạo",
+            command=self._open_last_ocr_patch_file,
+            state=tk.DISABLED
+        )
+        self.btn_open_ocr_patch_file.pack(side=tk.RIGHT, padx=(8, 0))
+
+        self.btn_cancel_ocr_patch = ttk.Button(
+            r_act,
+            text="🛑 DỪNG",
+            command=self._cancel_ocr_patch,
+            state=tk.DISABLED
+        )
+        self.btn_cancel_ocr_patch.pack(side=tk.RIGHT, padx=(8, 0))
+
+        self.btn_run_ocr_patch = ttk.Button(
+            r_act,
+            text="⚡ BẮT ĐẦU CẬP NHẬT",
+            command=self._start_ocr_patch_thread,
+            style="Action.TButton"
+        )
+        self.btn_run_ocr_patch.pack(side=tk.RIGHT)
+
+    def _on_choose_ocr_patch_excel(self):
+        f = filedialog.askopenfilename(
+            title="Chọn tệp danh sách Excel 28 cột cần sửa đổi",
+            filetypes=[("Excel Files", "*.xlsx"), ("All Files", "*.*")],
+            parent=self
+        )
+        if not f:
+            return
+        p = Path(f)
+        self.ocr_patch_excel_var.set(str(p))
+        try:
+            wb = openpyxl.load_workbook(p, read_only=True)
+            active_sheet = wb.active
+            rows_count = active_sheet.max_row
+            wb.close()
+            self.ocr_patch_excel_info_lbl.config(
+                text=f"✅ Đã chọn: {p.name} (Sheet: '{active_sheet.title}', ~{rows_count:,} dòng)",
+                foreground=self.palette.SUCCESS
+            )
+            # Gợi ý tên file đầu ra
+            out_suggest = p.parent / f"{p.stem}_DaCapNhat.xlsx"
+            self.ocr_patch_out_var.set(str(out_suggest))
+        except Exception as e:
+            self.ocr_patch_excel_info_lbl.config(
+                text=f"⚠️ Không đọc được thông tin tệp: {e}",
+                foreground=self.palette.WARNING
+            )
+
+    def _on_choose_ocr_patch_folder(self):
+        d = filedialog.askdirectory(title="Chọn thư mục chứa ảnh các trang có sửa đổi / bổ sung", parent=self)
+        if not d:
+            return
+        folder_p = Path(d)
+        scan_res = OCRProcessor.scan_images([folder_p])
+        if not scan_res:
+            messagebox.showinfo(
+                "Thông báo",
+                f"Thư mục '{folder_p.name}' trống hoặc không chứa tệp ảnh hợp lệ (.jpg, .jpeg, .png, .heic, .heif)!",
+                parent=self
+            )
+            return
+        self.ocr_patch_images_list = [item["path"] for item in scan_res]
+        self._refresh_ocr_patch_tree(scan_res)
+        self._log(f"📁 Đã nạp {len(scan_res)} ảnh chụp sửa đổi/bổ sung từ: {folder_p.name}", "info")
+
+    def _on_choose_ocr_patch_files(self):
+        files = filedialog.askopenfilenames(
+            title="Chọn các tệp ảnh trang có đánh dấu sửa đổi/bổ sung",
+            filetypes=[
+                ("Image Files", "*.jpg *.jpeg *.png *.heic *.heif *.JPG *.JPEG *.PNG *.HEIC *.HEIF"),
+                ("All Files", "*.*"),
+            ],
+            parent=self
+        )
+        if not files:
+            return
+        scan_res = OCRProcessor.scan_images([Path(f) for f in files])
+        if not scan_res:
+            return
+        self.ocr_patch_images_list = [item["path"] for item in scan_res]
+        self._refresh_ocr_patch_tree(scan_res)
+        self._log(f"🖼️ Đã chọn {len(scan_res)} tệp ảnh lẻ.", "info")
+
+    def _clear_ocr_patch_list(self):
+        self.ocr_patch_images_list.clear()
+        for item in self.ocr_patch_tree.get_children():
+            self.ocr_patch_tree.delete(item)
+        self.ocr_patch_files_count_lbl.config(text="Chưa chọn ảnh nào", foreground=self.palette.MUTED)
+        self.btn_open_ocr_patch_file.config(state=tk.DISABLED)
+
+    def _refresh_ocr_patch_tree(self, scan_data: list[dict] | None = None):
+        for item in self.ocr_patch_tree.get_children():
+            self.ocr_patch_tree.delete(item)
+
+        if not self.ocr_patch_images_list:
+            self.ocr_patch_files_count_lbl.config(text="Chưa chọn ảnh nào", foreground=self.palette.MUTED)
+            return
+
+        items = scan_data or OCRProcessor.scan_images(self.ocr_patch_images_list)
+        self.ocr_patch_files_count_lbl.config(
+            text=f"Đã chọn {len(items)} ảnh",
+            foreground=self.palette.SUCCESS
+        )
+        for idx, it in enumerate(items, start=1):
+            self.ocr_patch_tree.insert(
+                "",
+                tk.END,
+                values=(idx, it["name"], it["size_str"], it["status"], str(it["path"]))
+            )
+
+    def _on_choose_ocr_patch_output_path(self):
+        init_name = Path(self.ocr_patch_out_var.get()).name if self.ocr_patch_out_var.get() else "danh_sach_DaCapNhat.xlsx"
+        f = filedialog.asksaveasfilename(
+            title="Lưu tệp Excel kết quả sau cập nhật",
+            initialfile=init_name,
+            defaultextension=".xlsx",
+            filetypes=[("Excel Files", "*.xlsx")],
+            parent=self
+        )
+        if f:
+            self.ocr_patch_out_var.set(f)
+
+    def _open_last_ocr_patch_file(self):
+        if self.last_ocr_patch_output_file and self.last_ocr_patch_output_file.exists():
+            open_path_in_os(self.last_ocr_patch_output_file)
+        else:
+            messagebox.showinfo("Thông báo", "Chưa có tệp Excel kết quả cập nhật nào.", parent=self)
+
+    def _cancel_ocr_patch(self):
+        if messagebox.askyesno("Xác nhận dừng", "Bạn có chắc chắn muốn dừng tiến trình cập nhật không?", parent=self):
+            self.ocr_patch_cancel_requested = True
+            self.btn_cancel_ocr_patch.config(state=tk.DISABLED)
+            self.ocr_patch_status_lbl.config(text="⏳ Đang dừng tiến trình...", foreground=self.palette.WARNING)
+
+    def _start_ocr_patch_thread(self):
+        excel_str = self.ocr_patch_excel_var.get().strip()
+        if not excel_str or not Path(excel_str).is_file():
+            messagebox.showwarning("Chưa chọn file Excel", "Vui lòng chọn tệp danh sách Excel 28 cột cần cập nhật!", parent=self)
+            return
+
+        if not self.ocr_patch_images_list:
+            messagebox.showwarning("Chưa chọn ảnh", "Vui lòng chọn thư mục ảnh hoặc các tệp ảnh chụp sửa đổi/bổ sung!", parent=self)
+            return
+
+        api_key = self.ocr_api_key_var.get().strip()
+        if not api_key:
+            messagebox.showwarning("Thiếu API Key", "Vui lòng nhập API Key ở tab 5.1 trước khi chạy OCR!", parent=self)
+            return
+
+        out_path_str = self.ocr_patch_out_var.get().strip()
+        if not out_path_str:
+            self._on_choose_ocr_patch_output_path()
+            out_path_str = self.ocr_patch_out_var.get().strip()
+            if not out_path_str:
+                return
+
+        # Thu thập tiêu chí so khớp dòng
+        match_keys = []
+        if self.ocr_match_stt_var.get():
+            match_keys.append("stt")
+        if self.ocr_match_so_hieu_var.get():
+            match_keys.append("so_hieu_bang")
+        if self.ocr_match_so_vao_so_var.get():
+            match_keys.append("so_vao_so")
+        if self.ocr_match_ho_ten_var.get():
+            match_keys.append("ho_ten")
+        if self.ocr_match_ngay_sinh_var.get():
+            match_keys.append("ngay_sinh")
+        if self.ocr_match_ten_truong_var.get():
+            match_keys.append("ten_truong")
+
+        if not match_keys:
+            messagebox.showwarning(
+                "Chưa chọn tiêu chí khớp",
+                "Vui lòng tích chọn ít nhất 1 trường để định vị học sinh (ví dụ Họ tên hoặc Số vào sổ)!",
+                parent=self
+            )
+            return
+
+        base_url = self.ocr_base_url_var.get().strip() or DEFAULT_BASE_URL
+        model_name = self.ocr_model_var.get().strip() or DEFAULT_MODEL_NAME
+        auto_append = self.ocr_patch_auto_append_var.get()
+
+        self.ocr_patch_cancel_requested = False
+        self.btn_run_ocr_patch.config(state=tk.DISABLED)
+        self.btn_cancel_ocr_patch.config(state=tk.NORMAL)
+        self.btn_open_ocr_patch_file.config(state=tk.DISABLED)
+        self.ocr_patch_prog_bar["value"] = 0
+        self.ocr_patch_status_lbl.config(text="⏳ Đang OCR và cập nhật dữ liệu...", foreground=self.palette.WARNING)
+
+        images = list(self.ocr_patch_images_list)
+        excel_path = Path(excel_str)
+        out_p = Path(out_path_str)
+
+        enable_review = self.ocr_patch_manual_review_var.get()
+
+        prof_name = self.ocr_patch_profile_var.get().strip()
+        column_mapping = self.ocr_mapping_mgr.get_mapping(prof_name)
+
+        def run():
+            try:
+                def prog_cb(cur, tot, msg):
+                    val = (cur / tot * 100) if tot > 0 else 0
+                    self.msg_queue.put(("ocr_patch_prog", val, msg))
+
+                def review_cb(review_data):
+                    if not self.ocr_patch_manual_review_var.get():
+                        return {
+                            "action": "apply",
+                            "changes": review_data.get("changes", []),
+                            "fields": review_data.get("fields", [])
+                        }
+                    res_container = {}
+                    ev = threading.Event()
+                    self.msg_queue.put(("ocr_patch_review_req", review_data, ev, res_container))
+                    ev.wait()
+                    return res_container
+
+                res = self.ocr_updater.update_excel_from_images(
+                    excel_path=excel_path,
+                    image_paths=images,
+                    selected_match_keys=match_keys,
+                    column_mapping=column_mapping,
+                    auto_append_new=auto_append,
+                    output_path=out_p,
+                    api_key=api_key,
+                    base_url=base_url,
+                    model_name=model_name,
+                    prompt_text=DEFAULT_PATCH_PROMPT,
+                    progress_callback=prog_cb,
+                    log_callback=lambda m, l: self._log(m, l),
+                    check_cancel=lambda: self.ocr_patch_cancel_requested,
+                    manual_review_callback=review_cb if enable_review else None,
+                )
+                self.msg_queue.put(("ocr_patch_done", res))
+            except Exception as e:
+                trace = traceback.format_exc()
+                self.msg_queue.put(("ocr_patch_error", str(e), trace))
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _open_ocr_mapping_dialog(self):
+        """Mở hộp thoại cấu hình ánh xạ cột tùy chỉnh (Ảnh ➔ 28 Cột chuẩn)."""
+        def on_saved(profile_name: str):
+            self.ocr_patch_profile_var.set(profile_name)
+            self._refresh_ocr_patch_profile_ui()
+            self._log(f"⚙️ Đã áp dụng cấu hình ánh xạ cột '{profile_name}' cho tiến trình OCR.", "info")
+
+        dlg = OCRColumnMappingDialog(self.winfo_toplevel(), is_dark=self.is_dark, on_saved=on_saved)
+        dlg.wait_window()
+        self._refresh_ocr_patch_profile_ui()
+
+    def _on_ocr_patch_profile_changed(self, event=None):
+        prof = self.ocr_patch_profile_var.get().strip()
+        if prof:
+            self.ocr_mapping_mgr.set_active_profile_name(prof)
+            self._refresh_ocr_patch_profile_ui()
+
+    def _refresh_ocr_patch_profile_ui(self):
+        profiles = self.ocr_mapping_mgr.list_profiles()
+        if hasattr(self, "ocr_patch_profile_cb"):
+            self.ocr_patch_profile_cb["values"] = profiles
+        cur_prof = self.ocr_patch_profile_var.get() or self.ocr_mapping_mgr.get_active_profile_name()
+        if cur_prof not in profiles and profiles:
+            cur_prof = profiles[0]
+            self.ocr_patch_profile_var.set(cur_prof)
+        mapping = self.ocr_mapping_mgr.get_mapping(cur_prof)
+        if hasattr(self, "ocr_patch_mapping_info_lbl"):
+            self.ocr_patch_mapping_info_lbl.config(
+                text=f"🎯 Đang dùng {len(mapping)} quy tắc ánh xạ (Chuẩn xác 100%, không đoán mò)",
+                foreground=self.palette.PRIMARY
+            )
+
+
+class OCRColumnMappingDialog(tk.Toplevel):
+    """
+    Hộp thoại Cấu hình Ánh xạ Cột: Tên cột trên ảnh ➔ 28 Cột chuẩn.
+    Giải pháp đơn giản, chuẩn xác 100%, không phỏng đoán mơ hồ:
+    - Lưu lại thành từng Profile để tái sử dụng lâu dài.
+    - Cho phép sửa, thêm, xóa quy tắc ánh xạ khi gặp ảnh có tên cột khác nhau.
+    - Khôi phục về mặc định chuẩn 28 cột bất cứ lúc nào.
+    """
+    def __init__(
+        self,
+        parent,
+        is_dark: bool | None = None,
+        on_saved: Callable[[str], None] | None = None,
+    ):
+        super().__init__(parent)
+        self.palette = get_theme_palette(is_dark)
+        self.is_dark = is_dark
+        self.on_saved = on_saved
+        self.mapping_mgr = OCRColumnMappingManager()
+        self.active_profile = self.mapping_mgr.get_active_profile_name()
+        self.current_mapping: dict[str, int] = dict(self.mapping_mgr.get_mapping(self.active_profile))
+
+        self.title("⚙️ Cấu hình Ánh xạ Cột (Tên cột trên ảnh ➔ Cột chuẩn 28)")
+        self.geometry("880x620")
+        self.minsize(760, 500)
+        self.configure(bg=self.palette.WINDOW_BG)
+        self.transient(parent)
+        self.grab_set()
+
+        self._build_ui()
+        self._load_current_profile_to_tree()
+        self._center_window(parent)
+
+    def _center_window(self, parent):
+        self.update_idletasks()
+        w, h = 880, 620
+        if parent and parent.winfo_exists():
+            x = parent.winfo_rootx() + (parent.winfo_width() // 2) - (w // 2)
+            y = parent.winfo_rooty() + (parent.winfo_height() // 2) - (h // 2)
+            self.geometry(f"{w}x{h}+{max(0, x)}+{max(0, y)}")
+
+    def _build_ui(self):
+        p = self.palette
+        main_frame = ttk.Frame(self, padding=10)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # 1. Khung 1: Quản lý Profile (Hồ sơ cấu hình)
+        prof_card = ttk.LabelFrame(main_frame, text="1. Hồ sơ cấu hình (Profile) - Lưu để tái sử dụng", padding=8)
+        prof_card.pack(side=tk.TOP, fill=tk.X, pady=(0, 6))
+
+        r_p = ttk.Frame(prof_card)
+        r_p.pack(fill=tk.X)
+
+        ttk.Label(r_p, text="Chọn Profile:", font=FONT_LABEL_BOLD).pack(side=tk.LEFT, padx=(0, 6))
+        self.profile_var = tk.StringVar(value=self.active_profile)
+        self.profile_cb = ttk.Combobox(
+            r_p,
+            textvariable=self.profile_var,
+            values=self.mapping_mgr.list_profiles(),
+            state="readonly",
+            width=28,
+            font=FONT_LABEL
+        )
+        self.profile_cb.pack(side=tk.LEFT, padx=(0, 8))
+        self.profile_cb.bind("<<ComboboxSelected>>", self._on_profile_selected)
+
+        ttk.Button(r_p, text="➕ Tạo mới...", command=self._on_add_profile).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(r_p, text="📋 Nhân bản", command=self._on_clone_profile).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(r_p, text="🗑️ Xóa", command=self._on_delete_profile).pack(side=tk.LEFT, padx=(0, 6))
+
+        # Khung Nút hành động đáy
+        bot_frame = ttk.Frame(main_frame)
+        bot_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(6, 0))
+
+        self.status_lbl = ttk.Label(bot_frame, text="", font=FONT_LABEL_BOLD, foreground=p.SUCCESS)
+        self.status_lbl.pack(side=tk.LEFT)
+
+        ttk.Button(bot_frame, text="Đóng", command=self.destroy).pack(side=tk.RIGHT, padx=(6, 0))
+        self.btn_save_apply = ttk.Button(
+            bot_frame,
+            text="💾 LƯU PROFILE & ÁP DỤNG",
+            command=self._on_save_and_apply,
+            style="Action.TButton"
+        )
+        self.btn_save_apply.pack(side=tk.RIGHT)
+
+        # 3. Khung 3: Thêm / Sửa ánh xạ (Form thao tác chi tiết)
+        edit_card = ttk.LabelFrame(main_frame, text="3. Thêm hoặc Sửa ánh xạ (Khi gặp ảnh có tên cột khác)", padding=8)
+        edit_card.pack(side=tk.BOTTOM, fill=tk.X, pady=(6, 0))
+
+        r_e1 = ttk.Frame(edit_card)
+        r_e1.pack(fill=tk.X, pady=(0, 4))
+
+        ttk.Label(r_e1, text="Tên cột trên ảnh:", font=FONT_LABEL_BOLD).pack(side=tk.LEFT, padx=(0, 6))
+        self.edit_photo_col_var = tk.StringVar()
+        self.edit_photo_col_entry = ttk.Entry(r_e1, textvariable=self.edit_photo_col_var, font=FONT_LABEL, width=30)
+        self.edit_photo_col_entry.pack(side=tk.LEFT, padx=(0, 16))
+
+        ttk.Label(r_e1, text="Ánh xạ vào Cột chuẩn:", font=FONT_LABEL_BOLD).pack(side=tk.LEFT, padx=(0, 6))
+        self.target_col_options = [
+            f"Cột {c['idx']:02d}: {c['name']}"
+            for c in TARGET_COLUMNS
+        ]
+        self.edit_target_col_var = tk.StringVar(value=self.target_col_options[0])
+        self.edit_target_cb = ttk.Combobox(
+            r_e1,
+            textvariable=self.edit_target_col_var,
+            values=self.target_col_options,
+            state="readonly",
+            width=36,
+            font=FONT_LABEL
+        )
+        self.edit_target_cb.pack(side=tk.LEFT, padx=(0, 10))
+
+        r_e2 = ttk.Frame(edit_card)
+        r_e2.pack(fill=tk.X, pady=(4, 0))
+
+        ttk.Button(r_e2, text="➕ Lưu / Thêm quy tắc", command=self._on_add_or_update_mapping).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(r_e2, text="➖ Xóa quy tắc đã chọn", command=self._on_delete_mapping_row).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(r_e2, text="🔄 Khôi phục mặc định 28 cột", command=self._on_reset_to_default).pack(side=tk.LEFT)
+
+        # 2. Khung 2: Bảng Danh sách Ánh xạ hiện tại (Treeview)
+        tree_card = ttk.LabelFrame(main_frame, text="2. Danh sách ánh xạ hiện tại (100% chuẩn xác, không suy đoán mơ hồ)", padding=6)
+        tree_card.pack(side=tk.TOP, fill=tk.BOTH, expand=True, pady=(2, 2))
+
+        cols = ("stt", "photo_col", "target_col", "col_num")
+        self.map_tree = ttk.Treeview(tree_card, columns=cols, show="headings", height=9)
+        self.map_tree.heading("stt", text="STT")
+        self.map_tree.heading("photo_col", text="Tên cột trên ảnh (Chữ in / viết trên sổ)")
+        self.map_tree.heading("target_col", text="Cột đích chuẩn trong file Excel")
+        self.map_tree.heading("col_num", text="Số cột")
+
+        self.map_tree.column("stt", width=50, anchor=tk.CENTER)
+        self.map_tree.column("photo_col", width=320, anchor=tk.W)
+        self.map_tree.column("target_col", width=360, anchor=tk.W)
+        self.map_tree.column("col_num", width=70, anchor=tk.CENTER)
+
+        tree_sb = ttk.Scrollbar(tree_card, orient=tk.VERTICAL, command=self.map_tree.yview)
+        self.map_tree.configure(yscrollcommand=tree_sb.set)
+        self.map_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        tree_sb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self.map_tree.bind("<<TreeviewSelect>>", self._on_tree_select)
+        self.map_tree.bind("<Double-1>", self._on_tree_select)
+
+    def _load_current_profile_to_tree(self):
+        for it in self.map_tree.get_children():
+            self.map_tree.delete(it)
+
+        # Sắp xếp theo số cột tăng dần, rồi theo tên
+        sorted_items = sorted(self.current_mapping.items(), key=lambda x: (x[1], x[0].lower()))
+        for idx, (photo_k, col_idx) in enumerate(sorted_items, start=1):
+            col_name = TARGET_COLUMNS[col_idx - 1]["name"] if (1 <= col_idx <= len(TARGET_COLUMNS)) else f"Cột {col_idx}"
+            self.map_tree.insert(
+                "",
+                tk.END,
+                values=(idx, photo_k, col_name, f"Cột {col_idx}")
+            )
+
+        self.status_lbl.config(
+            text=f"Profile '{self.active_profile}': {len(self.current_mapping)} quy tắc ánh xạ."
+        )
+
+    def _on_tree_select(self, event=None):
+        sel = self.map_tree.selection()
+        if not sel:
+            return
+        vals = self.map_tree.item(sel[0], "values")
+        if len(vals) >= 4:
+            photo_name = vals[1]
+            col_num_str = vals[3]  # "Cột X"
+            self.edit_photo_col_var.set(photo_name)
+            try:
+                c_idx = int(col_num_str.replace("Cột", "").strip())
+                for opt in self.target_col_options:
+                    if opt.startswith(f"Cột {c_idx:02d}:"):
+                        self.edit_target_col_var.set(opt)
+                        break
+            except Exception:
+                pass
+
+    def _on_add_or_update_mapping(self):
+        photo_col = self.edit_photo_col_var.get().strip()
+        if not photo_col:
+            messagebox.showwarning("Thiếu tên cột", "Vui lòng nhập tên cột xuất hiện trên ảnh!", parent=self)
+            self.edit_photo_col_entry.focus_set()
+            return
+
+        target_opt = self.edit_target_col_var.get()
+        try:
+            # "Cột 05: Họ, chữ đệm..." -> 5
+            c_idx = int(target_opt.split(":")[0].replace("Cột", "").strip())
+        except Exception:
+            c_idx = 1
+
+        self.current_mapping[photo_col] = c_idx
+        self._load_current_profile_to_tree()
+        self.status_lbl.config(text=f"✅ Đã cập nhật ánh xạ: '{photo_col}' ➔ Cột {c_idx}")
+
+    def _on_delete_mapping_row(self):
+        sel = self.map_tree.selection()
+        if not sel:
+            messagebox.showinfo("Thông báo", "Vui lòng chọn dòng cần xóa trên bảng!", parent=self)
+            return
+        vals = self.map_tree.item(sel[0], "values")
+        photo_name = vals[1]
+        if photo_name in self.current_mapping:
+            del self.current_mapping[photo_name]
+            self._load_current_profile_to_tree()
+            self.status_lbl.config(text=f"🗑️ Đã xóa ánh xạ: '{photo_name}'")
+
+    def _on_reset_to_default(self):
+        if messagebox.askyesno(
+            "Xác nhận khôi phục",
+            f"Bạn có chắc muốn đặt lại bảng ánh xạ cho profile '{self.active_profile}' về danh sách 28 cột chuẩn mặc định không?",
+            parent=self
+        ):
+            self.current_mapping = dict(self.mapping_mgr.get_default_mapping())
+            self._load_current_profile_to_tree()
+            self.status_lbl.config(text=f"🔄 Đã khôi phục về mặc định 28 cột.")
+
+    def _on_profile_selected(self, event=None):
+        new_prof = self.profile_var.get().strip()
+        if not new_prof or new_prof == self.active_profile:
+            return
+        self.active_profile = new_prof
+        self.current_mapping = dict(self.mapping_mgr.get_mapping(new_prof))
+        self._load_current_profile_to_tree()
+
+    def _on_add_profile(self):
+        name = simpledialog.askstring(
+            "Tạo Profile mới",
+            "Nhập tên Profile mới (Ví dụ: Sổ THCS Chu Văn An - 2008):",
+            parent=self
+        )
+        if not name or not name.strip():
+            return
+        name = name.strip()
+        profiles = self.mapping_mgr.list_profiles()
+        if name in profiles:
+            messagebox.showwarning("Trùng tên", f"Profile '{name}' đã tồn tại!", parent=self)
+            return
+
+        # Lưu profile mới kế thừa mapping hiện tại
+        self.mapping_mgr.save_profile(name, dict(self.current_mapping))
+        self.active_profile = name
+        self.profile_cb["values"] = self.mapping_mgr.list_profiles()
+        self.profile_var.set(name)
+        self._load_current_profile_to_tree()
+        self.status_lbl.config(text=f"✨ Đã tạo Profile mới: '{name}'")
+
+    def _on_clone_profile(self):
+        clone_default = f"{self.active_profile} (Bản sao)"
+        name = simpledialog.askstring(
+            "Nhân bản Profile",
+            "Nhập tên cho bản sao cấu hình:",
+            initialvalue=clone_default,
+            parent=self
+        )
+        if not name or not name.strip():
+            return
+        name = name.strip()
+        self.mapping_mgr.save_profile(name, dict(self.current_mapping))
+        self.active_profile = name
+        self.profile_cb["values"] = self.mapping_mgr.list_profiles()
+        self.profile_var.set(name)
+        self._load_current_profile_to_tree()
+        self.status_lbl.config(text=f"📋 Đã nhân bản sang Profile: '{name}'")
+
+    def _on_delete_profile(self):
+        profiles = self.mapping_mgr.list_profiles()
+        if len(profiles) <= 1:
+            messagebox.showwarning("Không thể xóa", "Không thể xóa Profile duy nhất còn lại!", parent=self)
+            return
+
+        if messagebox.askyesno("Xác nhận xóa", f"Bạn có chắc muốn xóa Profile '{self.active_profile}' không?", parent=self):
+            del_name = self.active_profile
+            self.mapping_mgr.delete_profile(del_name)
+            self.active_profile = self.mapping_mgr.get_active_profile_name()
+            self.profile_cb["values"] = self.mapping_mgr.list_profiles()
+            self.profile_var.set(self.active_profile)
+            self.current_mapping = dict(self.mapping_mgr.get_mapping(self.active_profile))
+            self._load_current_profile_to_tree()
+            self.status_lbl.config(text=f"🗑️ Đã xóa Profile '{del_name}'")
+
+    def _on_save_and_apply(self):
+        self.mapping_mgr.save_profile(self.active_profile, self.current_mapping)
+        self.mapping_mgr.set_active_profile_name(self.active_profile)
+        if self.on_saved:
+            self.on_saved(self.active_profile)
+        messagebox.showinfo(
+            "Đã lưu Profile",
+            f"Đã lưu thành công cấu hình '{self.active_profile}' với {len(self.current_mapping)} quy tắc ánh xạ!\n\n"
+            f"Hệ thống sẽ áp dụng chính xác 100% các cột này khi thực hiện cập nhật từ ảnh.",
+            parent=self
+        )
+        self.destroy()
+
+
+class ReviewPatchDialog(tk.Toplevel):
+    """
+    Hộp thoại Kiểm soát & Duyệt sửa đổi học sinh trước khi ghi vào Excel:
+    - Cho biết cột/các cột cần sửa, giá trị cũ/mới.
+    - Cho phép người dùng chỉnh sửa thủ công vào ô nhập liệu nếu AI nhận diện chưa đúng.
+    - Nút Xác nhận, Bỏ qua, Áp dụng tất cả, Dừng lại.
+    """
+    def __init__(self, parent, review_data: dict[str, Any], is_dark: bool | None = None):
+        super().__init__(parent)
+        self.palette = get_theme_palette(is_dark)
+        self.review_data = review_data
+        self.result: dict[str, Any] = {
+            "action": "skip",
+            "changes": review_data.get("changes", []),
+            "fields": review_data.get("fields", []),
+        }
+
+        rec_type = review_data.get("type", "SUA_DOI")
+        stu_name = review_data.get("student_name", "Không rõ")
+        row_num = review_data.get("row_num", "---")
+
+        if rec_type == "SUA_DOI":
+            self.title(f"🔍 Kiểm soát sửa đổi: {stu_name} (Dòng {row_num})")
+        else:
+            self.title(f"➕ Kiểm soát thêm mới: {stu_name} (Dòng {row_num})")
+
+        self.geometry("820x520")
+        self.minsize(700, 420)
+        self.configure(bg=self.palette.WINDOW_BG)
+        self.transient(parent)
+        self.grab_set()
+
+        self._entry_vars: list[tuple[dict[str, Any], tk.StringVar]] = []
+        self._build_ui()
+        self._center_window(parent)
+
+        self.protocol("WM_DELETE_WINDOW", self._on_skip)
+
+    def _center_window(self, parent):
+        self.update_idletasks()
+        w, h = 820, 520
+        if parent and parent.winfo_exists():
+            x = parent.winfo_rootx() + (parent.winfo_width() // 2) - (w // 2)
+            y = parent.winfo_rooty() + (parent.winfo_height() // 2) - (h // 2)
+            self.geometry(f"{w}x{h}+{max(0, x)}+{max(0, y)}")
+        else:
+            sw = self.winfo_screenwidth()
+            sh = self.winfo_screenheight()
+            self.geometry(f"{w}x{h}+{(sw - w) // 2}+{(sh - h) // 2}")
+
+    def _build_ui(self):
+        p = self.palette
+        rec_type = self.review_data.get("type", "SUA_DOI")
+        stu_name = self.review_data.get("student_name", "")
+        row_num = self.review_data.get("row_num", "")
+        img_name = self.review_data.get("image_name", "")
+        reason = self.review_data.get("reason", "")
+
+        # 1. Header Banner
+        h_frame = tk.Frame(self, bg=p.HEADER_BANNER_BG, padx=16, pady=10)
+        h_frame.pack(side=tk.TOP, fill=tk.X)
+
+        title_lbl = "✏️ KIỂM SOÁT THAY ĐỔI DỮ LIỆU HỌC SINH" if rec_type == "SUA_DOI" else "➕ KIỂM SOÁT BỔ SUNG HỌC SINH MỚI"
+        tk.Label(
+            h_frame,
+            text=title_lbl,
+            font=FONT_TITLE,
+            bg=p.HEADER_BANNER_BG,
+            fg=p.HEADER_BANNER_FG
+        ).pack(anchor=tk.W)
+
+        sub_info = f"👤 Học sinh: {stu_name}   |   📄 Dòng Excel: {row_num}   |   📷 Ảnh: {img_name}"
+        tk.Label(
+            h_frame,
+            text=sub_info,
+            font=FONT_LABEL_BOLD,
+            bg=p.HEADER_BANNER_BG,
+            fg=p.HEADER_SUB_FG
+        ).pack(anchor=tk.W, pady=(2, 0))
+
+        if reason:
+            tk.Label(
+                h_frame,
+                text=f"⚠️ Cảnh báo AI: {reason}",
+                font=FONT_LABEL_BOLD,
+                bg=p.HEADER_BANNER_BG,
+                fg=p.WARNING
+            ).pack(anchor=tk.W, pady=(2, 0))
+
+        # 2. Bottom Actions Bar
+        b_frame = ttk.Frame(self, padding=(14, 10))
+        b_frame.pack(side=tk.BOTTOM, fill=tk.X)
+
+        ttk.Button(b_frame, text="🛑 Dừng lại", command=self._on_stop).pack(side=tk.LEFT)
+        ttk.Button(b_frame, text="⚡ Áp dụng tất cả còn lại (Không hỏi nữa)", command=self._on_apply_all).pack(side=tk.LEFT, padx=(12, 0))
+
+        ttk.Button(b_frame, text="✅ Xác nhận & Cập nhật", command=self._on_apply, style="Action.TButton").pack(side=tk.RIGHT, padx=(8, 0))
+        ttk.Button(b_frame, text="⏭️ Bỏ qua học sinh này", command=self._on_skip).pack(side=tk.RIGHT)
+
+        # 3. Main Content
+        container = ttk.Frame(self, padding=12)
+        container.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+
+        instr_txt = "Kiểm tra giá trị cũ và mới dưới đây. Bạn có thể SỬA TRỰC TIẾP vào ô 'Giá trị cập nhật' nếu AI đọc chưa đúng:"
+        ttk.Label(container, text=instr_txt, font=FONT_LABEL_BOLD, foreground=p.PRIMARY).pack(anchor=tk.W, pady=(0, 8))
+
+        canvas_frame = ttk.Frame(container)
+        canvas_frame.pack(fill=tk.BOTH, expand=True)
+
+        canvas = tk.Canvas(canvas_frame, bg=p.WINDOW_BG, highlightthickness=0)
+        v_sb = ttk.Scrollbar(canvas_frame, orient=tk.VERTICAL, command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=v_sb.set)
+
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        v_sb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        first_entry = None
+
+        if rec_type == "SUA_DOI":
+            changes = self.review_data.get("changes", [])
+            hdr_grid = ttk.Frame(scrollable_frame)
+            hdr_grid.pack(fill=tk.X, pady=(0, 6))
+            ttk.Label(hdr_grid, text="Cột dữ liệu", font=FONT_LABEL_BOLD, width=24).pack(side=tk.LEFT, padx=4)
+            ttk.Label(hdr_grid, text="Giá trị cũ trong file Excel", font=FONT_LABEL_BOLD, width=26).pack(side=tk.LEFT, padx=4)
+            ttk.Label(hdr_grid, text="👉 Giá trị cập nhật (Cho phép nhập tay)", font=FONT_LABEL_BOLD, width=32, foreground=p.SUCCESS).pack(side=tk.LEFT, padx=4)
+
+            ttk.Separator(scrollable_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=(0, 6))
+
+            for idx, item in enumerate(changes):
+                row_f = ttk.Frame(scrollable_frame, padding=2)
+                row_f.pack(fill=tk.X, pady=4)
+
+                c_name = item.get("col_name", item.get("field_name", ""))
+                old_v = item.get("old_val", "")
+                new_v = item.get("new_val", "")
+
+                ttk.Label(row_f, text=c_name, font=FONT_LABEL_BOLD, width=24).pack(side=tk.LEFT, padx=4)
+
+                lbl_old = tk.Label(row_f, text=old_v or "(Trống)", font=FONT_LABEL, bg=p.CARD_BG, fg=p.MUTED, width=24, anchor="w", relief="solid", bd=1)
+                lbl_old.pack(side=tk.LEFT, padx=4)
+
+                var = tk.StringVar(value=new_v)
+                ent = ttk.Entry(row_f, textvariable=var, font=FONT_LABEL_BOLD, width=30)
+                ent.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
+                self._entry_vars.append((item, var))
+                if idx == 0:
+                    first_entry = ent
+
+        else:
+            fields = self.review_data.get("fields", [])
+            hdr_grid = ttk.Frame(scrollable_frame)
+            hdr_grid.pack(fill=tk.X, pady=(0, 6))
+            ttk.Label(hdr_grid, text="Cột dữ liệu (28 cột)", font=FONT_LABEL_BOLD, width=26).pack(side=tk.LEFT, padx=4)
+            ttk.Label(hdr_grid, text="👉 Giá trị học sinh bổ sung (Cho phép sửa tay)", font=FONT_LABEL_BOLD, width=42, foreground=p.SUCCESS).pack(side=tk.LEFT, padx=4)
+
+            ttk.Separator(scrollable_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=(0, 6))
+
+            for idx, item in enumerate(fields):
+                row_f = ttk.Frame(scrollable_frame, padding=2)
+                row_f.pack(fill=tk.X, pady=4)
+
+                c_name = item.get("col_name", "")
+                cur_v = item.get("val", "")
+
+                ttk.Label(row_f, text=c_name, font=FONT_LABEL, width=26).pack(side=tk.LEFT, padx=4)
+                var = tk.StringVar(value=cur_v)
+                ent = ttk.Entry(row_f, textvariable=var, font=FONT_LABEL_BOLD, width=40)
+                ent.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
+                self._entry_vars.append((item, var))
+                if idx == 0:
+                    first_entry = ent
+
+        if first_entry:
+            first_entry.focus_set()
+
+        self.bind("<Return>", lambda e: self._on_apply())
+        self.bind("<Escape>", lambda e: self._on_skip())
+
+    def _on_apply(self):
+        rec_type = self.review_data.get("type", "SUA_DOI")
+        if rec_type == "SUA_DOI":
+            updated_changes = []
+            for item, var in self._entry_vars:
+                item_copy = dict(item)
+                item_copy["new_val"] = var.get().strip()
+                updated_changes.append(item_copy)
+            self.result = {"action": "apply", "changes": updated_changes}
+        else:
+            updated_fields = []
+            for item, var in self._entry_vars:
+                item_copy = dict(item)
+                item_copy["val"] = var.get().strip()
+                updated_fields.append(item_copy)
+            self.result = {"action": "apply", "fields": updated_fields}
+        self.destroy()
+
+    def _on_skip(self):
+        self.result = {"action": "skip"}
+        self.destroy()
+
+    def _on_apply_all(self):
+        rec_type = self.review_data.get("type", "SUA_DOI")
+        if rec_type == "SUA_DOI":
+            updated_changes = []
+            for item, var in self._entry_vars:
+                item_copy = dict(item)
+                item_copy["new_val"] = var.get().strip()
+                updated_changes.append(item_copy)
+            self.result = {"action": "apply_all", "changes": updated_changes}
+        else:
+            updated_fields = []
+            for item, var in self._entry_vars:
+                item_copy = dict(item)
+                item_copy["val"] = var.get().strip()
+                updated_fields.append(item_copy)
+            self.result = {"action": "apply_all", "fields": updated_fields}
+        self.destroy()
+
+    def _on_stop(self):
+        self.result = {"action": "stop"}
+        self.destroy()
 
 
 class OCRPromptDialog(tk.Toplevel):
