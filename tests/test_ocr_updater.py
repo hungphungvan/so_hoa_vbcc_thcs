@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import tempfile
+import time
+import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 import openpyxl
-import pytest
 
 from src.ocr_updater import (
     AVAILABLE_MATCH_FIELDS,
@@ -329,4 +330,85 @@ def test_updater_with_custom_column_mapping(tmp_path: Path):
     # Kiểm tra cột 5 và cột 2 đã được cập nhật chính xác 100% theo ánh xạ người dùng
     assert ws_res.cell(row=2, column=5).value == "Lê Quốc Cường"
     assert ws_res.cell(row=2, column=2).value == "A999"
+
+
+def test_background_scan_continues_during_manual_review(tmp_path: Path):
+    """Kiểm tra luồng quét OCR ngầm vẫn tiếp tục quét ảnh 2 trong khi người dùng đang dừng ở hộp thoại duyệt ảnh 1."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Mau28Cot"
+    from src.smart_merger import TARGET_COLUMNS
+    ws.append([col["name"] for col in TARGET_COLUMNS])
+
+    for i, name in enumerate(["Nguyễn Văn An", "Trần Thị Bích"], start=1):
+        r = [None] * 28
+        r[0] = i
+        r[4] = name
+        r[8] = "15/03/2008"
+        ws.append(r)
+
+    excel_file = tmp_path / "ds_bg.xlsx"
+    wb.save(excel_file)
+
+    img1 = tmp_path / "trang_01.jpg"
+    img2 = tmp_path / "trang_02.jpg"
+    img1.write_bytes(b"IMG1")
+    img2.write_bytes(b"IMG2")
+
+    scanned_images: list[str] = []
+
+    def fake_extract(image_path, **kwargs):
+        p_name = Path(image_path).name
+        scanned_images.append(p_name)
+        if p_name == "trang_01.jpg":
+            return '[{"loai": "SUA_DOI", "ho_ten": "Nguyễn Văn An", "cac_truong_sua": [{"ten_truong": "ngay_sinh", "gia_tri_cu": "15/03/2008", "gia_tri_moi": "16/03/2008"}]}]'
+        return '[{"loai": "SUA_DOI", "ho_ten": "Trần Thị Bích", "cac_truong_sua": [{"ten_truong": "ngay_sinh", "gia_tri_cu": "15/03/2008", "gia_tri_moi": "22/05/2008"}]}]'
+
+    img2_scanned_while_reviewing_img1 = False
+
+    def slow_review_cb(req):
+        nonlocal img2_scanned_while_reviewing_img1
+        if req["image_name"] == "trang_01.jpg":
+            # Chờ một chút để luồng producer quét xong ảnh 2 ngay trong lúc hộp thoại ảnh 1 đang mở
+            for _ in range(20):
+                if "trang_02.jpg" in scanned_images:
+                    img2_scanned_while_reviewing_img1 = True
+                    break
+                time.sleep(0.02)
+        return {"action": "apply", "changes": req.get("changes", [])}
+
+    out_file = tmp_path / "ds_bg_out.xlsx"
+    processor = OCRUpdaterProcessor()
+    with patch("src.ocr_updater.extract_table_from_image", side_effect=fake_extract):
+        res = processor.update_excel_from_images(
+            excel_path=excel_file,
+            image_paths=[img1, img2],
+            selected_match_keys=["ho_ten"],
+            output_path=out_file,
+            api_key="test_key",
+            manual_review_callback=slow_review_cb,
+            background_scan=True,
+        )
+
+    assert res["status"] == "success"
+    assert res["modified_students"] == 2
+    assert img2_scanned_while_reviewing_img1 is True
+
+
+class TestOCRUpdaterUnittest(unittest.TestCase):
+    def test_all(self):
+        test_normalize_match_val()
+        test_resolve_field_to_col_idx()
+        test_match_student_row()
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td)
+            test_updater_end_to_end(p)
+            test_updater_with_manual_review(p)
+            test_column_mapping_manager(p)
+            test_updater_with_custom_column_mapping(p)
+            test_background_scan_continues_during_manual_review(p)
+
+
+if __name__ == "__main__":
+    unittest.main()
 

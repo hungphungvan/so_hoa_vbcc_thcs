@@ -144,10 +144,15 @@ class CustomToolsView(ttk.Frame):
         self.ocr_updater = OCRUpdaterProcessor(config_mgr=self.ocr_config_mgr)
         self.ocr_mapping_mgr = OCRColumnMappingManager()
         self.ocr_patch_profile_var = tk.StringVar(value=self.ocr_mapping_mgr.get_active_profile_name())
+        saved_patch_prompt = ocr_init_cfg.get("custom_patch_prompt", "").strip()
+        self.ocr_patch_prompt_text: str = saved_patch_prompt if saved_patch_prompt else DEFAULT_PATCH_PROMPT
+        self.ocr_patch_prompt_source_var = tk.StringVar(
+            value="Prompt tùy chỉnh trên giao diện" if saved_patch_prompt else "Prompt mặc định Sửa đổi & Bổ sung"
+        )
         self.ocr_patch_excel_var = tk.StringVar()
         self.ocr_patch_images_list: list[Path] = []
         self.ocr_patch_out_var = tk.StringVar()
-        self.ocr_patch_auto_append_var = tk.BooleanVar(value=True)
+        self.ocr_patch_auto_append_var = tk.BooleanVar(value=False)
         self.ocr_match_stt_var = tk.BooleanVar(value=False)
         self.ocr_match_so_hieu_var = tk.BooleanVar(value=False)
         self.ocr_match_so_vao_so_var = tk.BooleanVar(value=False)
@@ -155,6 +160,7 @@ class CustomToolsView(ttk.Frame):
         self.ocr_match_ngay_sinh_var = tk.BooleanVar(value=True)
         self.ocr_match_ten_truong_var = tk.BooleanVar(value=False)
         self.ocr_patch_manual_review_var = tk.BooleanVar(value=True)
+        self.ocr_patch_bg_scan_var = tk.BooleanVar(value=True)
         self.last_ocr_patch_output_file: Path | None = None
         self.ocr_patch_cancel_requested = False
 
@@ -1685,6 +1691,14 @@ class CustomToolsView(ttk.Frame):
                     self.ocr_patch_prog_bar["value"] = val
                 if hasattr(self, "ocr_patch_status_lbl"):
                     self.ocr_patch_status_lbl.config(text=f"⏳ {msg}...", foreground=self.palette.PRIMARY)
+            elif msg_type == "ocr_patch_file_status":
+                img_p, st_text = item[1], item[2]
+                if hasattr(self, "ocr_patch_tree"):
+                    for child in self.ocr_patch_tree.get_children():
+                        vals = list(self.ocr_patch_tree.item(child, "values"))
+                        if str(img_p) in vals or img_p.name in vals:
+                            vals[3] = st_text
+                            self.ocr_patch_tree.item(child, values=vals)
             elif msg_type == "ocr_patch_done":
                 res = item[1]
                 if hasattr(self, "ocr_patch_prog_bar"):
@@ -2594,12 +2608,12 @@ class CustomToolsView(ttk.Frame):
         self.ocr_patch_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         p_sb.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # 3. Khung 3: Cấu hình Ánh xạ Cột (Tên cột trên ảnh ➔ 28 Cột chuẩn - Chuẩn xác 100%)
-        map_card = ttk.LabelFrame(parent, text="3. Cấu hình Ánh xạ Cột (Ảnh ➔ 28 Cột chuẩn - Chuẩn xác 100%)", padding=6)
+        # 3. Khung 3: Cấu hình Ánh xạ Cột & Prompt OCR (Tên cột trên ảnh ➔ 28 Cột chuẩn - Chuẩn xác 100%)
+        map_card = ttk.LabelFrame(parent, text="3. Cấu hình Ánh xạ Cột & Prompt OCR (Ảnh ➔ 28 Cột chuẩn)", padding=6)
         map_card.pack(side=tk.TOP, fill=tk.X, pady=(2, 2))
 
         r_map = ttk.Frame(map_card)
-        r_map.pack(fill=tk.X)
+        r_map.pack(fill=tk.X, pady=(0, 4))
 
         ttk.Label(r_map, text="Hồ sơ ánh xạ (Profile):", font=FONT_LABEL_BOLD).pack(side=tk.LEFT, padx=(0, 6))
         self.ocr_patch_profile_cb = ttk.Combobox(
@@ -2629,6 +2643,29 @@ class CustomToolsView(ttk.Frame):
         )
         self.ocr_patch_mapping_info_lbl.pack(side=tk.LEFT)
 
+        r_patch_prompt = ttk.Frame(map_card)
+        r_patch_prompt.pack(fill=tk.X)
+
+        ttk.Label(r_patch_prompt, text="Prompt đang dùng:", font=FONT_LABEL_BOLD).pack(side=tk.LEFT, padx=(0, 6))
+        self.ocr_patch_prompt_lbl = ttk.Label(
+            r_patch_prompt,
+            textvariable=self.ocr_patch_prompt_source_var,
+            font=FONT_MUTED,
+            foreground=p.PRIMARY
+        )
+        self.ocr_patch_prompt_lbl.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        ttk.Button(
+            r_patch_prompt,
+            text="📂 Nạp file prompt.txt...",
+            command=self._on_choose_ocr_patch_prompt_file
+        ).pack(side=tk.RIGHT, padx=(6, 0))
+        ttk.Button(
+            r_patch_prompt,
+            text="📝 Xem / Tùy chỉnh Prompt...",
+            command=self._open_ocr_patch_prompt_dialog
+        ).pack(side=tk.RIGHT)
+
         # 4. Khung 4: Chiến lược định vị & So khớp dòng học sinh
         match_card = ttk.LabelFrame(parent, text="4. Chiến lược định vị học sinh & Quy tắc cập nhật", padding=6)
         match_card.pack(side=tk.TOP, fill=tk.X, pady=(2, 2))
@@ -2650,11 +2687,16 @@ class CustomToolsView(ttk.Frame):
             r_opt2,
             text="➕ Tự động bổ sung dòng mới (Tô màu xanh)",
             variable=self.ocr_patch_auto_append_var
-        ).pack(side=tk.LEFT, padx=(0, 16))
+        ).pack(side=tk.LEFT, padx=(0, 14))
         ttk.Checkbutton(
             r_opt2,
-            text="🔍 Bật hộp thoại duyệt & chỉnh sửa thủ công từng học sinh (Kiểm soát 100%)",
+            text="🔍 Duyệt & chỉnh sửa thủ công từng học sinh",
             variable=self.ocr_patch_manual_review_var
+        ).pack(side=tk.LEFT, padx=(0, 14))
+        ttk.Checkbutton(
+            r_opt2,
+            text="⚡ Quét OCR ngầm liên tục trong khi đang duyệt (Nhanh hơn)",
+            variable=self.ocr_patch_bg_scan_var
         ).pack(side=tk.LEFT)
 
         # 5. Khung 5: Đầu ra & Thực thi (GHIM CỐ ĐỊNH Ở ĐÁY)
@@ -2877,6 +2919,8 @@ class CustomToolsView(ttk.Frame):
         out_p = Path(out_path_str)
 
         enable_review = self.ocr_patch_manual_review_var.get()
+        bg_scan = self.ocr_patch_bg_scan_var.get()
+        active_patch_prompt = self.ocr_patch_prompt_text.strip() or DEFAULT_PATCH_PROMPT
 
         prof_name = self.ocr_patch_profile_var.get().strip()
         column_mapping = self.ocr_mapping_mgr.get_mapping(prof_name)
@@ -2886,6 +2930,9 @@ class CustomToolsView(ttk.Frame):
                 def prog_cb(cur, tot, msg):
                     val = (cur / tot * 100) if tot > 0 else 0
                     self.msg_queue.put(("ocr_patch_prog", val, msg))
+
+                def file_st_cb(img_p, st_str):
+                    self.msg_queue.put(("ocr_patch_file_status", img_p, st_str))
 
                 def review_cb(review_data):
                     if not self.ocr_patch_manual_review_var.get():
@@ -2910,11 +2957,13 @@ class CustomToolsView(ttk.Frame):
                     api_key=api_key,
                     base_url=base_url,
                     model_name=model_name,
-                    prompt_text=DEFAULT_PATCH_PROMPT,
+                    prompt_text=active_patch_prompt,
                     progress_callback=prog_cb,
+                    file_status_callback=file_st_cb,
                     log_callback=lambda m, l: self._log(m, l),
                     check_cancel=lambda: self.ocr_patch_cancel_requested,
                     manual_review_callback=review_cb if enable_review else None,
+                    background_scan=bg_scan,
                 )
                 self.msg_queue.put(("ocr_patch_done", res))
             except Exception as e:
@@ -2922,6 +2971,52 @@ class CustomToolsView(ttk.Frame):
                 self.msg_queue.put(("ocr_patch_error", str(e), trace))
 
         threading.Thread(target=run, daemon=True).start()
+
+    def _on_choose_ocr_patch_prompt_file(self):
+        f = filedialog.askopenfilename(
+            title="Chọn tệp prompt.txt cho Tab 5.2 (Sửa đổi & Bổ sung)",
+            filetypes=[("Text Files", "*.txt"), ("All Files", "*.*")],
+            parent=self
+        )
+        if not f:
+            return
+        try:
+            p = Path(f)
+            txt = p.read_text(encoding="utf-8").strip()
+            if txt:
+                self.ocr_patch_prompt_text = txt
+                self.ocr_patch_prompt_source_var.set(f"Tệp tùy chọn ({p.name})")
+                self.ocr_config_mgr.save_config(
+                    api_key=self.ocr_api_key_var.get().strip(),
+                    base_url=self.ocr_base_url_var.get().strip(),
+                    model_name=self.ocr_model_var.get().strip(),
+                    custom_patch_prompt=self.ocr_patch_prompt_text,
+                )
+                self._log(f"📝 [Tab 5.2] Đã nạp nội dung Prompt từ tệp: {p}", "info")
+        except Exception as e:
+            messagebox.showerror("Lỗi đọc file", f"Không thể đọc tệp prompt:\n{e}", parent=self)
+
+    def _open_ocr_patch_prompt_dialog(self):
+        dlg = OCRPromptDialog(
+            parent=self.winfo_toplevel(),
+            current_prompt=self.ocr_patch_prompt_text,
+            default_prompt=DEFAULT_PATCH_PROMPT,
+            is_dark=self.is_dark,
+        )
+        dlg.wait_window()
+        if dlg.saved_prompt is not None:
+            self.ocr_patch_prompt_text = dlg.saved_prompt
+            is_def = (self.ocr_patch_prompt_text.strip() == DEFAULT_PATCH_PROMPT.strip())
+            self.ocr_patch_prompt_source_var.set(
+                "Prompt mặc định Sửa đổi & Bổ sung" if is_def else "Prompt tùy chỉnh trên giao diện"
+            )
+            self.ocr_config_mgr.save_config(
+                api_key=self.ocr_api_key_var.get().strip(),
+                base_url=self.ocr_base_url_var.get().strip(),
+                model_name=self.ocr_model_var.get().strip(),
+                custom_patch_prompt="" if is_def else self.ocr_patch_prompt_text,
+            )
+            self._log("📝 [Tab 5.2] Đã cập nhật nội dung Prompt Sửa đổi & Bổ sung.", "success")
 
     def _open_ocr_mapping_dialog(self):
         """Mở hộp thoại cấu hình ánh xạ cột tùy chỉnh (Ảnh ➔ 28 Cột chuẩn)."""

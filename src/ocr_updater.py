@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
+import queue
 import re
+import threading
 import time
 import unicodedata
 from pathlib import Path
@@ -113,49 +116,53 @@ FIELD_SYNONYMS: dict[str, int] = {
     "trang thai": 25,
 }
 
-DEFAULT_PATCH_PROMPT = """Bạn là chuyên gia số hóa văn bằng chứng chỉ THCS, có nhiệm vụ trích xuất dữ liệu từ các trang tài liệu/sổ bộ CÓ CHỨA ĐÁNH DẤU SỬA ĐỔI HOẶC BỔ SUNG THÊM HỌC SINH.
+DEFAULT_PATCH_PROMPT = """Bạn là hệ thống OCR tốc độ cao chuyên lọc các dòng CÓ CHỮ SỬA ĐỔI MÀU ĐỎ trong danh sách tốt nghiệp THCS.
 
-ĐẶC ĐIỂM TÀI LIỆU CẦN ĐỌC:
-1. SỬA ĐỔI (Sửa trên học sinh đã in sẵn):
-   - Có chữ in máy bị gạch ngang/gạch xóa và được viết đè chữ viết tay hoặc bút đỏ (sửa Họ tên, Ngày sinh, Giới tính, Nơi sinh, Xếp loại, Số hiệu bằng, Số vào sổ, Ghi chú...).
-   - BẮT BUỘC lấy giá trị viết tay/bút đỏ sửa đổi làm giá trị mới ("gia_tri_moi").
-2. BỔ SUNG (Học sinh mới được chèn thêm):
-   - Là những dòng học sinh được viết tay toàn bộ hoặc ghi thêm bằng bút mực/bút đỏ ở dòng trống, cuối trang, hoặc chèn giữa danh sách.
+QUY TẮC LỌC TỐC ĐỘ CAO (BỎ QUA NHANH):
+1. BỎ QUA DÒNG VIẾT THÊM (BỔ SUNG): Tuyệt đối KHÔNG lấy các dòng học sinh viết tay bổ sung thêm ở cuối bảng hay chèn mới. CHỈ quan tâm các dòng in máy có sửa đổi bằng mực đỏ.
+2. BỎ QUA DẤU TÍCH KIỂM TRA (dấu "v", "✓", chấm tròn đánh dấu đã kiểm tra): Các dấu tích v màu đỏ hoặc bút bi dùng để đánh dấu kiểm đếm KHÔNG phải là sửa đổi. Nếu một dòng chỉ có dấu tích "v" mà không gạch xóa hay viết chữ sửa đổi thì BỎ QUA NGAY.
+3. NẾU DÒNG CHỈ CÓ CHỮ IN MÁY BÌNH THƯỜNG: Lập tức bỏ qua ngay, không đọc chi tiết.
 
-QUY TẮC TRÍCH XUẤT:
-- BỎ QUA những dòng in máy bình thường không hề có bất kỳ dấu hiệu sửa đổi, gạch xóa hay ghi chú viết tay nào.
-- CHỈ trích xuất những dòng có SỬA ĐỔI hoặc BỔ SUNG.
+QUY TẮC TRÍCH XUẤT 5 TRƯỜNG DỮ LIỆU SỬA ĐỔI (MÀU ĐỎ) Ở MỖI DÒNG CÓ SỬA:
+Chỉ lấy dữ liệu sửa đổi thuộc 5 mục sau:
+1. Họ và tên ("ho_ten"):
+   - Nếu gạch đỏ cả họ tên hoặc chỉ gạch đỏ một phần (họ, đệm, hoặc tên) và viết chữ đỏ sửa lại: hãy ghép phần chữ đỏ mới với phần chữ in không bị gạch để tạo thành HỌ VÀ TÊN ĐẦY ĐỦ sau khi sửa (đồng thời ghi nhận tên in máy ban đầu vào "gia_tri_cu").
+   - CHÚ Ý: Chữ viết tay màu đỏ sửa họ và tên có thể viết lệch sang cột bên cạnh, viết ở lề hoặc phía trên/dưới dòng do thiếu chỗ. Hãy nhìn theo vị trí gạch đỏ ở cột Họ tên để lấy đúng chữ đỏ tương ứng.
+2. Ngày tháng năm sinh ("ngay_sinh"):
+   - Nếu gạch đỏ toàn bộ hoặc chỉ một phần (chỉ gạch ngày, chỉ gạch tháng, hoặc chỉ gạch năm sinh) và viết số màu đỏ sửa lại: hãy ghép phần số đỏ mới với phần số in còn lại để tạo thành NGÀY THÁNG NĂM SINH ĐẦY ĐỦ (dạng dd/mm/yyyy).
+   - CHÚ Ý: Số sửa ngày/tháng/năm sinh màu đỏ có thể bị viết tràn sang cột lân cận (như cột Giới tính, Nơi sinh). Hãy chú ý vết gạch đỏ ở cột Ngày sinh để ghép đúng.
+3. Giới tính ("gioi_tinh"):
+   - Nếu chữ giới tính in sẵn bị gạch đỏ (kể cả không ghi chữ mới bên cạnh), nghĩa là đổi sang giới tính còn lại: ví dụ gạch chéo/gạch ngang chữ "Nam" tức là sửa thành "Nữ" (gia_tri_cu: "Nam", gia_tri_moi: "Nữ"); ngược lại gạch chữ "Nữ" tức là sửa thành "Nam" (gia_tri_cu: "Nữ", gia_tri_moi: "Nam").
+4. Dân tộc ("dan_toc"):
+   - Thường gạch đỏ dân tộc in sẵn và ghi tên dân tộc mới bằng chữ đỏ ngay bên cạnh (ví dụ gạch "Kinh" ghi "Tày" bên cạnh).
+5. Nơi sinh ("noi_sinh"):
+   - Thường gạch đỏ nơi sinh in sẵn và ghi nơi sinh mới bằng chữ đỏ bên cạnh.
 
 ĐẦU RA BẮT BUỘC:
-Trả về DUY NHẤT một mảng JSON (chuỗi JSON chuẩn), không bọc trong ```json, không kèm giải thích ngoài.
-Mỗi phần tử trong mảng là một object đại diện cho một học sinh với cấu trúc:
+- Nếu cả trang KHÔNG có dòng nào sửa đổi thuộc 5 mục trên, trả về ngay lập tức: []
+- Nếu có, trả về DUY NHẤT 1 mảng JSON chuẩn (không dùng ```json, không giải thích):
 [
   {
-    "loai": "SUA_DOI" hoặc "BO_SUNG",
-    "stt": <số thứ tự trên trang, nếu có, ví dụ 15>,
-    "so_hieu_bang": "<số hiệu bằng sau khi sửa nếu có>",
-    "so_vao_so": "<số vào sổ gốc sau khi sửa nếu có>",
-    "ho_ten": "<họ và tên đầy đủ sau khi sửa>",
-    "ngay_sinh": "<ngày sinh dạng dd/mm/yyyy sau khi sửa>",
-    "gioi_tinh": "<Nam hoặc Nữ>",
-    "dan_toc": "<dân tộc nếu có, vd: Kinh>",
-    "noi_sinh": "<nơi sinh tỉnh/huyện sau khi sửa nếu có>",
-    "ten_truong": "<tên trường hoặc hội đồng thi>",
-    "xep_loai": "<xếp loại tốt nghiệp sau khi sửa nếu có: Giỏi/Khá/TB>",
-    "ghi_chu": "<ghi chú sau khi sửa/bổ sung>",
+    "loai": "SUA_DOI",
+    "stt": <số thứ tự in trên dòng đó>,
+    "so_hieu_bang": "<số hiệu bằng in trên dòng đó nếu có>",
+    "so_vao_so": "<số vào sổ in trên dòng đó nếu có>",
+    "ho_ten": "<họ và tên đầy đủ của học sinh (đã ghép phần sửa nếu bị sửa tên)>",
+    "ngay_sinh": "<ngày tháng năm sinh đầy đủ dd/mm/yyyy (đã ghép phần sửa nếu bị sửa ngày sinh)>",
+    "gioi_tinh": "<Nam hoặc Nữ sau khi sửa>",
+    "dan_toc": "<dân tộc sau khi sửa>",
+    "noi_sinh": "<nơi sinh sau khi sửa>",
     "cac_truong_sua": [
       {
-        "ten_truong": "<tên trường dữ liệu bị sửa, ví dụ: ho_ten, ngay_sinh, gioi_tinh, noi_sinh, so_hieu_bang, so_vao_so, xep_loai, ghi_chu>",
-        "gia_tri_cu": "<giá trị in máy cũ bị gạch xóa>",
-        "gia_tri_moi": "<giá trị sửa đổi mới viết tay/mực đỏ>"
+        "ten_truong": "<chỉ nhận 1 trong 5 giá trị: ho_ten, ngay_sinh, gioi_tinh, dan_toc, noi_sinh>",
+        "gia_tri_cu": "<giá trị in máy đầy đủ ban đầu trước khi bị gạch đỏ>",
+        "gia_tri_moi": "<giá trị đầy đủ mới sau khi đã áp dụng chữ đỏ sửa đổi>"
       }
     ],
     "can_kiem_tra": false,
     "ly_do_nghi_ngo": null
   }
-]
-
-Nếu trang không có dòng nào bị sửa đổi hay bổ sung, trả về mảng rỗng: []"""
+]"""
 
 
 def normalize_match_val(val: Any, field_key: str) -> str:
@@ -441,25 +448,39 @@ class OCRUpdaterProcessor:
         image_paths: list[Path | str],
         selected_match_keys: list[str] | None = None,
         column_mapping: dict[str, int] | None = None,
-        auto_append_new: bool = True,
+        auto_append_new: bool = False,
         output_path: Path | str | None = None,
         api_key: str | None = None,
         base_url: str | None = None,
         model_name: str | None = None,
         prompt_text: str | None = None,
         progress_callback: Callable[[int, int, str], None] | None = None,
+        file_status_callback: Callable[[Path, str], None] | None = None,
         log_callback: Callable[[str, str], None] | None = None,
         check_cancel: Callable[[], bool] | None = None,
         manual_review_callback: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+        background_scan: bool = True,
+        max_workers: int = 3,
     ) -> dict[str, Any]:
         """
         Thực thi OCR từng ảnh sửa đổi/bổ sung, định vị học sinh trong file Excel 28 cột
         và áp dụng các thay đổi kèm tô màu highlight và tạo sheet lịch sử.
-        Hỗ trợ cấu hình ánh xạ cột tùy biến 100% chuẩn xác và hộp thoại duyệt thủ công.
+        Hỗ trợ:
+        - Cấu hình ánh xạ cột tùy biến 100% chuẩn xác.
+        - Hộp thoại duyệt thủ công.
+        - Cơ chế Producer-Consumer (`background_scan`): Luồng quét OCR vẫn tiếp tục chạy ngầm
+          trên các ảnh tiếp theo trong khi người dùng đang xem và xác nhận hộp thoại chỉnh sửa.
         """
         def log(msg: str, tag: str = "info"):
             if log_callback:
                 log_callback(msg, tag)
+
+        def update_file_st(img_p: Path, status_str: str):
+            if file_status_callback:
+                try:
+                    file_status_callback(img_p, status_str)
+                except Exception:
+                    pass
 
         excel_p = Path(excel_path)
         if not excel_p.is_file():
@@ -580,16 +601,14 @@ class OCRUpdaterProcessor:
 
         # Biến trạng thái duyệt thủ công
         review_active = bool(manual_review_callback)
+        stop_process = False
 
-        for idx, img_p in enumerate(imgs, start=1):
-            if check_cancel and check_cancel():
-                log(f"🛑 Đã dừng theo yêu cầu tại ảnh {img_p.name}.", "warning")
-                break
-
+        # Hàm quét 1 ảnh (có thể chạy trên luồng Producer hoặc chạy tuần tự)
+        def _scan_single_image(idx: int, img_p: Path) -> tuple[int, Path, list[dict[str, Any]] | None, str | None]:
             prog_pct = int(((idx - 1) / total_images) * 100)
             if progress_callback:
-                progress_callback(prog_pct, 100, f"[{idx}/{total_images}] OCR: {img_p.name}")
-
+                progress_callback(prog_pct, 100, f"Đang quét OCR [{idx}/{total_images}]: {img_p.name}")
+            update_file_st(img_p, "⏳ Đang quét OCR...")
             log(f"📷 [{idx}/{total_images}] Đang đọc ảnh: {img_p.name}...", "info")
 
             try:
@@ -602,22 +621,116 @@ class OCRUpdaterProcessor:
                     log_callback=log_callback,
                 )
             except Exception as e:
+                err_s = f"Lỗi kết nối ({e})"
+                update_file_st(img_p, f"❌ {err_s}")
                 log(f"  ❌ Lỗi khi gửi ảnh {img_p.name}: {e}", "error")
-                continue
+                return idx, img_p, None, err_s
 
             records, err_msg = parse_ocr_json_response(raw_response)
             if records is None:
+                update_file_st(img_p, f"⚠️ {err_msg}")
                 log(f"  ⚠️ {img_p.name}: Không trích xuất được JSON ({err_msg}).", "warning")
+                return idx, img_p, None, err_msg
+
+            if not records:
+                update_file_st(img_p, "ℹ️ Không có sửa/bổ sung")
+                log(f"  ℹ️ {img_p.name}: Không phát hiện dòng nào có sửa đổi hoặc bổ sung.", "info")
+                return idx, img_p, [], None
+
+            update_file_st(img_p, f"✨ Phát hiện {len(records)} HS (Chờ duyệt)")
+            log(f"  ✨ {img_p.name}: Phát hiện {len(records)} học sinh có đánh dấu sửa đổi/bổ sung.", "success")
+            return idx, img_p, records, None
+
+        # Khởi tạo hàng đợi kết quả OCR
+        scan_queue: queue.Queue[tuple[int, Path, list[dict[str, Any]] | None, str | None] | None] = queue.Queue()
+
+        def _producer_worker():
+            workers = max(1, min(int(max_workers or 3), total_images))
+            if workers <= 1:
+                for idx, img_p in enumerate(imgs, start=1):
+                    if stop_process or (check_cancel and check_cancel()):
+                        log(f"🛑 Đã dừng luồng quét OCR tại ảnh {img_p.name}.", "warning")
+                        break
+                    res_item = _scan_single_image(idx, img_p)
+                    scan_queue.put(res_item)
+                scan_queue.put(None)
+                return
+
+            # Quét song song nhiều ảnh cùng lúc để tăng tốc gấp 2-3 lần nhưng vẫn đẩy vào queue theo đúng thứ tự trang
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                futures_map = {}
+                next_submit_idx = 0
+                next_yield_idx = 0
+
+                # Nộp trước tối đa `workers * 2` ảnh vào pool
+                while next_submit_idx < total_images and len(futures_map) < workers * 2:
+                    if stop_process or (check_cancel and check_cancel()):
+                        break
+                    i_one = next_submit_idx + 1
+                    p_img = imgs[next_submit_idx]
+                    futures_map[next_submit_idx] = executor.submit(_scan_single_image, i_one, p_img)
+                    next_submit_idx += 1
+
+                while next_yield_idx in futures_map:
+                    if stop_process or (check_cancel and check_cancel()):
+                        log("🛑 Đã dừng luồng quét OCR song song.", "warning")
+                        break
+                    fut = futures_map.pop(next_yield_idx)
+                    try:
+                        res_item = fut.result()
+                        scan_queue.put(res_item)
+                    except Exception as e:
+                        p_err = imgs[next_yield_idx]
+                        scan_queue.put((next_yield_idx + 1, p_err, None, str(e)))
+                    next_yield_idx += 1
+
+                    # Nộp tiếp ảnh mới vào pool
+                    if next_submit_idx < total_images and not (stop_process or (check_cancel and check_cancel())):
+                        i_one = next_submit_idx + 1
+                        p_img = imgs[next_submit_idx]
+                        futures_map[next_submit_idx] = executor.submit(_scan_single_image, i_one, p_img)
+                        next_submit_idx += 1
+
+            scan_queue.put(None)  # Sentinel kết thúc quét
+
+        if background_scan and total_images > 1:
+            # Chạy quét OCR ở luồng riêng để không bị chặn khi người dùng mở hộp thoại duyệt
+            producer_thread = threading.Thread(target=_producer_worker, daemon=True)
+            producer_thread.start()
+        else:
+            # Nếu chỉ có 1 ảnh hoặc tắt background_scan, đẩy tuần tự hoặc chạy trực tiếp
+            producer_thread = None
+
+        img_cursor = 0
+        while True:
+            if stop_process or (check_cancel and check_cancel()):
+                break
+
+            if producer_thread is not None:
+                q_item = scan_queue.get()
+                if q_item is None:
+                    break
+                idx, img_p, records, err_msg = q_item
+            else:
+                if img_cursor >= total_images:
+                    break
+                img_p = imgs[img_cursor]
+                img_cursor += 1
+                idx = img_cursor
+                if check_cancel and check_cancel():
+                    log(f"🛑 Đã dừng theo yêu cầu tại ảnh {img_p.name}.", "warning")
+                    break
+                idx, img_p, records, err_msg = _scan_single_image(idx, img_p)
+
+            if records is None:
                 continue
 
             success_images += 1
             if not records:
-                log(f"  ℹ️ {img_p.name}: Không phát hiện dòng nào có sửa đổi hoặc bổ sung.", "info")
                 continue
 
-            log(f"  ✨ {img_p.name}: Phát hiện {len(records)} học sinh có đánh dấu sửa đổi/bổ sung.", "success")
-
-            stop_process = False
+            img_mod_cnt = 0
+            img_add_cnt = 0
 
             for rec in records:
                 if stop_process or (check_cancel and check_cancel()):
@@ -627,6 +740,11 @@ class OCRUpdaterProcessor:
                 ho_ten = str(rec.get("ho_ten") or "").strip()
                 stt_val = rec.get("stt")
 
+                # Nếu không bật auto_append_new, bỏ qua ngay các bản ghi loại BO_SUNG
+                if rec_type == "BO_SUNG" and not auto_append_new:
+                    log(f"    ⏭️ Bỏ qua dòng viết thêm (bổ sung): {ho_ten}.", "info")
+                    continue
+
                 # 1. Thử so khớp học sinh với các dòng hiện có
                 matched_idx, all_cand, match_note = match_student_row(rec, sheet_rows, keys_to_match)
 
@@ -635,9 +753,9 @@ class OCRUpdaterProcessor:
                     excel_r = excel_row_indices[matched_idx]
                     mod_fields = rec.get("cac_truong_sua", [])
 
-                    # Nếu AI không liệt kê cac_truong_sua cụ thể, so sánh trực tiếp các trường cơ bản
+                    # Nếu AI không liệt kê cac_truong_sua cụ thể, so sánh trực tiếp 5 trường sửa đổi mục tiêu
                     if not mod_fields:
-                        for field_k in ("ho_ten", "ngay_sinh", "gioi_tinh", "noi_sinh", "so_hieu_bang", "so_vao_so", "xep_loai", "ghi_chu"):
+                        for field_k in ("ho_ten", "ngay_sinh", "gioi_tinh", "dan_toc", "noi_sinh"):
                             new_v = rec.get(field_k)
                             if new_v is not None and str(new_v).strip():
                                 c_idx = resolve_field_to_col_idx(field_k, custom_mapping=active_mapping)
@@ -712,6 +830,7 @@ class OCRUpdaterProcessor:
                         candidate_changes = user_decision.get("changes", candidate_changes)
 
                     modified_students_count += 1
+                    img_mod_cnt += 1
                     updated_cols_log = []
                     for c_info in candidate_changes:
                         col_idx = c_info["col_idx"]
@@ -753,7 +872,7 @@ class OCRUpdaterProcessor:
 
                     log(f"    ✏️ Dòng {excel_r} ({ho_ten}): Đã sửa {len(candidate_changes)} ô ({', '.join(updated_cols_log)}).", "info")
 
-                elif rec_type == "BO_SUNG" or auto_append_new:
+                elif auto_append_new:
                     # BỔ SUNG HỌC SINH MỚI VÀO CUỐI DANH SÁCH
                     max_existing_stt += 1
                     new_r = ws.max_row + 1
@@ -877,6 +996,7 @@ class OCRUpdaterProcessor:
                                 new_row_vals[c_i - 1] = v_ed
 
                     added_students_count += 1
+                    img_add_cnt += 1
 
                     # Ghi vào sheet
                     for c_i, v_val in enumerate(new_row_vals, start=1):
@@ -925,6 +1045,7 @@ class OCRUpdaterProcessor:
                     })
                     log(f"    ⚠️ Không tìm thấy vị trí của học sinh '{ho_ten}' ({match_note}).", "warning")
 
+            update_file_st(img_p, f"✅ Đã xử lý (Sửa {img_mod_cnt}, Thêm {img_add_cnt})")
             if stop_process:
                 break
 
