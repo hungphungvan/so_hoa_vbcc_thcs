@@ -140,15 +140,15 @@ Chỉ lấy dữ liệu sửa đổi thuộc 5 mục sau:
 
 ĐẦU RA BẮT BUỘC:
 - Nếu cả trang KHÔNG có dòng nào sửa đổi thuộc 5 mục trên, trả về ngay lập tức: []
-- Nếu có, trả về DUY NHẤT 1 mảng JSON chuẩn (không dùng ```json, không giải thích):
+- Nếu có, ở mỗi dòng có sửa đổi BẮT BUỘC đọc luôn cả 3 thông tin nhận diện trên ảnh gồm: Số thứ tự ("stt"), Họ và tên ("ho_ten"), và Ngày tháng năm sinh ("ngay_sinh") của dòng đó (kể cả khi dòng đó chỉ sửa giới tính, dân tộc hay nơi sinh), rồi trả về DUY NHẤT 1 mảng JSON chuẩn (không dùng ```json, không giải thích):
 [
   {
     "loai": "SUA_DOI",
     "stt": <số thứ tự in trên dòng đó>,
     "so_hieu_bang": "<số hiệu bằng in trên dòng đó nếu có>",
     "so_vao_so": "<số vào sổ in trên dòng đó nếu có>",
-    "ho_ten": "<họ và tên đầy đủ của học sinh (đã ghép phần sửa nếu bị sửa tên)>",
-    "ngay_sinh": "<ngày tháng năm sinh đầy đủ dd/mm/yyyy (đã ghép phần sửa nếu bị sửa ngày sinh)>",
+    "ho_ten": "<họ và tên đầy đủ của học sinh trên ảnh (đã ghép phần sửa nếu bị sửa tên)>",
+    "ngay_sinh": "<ngày tháng năm sinh đầy đủ dd/mm/yyyy trên ảnh (đã ghép phần sửa nếu bị sửa ngày sinh)>",
     "gioi_tinh": "<Nam hoặc Nữ sau khi sửa>",
     "dan_toc": "<dân tộc sau khi sửa>",
     "noi_sinh": "<nơi sinh sau khi sửa>",
@@ -175,8 +175,9 @@ def normalize_match_val(val: Any, field_key: str) -> str:
 
     if field_key == "stt":
         val_clean = re.sub(r"\.0+$", "", val_str)
-        if val_clean.isdigit():
-            return str(int(val_clean))
+        m_num = re.search(r"\d+", val_clean)
+        if m_num:
+            return str(int(m_num.group(0)))
         return val_clean.lower()
 
     if field_key == "ngay_sinh":
@@ -432,8 +433,32 @@ def match_student_row(
         return matches[0], matches, "Khớp duy nhất"
     elif len(matches) > 1:
         return None, matches, f"Trùng {len(matches)} dòng (Cần kiểm tra lại)"
-    else:
-        return None, [], "Không tìm thấy trong danh sách"
+
+    # Cơ chế dự phòng thông minh: Nếu chọn cả STT + Họ tên mà không khớp cả hai
+    # (do Họ tên bị sửa hoặc OCR đọc lệch dấu), ưu tiên định vị theo STT hoặc Họ tên
+    if "stt" in selected_keys and len(selected_keys) > 1:
+        stt_cand = normalize_match_val(candidate.get("stt"), "stt")
+        if stt_cand:
+            stt_matches = [
+                i for i, r_d in enumerate(sheet_rows)
+                if normalize_match_val(r_d.get("stt"), "stt") == stt_cand
+            ]
+            if len(stt_matches) == 1:
+                return stt_matches[0], stt_matches, "Khớp theo STT"
+
+    if "ho_ten" in selected_keys and len(selected_keys) > 1:
+        name_new = normalize_match_val(candidate.get("ho_ten"), "ho_ten")
+        name_old = normalize_match_val(old_vals.get("ho_ten"), "ho_ten") if "ho_ten" in old_vals else ""
+        if name_new or name_old:
+            name_matches = [
+                i for i, r_d in enumerate(sheet_rows)
+                if (name_new and normalize_match_val(r_d.get("ho_ten"), "ho_ten") == name_new)
+                or (name_old and normalize_match_val(r_d.get("ho_ten"), "ho_ten") == name_old)
+            ]
+            if len(name_matches) == 1:
+                return name_matches[0], name_matches, "Khớp theo Họ và tên"
+
+    return None, [], "Không tìm thấy trong danh sách"
 
 
 class OCRUpdaterProcessor:
@@ -490,7 +515,7 @@ class OCRUpdaterProcessor:
         if not imgs:
             return {"status": "error", "message": "Không có tệp ảnh hợp lệ để xử lý."}
 
-        keys_to_match = selected_match_keys or ["ho_ten", "ngay_sinh"]
+        keys_to_match = selected_match_keys or ["stt"]
 
         # Cấu hình Ánh xạ cột (100% chuẩn xác theo người dùng thiết lập)
         active_mapping = column_mapping
@@ -539,19 +564,26 @@ class OCRUpdaterProcessor:
             row_dict: dict[str, Any] = {}
             has_data = False
 
-            # Đọc các trường nhận diện chính
+            # Đọc các trường nhận diện chính + 5 trường sửa đổi mục tiêu
             stt_val = ws.cell(row=r_num, column=1).value
             so_hieu_val = ws.cell(row=r_num, column=2).value
             so_vao_so_val = ws.cell(row=r_num, column=3).value
             ho_ten_val = ws.cell(row=r_num, column=5).value
             ngay_sinh_val = ws.cell(row=r_num, column=9).value
+            gioi_tinh_val = ws.cell(row=r_num, column=10).value
+            dan_toc_val = ws.cell(row=r_num, column=11).value
+            noi_sinh_val = ws.cell(row=r_num, column=13).value
             ten_truong_val = ws.cell(row=r_num, column=14).value
 
+            row_dict["excel_row"] = r_num
             row_dict["stt"] = stt_val
             row_dict["so_hieu_bang"] = so_hieu_val
             row_dict["so_vao_so"] = so_vao_so_val
             row_dict["ho_ten"] = ho_ten_val
             row_dict["ngay_sinh"] = ngay_sinh_val
+            row_dict["gioi_tinh"] = gioi_tinh_val
+            row_dict["dan_toc"] = dan_toc_val
+            row_dict["noi_sinh"] = noi_sinh_val
             row_dict["ten_truong"] = ten_truong_val
 
             # Kiểm tra dòng có dữ liệu không
@@ -739,6 +771,12 @@ class OCRUpdaterProcessor:
                 rec_type = str(rec.get("loai") or "").strip().upper()
                 ho_ten = str(rec.get("ho_ten") or "").strip()
                 stt_val = rec.get("stt")
+                ngay_sinh_ocr = str(rec.get("ngay_sinh") or "").strip()
+                if not ngay_sinh_ocr:
+                    for m_it in (rec.get("cac_truong_sua") or []):
+                        if resolve_field_to_col_idx(str(m_it.get("ten_truong", "")), custom_mapping=active_mapping) == 9:
+                            ngay_sinh_ocr = str(m_it.get("gia_tri_moi") or m_it.get("gia_tri_cu") or "").strip()
+                            break
 
                 # Nếu không bật auto_append_new, bỏ qua ngay các bản ghi loại BO_SUNG
                 if rec_type == "BO_SUNG" and not auto_append_new:
@@ -748,13 +786,13 @@ class OCRUpdaterProcessor:
                 # 1. Thử so khớp học sinh với các dòng hiện có
                 matched_idx, all_cand, match_note = match_student_row(rec, sheet_rows, keys_to_match)
 
-                if matched_idx is not None:
-                    # KHỚP ĐƯỢC 1 DÒNG DUY NHẤT -> TIẾN HÀNH CẬP NHẬT
-                    excel_r = excel_row_indices[matched_idx]
-                    mod_fields = rec.get("cac_truong_sua", [])
+                # Nếu là bản ghi SUA_DOI, cho phép cập nhật khi đã khớp tự động HOẶC khi bật duyệt thủ công (để người dùng chọn lại STT)
+                if matched_idx is not None or (rec_type != "BO_SUNG" and review_active and manual_review_callback):
+                    excel_r = excel_row_indices[matched_idx] if matched_idx is not None else None
+                    mod_fields = list(rec.get("cac_truong_sua") or [])
 
                     # Nếu AI không liệt kê cac_truong_sua cụ thể, so sánh trực tiếp 5 trường sửa đổi mục tiêu
-                    if not mod_fields:
+                    if not mod_fields and excel_r is not None:
                         for field_k in ("ho_ten", "ngay_sinh", "gioi_tinh", "dan_toc", "noi_sinh"):
                             new_v = rec.get(field_k)
                             if new_v is not None and str(new_v).strip():
@@ -778,7 +816,7 @@ class OCRUpdaterProcessor:
 
                         val_new = m_item.get("gia_tri_moi", "")
                         val_old = m_item.get("gia_tri_cu", "")
-                        curr_excel_val = ws.cell(row=excel_r, column=col_idx).value
+                        curr_excel_val = ws.cell(row=excel_r, column=col_idx).value if excel_r is not None else None
 
                         col_label = TARGET_COLUMNS[col_idx - 1]["name"] if (1 <= col_idx <= len(TARGET_COLUMNS)) else f_name
                         candidate_changes.append({
@@ -792,22 +830,31 @@ class OCRUpdaterProcessor:
                     if not candidate_changes:
                         continue
 
-                    # NẾU BẬT DUYỆT THỦ CÔNG: GỌI CALLBACK HIỆN HỘP THOẠI
+                    # NẾU BẬT DUYỆT THỦ CÔNG: GỌI CALLBACK HIỆN HỘP THOẠI KÈM STT & HỌ TÊN NHẬN DIỆN TỪ ẢNH
                     if review_active and manual_review_callback:
+                        excel_stt_val = str(sheet_rows[matched_idx].get("stt", "") or "") if matched_idx is not None else str(stt_val or "")
+                        excel_stu_name = str(sheet_rows[matched_idx].get("ho_ten", "") or "") if matched_idx is not None else ""
                         review_req = {
                             "type": "SUA_DOI",
-                            "student_name": ho_ten or sheet_rows[matched_idx].get("ho_ten", ""),
+                            "ocr_stt": stt_val if stt_val is not None else "",
+                            "ocr_student_name": ho_ten,
+                            "ocr_ngay_sinh": ngay_sinh_ocr,
+                            "matched_idx": matched_idx,
+                            "excel_stt": excel_stt_val,
+                            "student_name": excel_stu_name or ho_ten,
                             "row_num": excel_r,
+                            "match_note": match_note,
                             "image_name": img_p.name,
                             "reason": rec.get("ly_do_nghi_ngo"),
                             "changes": candidate_changes,
+                            "sheet_rows": sheet_rows,
                         }
                         user_decision = manual_review_callback(review_req)
                         act = user_decision.get("action", "apply")
                         if act == "skip":
-                            log(f"    ⏭️ Người dùng bỏ qua sửa học sinh '{ho_ten}' (Dòng {excel_r}).", "warning")
+                            log(f"    ⏭️ Người dùng bỏ qua sửa học sinh '{ho_ten}' (STT ảnh: {stt_val}).", "warning")
                             audit_entries.append({
-                                "row_num": excel_r,
+                                "row_num": excel_r or "---",
                                 "type": "Bỏ qua",
                                 "student_name": ho_ten,
                                 "field_name": "---",
@@ -826,17 +873,40 @@ class OCRUpdaterProcessor:
                             stop_process = True
                             break
 
+                        # Kiểm tra xem người dùng có chọn/khớp lại STT thực trong file Excel không
+                        override_idx = user_decision.get("matched_idx", matched_idx)
+                        if override_idx is not None and 0 <= override_idx < len(excel_row_indices):
+                            matched_idx = override_idx
+                            excel_r = excel_row_indices[matched_idx]
+
                         # Nhận các giá trị người dùng đã sửa đổi thủ công
                         candidate_changes = user_decision.get("changes", candidate_changes)
+
+                    # Nếu sau khi duyệt vẫn không xác định được dòng Excel để sửa
+                    if matched_idx is None or excel_r is None:
+                        unmatched_count += 1
+                        audit_entries.append({
+                            "row_num": "---",
+                            "type": "Không khớp",
+                            "student_name": ho_ten,
+                            "field_name": "---",
+                            "old_val": "---",
+                            "new_val": "---",
+                            "image_name": img_p.name,
+                            "status": "Không tìm thấy",
+                            "note": match_note
+                        })
+                        log(f"    ⚠️ Không tìm thấy vị trí của học sinh '{ho_ten}' (STT ảnh: {stt_val} - {match_note}).", "warning")
+                        continue
 
                     modified_students_count += 1
                     img_mod_cnt += 1
                     updated_cols_log = []
+                    excel_current_name = str(sheet_rows[matched_idx].get("ho_ten") or ho_ten)
                     for c_info in candidate_changes:
                         col_idx = c_info["col_idx"]
                         f_name = c_info["field_name"]
                         val_new = c_info["new_val"]
-                        val_old = c_info["old_val"]
 
                         # Chuẩn hóa giá trị theo nghiệp vụ cột
                         if col_idx == 5:
@@ -861,16 +931,20 @@ class OCRUpdaterProcessor:
                         audit_entries.append({
                             "row_num": excel_r,
                             "type": "Sửa đổi",
-                            "student_name": ho_ten or sheet_rows[matched_idx].get("ho_ten", ""),
+                            "student_name": str(sheet_rows[matched_idx].get("ho_ten") or excel_current_name),
                             "field_name": c_info.get("col_name", f_name),
-                            "old_val": val_old or str(curr_excel_val or ""),
+                            "old_val": str(curr_excel_val if curr_excel_val is not None else c_info.get("old_val", "")),
                             "new_val": val_new,
                             "image_name": img_p.name,
                             "status": "Thành công",
-                            "note": rec.get("ly_do_nghi_ngo") or "Đã duyệt/cập nhật"
+                            "note": rec.get("ly_do_nghi_ngo") or f"Đã cập nhật (STT: {sheet_rows[matched_idx].get('stt')})"
                         })
 
-                    log(f"    ✏️ Dòng {excel_r} ({ho_ten}): Đã sửa {len(candidate_changes)} ô ({', '.join(updated_cols_log)}).", "info")
+                    log(
+                        f"    ✏️ STT {sheet_rows[matched_idx].get('stt')} (Dòng {excel_r} - {sheet_rows[matched_idx].get('ho_ten')}): "
+                        f"Đã sửa {len(candidate_changes)} ô ({', '.join(updated_cols_log)}).",
+                        "info"
+                    )
 
                 elif auto_append_new:
                     # BỔ SUNG HỌC SINH MỚI VÀO CUỐI DANH SÁCH

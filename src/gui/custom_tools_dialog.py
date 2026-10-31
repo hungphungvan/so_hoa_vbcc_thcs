@@ -43,6 +43,7 @@ from src.ocr_updater import (
     DEFAULT_PATCH_PROMPT,
     OCRColumnMappingManager,
     OCRUpdaterProcessor,
+    normalize_match_val,
 )
 
 def open_path_in_os(path: Path):
@@ -153,11 +154,11 @@ class CustomToolsView(ttk.Frame):
         self.ocr_patch_images_list: list[Path] = []
         self.ocr_patch_out_var = tk.StringVar()
         self.ocr_patch_auto_append_var = tk.BooleanVar(value=False)
-        self.ocr_match_stt_var = tk.BooleanVar(value=False)
+        self.ocr_match_stt_var = tk.BooleanVar(value=True)
         self.ocr_match_so_hieu_var = tk.BooleanVar(value=False)
         self.ocr_match_so_vao_so_var = tk.BooleanVar(value=False)
-        self.ocr_match_ho_ten_var = tk.BooleanVar(value=True)
-        self.ocr_match_ngay_sinh_var = tk.BooleanVar(value=True)
+        self.ocr_match_ho_ten_var = tk.BooleanVar(value=False)
+        self.ocr_match_ngay_sinh_var = tk.BooleanVar(value=False)
         self.ocr_match_ten_truong_var = tk.BooleanVar(value=False)
         self.ocr_patch_manual_review_var = tk.BooleanVar(value=True)
         self.ocr_patch_bg_scan_var = tk.BooleanVar(value=True)
@@ -2674,12 +2675,8 @@ class CustomToolsView(ttk.Frame):
         chk_row.pack(fill=tk.X, pady=(0, 2))
 
         ttk.Label(chk_row, text="Khớp theo:", font=FONT_LABEL_BOLD, foreground=p.PRIMARY).pack(side=tk.LEFT, padx=(0, 8))
-        ttk.Checkbutton(chk_row, text="Họ tên (Cột 5)", variable=self.ocr_match_ho_ten_var).pack(side=tk.LEFT, padx=(0, 12))
-        ttk.Checkbutton(chk_row, text="Ngày sinh (Cột 9)", variable=self.ocr_match_ngay_sinh_var).pack(side=tk.LEFT, padx=(0, 12))
-        ttk.Checkbutton(chk_row, text="STT (Cột 1)", variable=self.ocr_match_stt_var).pack(side=tk.LEFT, padx=(0, 12))
-        ttk.Checkbutton(chk_row, text="Số hiệu (Cột 2)", variable=self.ocr_match_so_hieu_var).pack(side=tk.LEFT, padx=(0, 12))
-        ttk.Checkbutton(chk_row, text="Số vào sổ (Cột 3)", variable=self.ocr_match_so_vao_so_var).pack(side=tk.LEFT, padx=(0, 12))
-        ttk.Checkbutton(chk_row, text="Trường (Cột 14)", variable=self.ocr_match_ten_truong_var).pack(side=tk.LEFT)
+        ttk.Checkbutton(chk_row, text="STT (Cột 1 - Mặc định)", variable=self.ocr_match_stt_var).pack(side=tk.LEFT, padx=(0, 16))
+        ttk.Checkbutton(chk_row, text="Họ và tên (Cột 5 - Tùy chọn thêm)", variable=self.ocr_match_ho_ten_var).pack(side=tk.LEFT, padx=(0, 12))
 
         r_opt2 = ttk.Frame(match_card)
         r_opt2.pack(fill=tk.X)
@@ -3353,36 +3350,41 @@ class OCRColumnMappingDialog(tk.Toplevel):
 class ReviewPatchDialog(tk.Toplevel):
     """
     Hộp thoại Kiểm soát & Duyệt sửa đổi học sinh trước khi ghi vào Excel:
-    - Cho biết cột/các cột cần sửa, giá trị cũ/mới.
-    - Cho phép người dùng chỉnh sửa thủ công vào ô nhập liệu nếu AI nhận diện chưa đúng.
+    - Hiển thị rõ STT và Họ tên nhận diện từ ảnh chụp.
+    - Cho phép người dùng nhập/chọn lại STT thực trong file Excel (kèm tự động nạp giá trị cũ của dòng mới).
+    - Cho biết cột/các cột cần sửa, giá trị cũ/mới và cho phép sửa trực tiếp.
     - Nút Xác nhận, Bỏ qua, Áp dụng tất cả, Dừng lại.
     """
     def __init__(self, parent, review_data: dict[str, Any], is_dark: bool | None = None):
         super().__init__(parent)
         self.palette = get_theme_palette(is_dark)
         self.review_data = review_data
+        self.sheet_rows: list[dict[str, Any]] = review_data.get("sheet_rows", [])
+        self.selected_matched_idx: int | None = review_data.get("matched_idx")
         self.result: dict[str, Any] = {
             "action": "skip",
+            "matched_idx": self.selected_matched_idx,
             "changes": review_data.get("changes", []),
             "fields": review_data.get("fields", []),
         }
 
         rec_type = review_data.get("type", "SUA_DOI")
-        stu_name = review_data.get("student_name", "Không rõ")
-        row_num = review_data.get("row_num", "---")
+        ocr_stt = review_data.get("ocr_stt", "")
+        ocr_name = review_data.get("ocr_student_name") or review_data.get("student_name", "Không rõ")
 
         if rec_type == "SUA_DOI":
-            self.title(f"🔍 Kiểm soát sửa đổi: {stu_name} (Dòng {row_num})")
+            self.title(f"🔍 Phát hiện sửa đổi - Ảnh STT: {ocr_stt} | Họ tên: {ocr_name}")
         else:
-            self.title(f"➕ Kiểm soát thêm mới: {stu_name} (Dòng {row_num})")
+            self.title(f"➕ Kiểm soát thêm mới: {ocr_name}")
 
-        self.geometry("820x520")
-        self.minsize(700, 420)
+        self.geometry("860x580")
+        self.minsize(740, 460)
         self.configure(bg=self.palette.WINDOW_BG)
         self.transient(parent)
         self.grab_set()
 
         self._entry_vars: list[tuple[dict[str, Any], tk.StringVar]] = []
+        self._old_labels: list[tuple[dict[str, Any], tk.Label]] = []
         self._build_ui()
         self._center_window(parent)
 
@@ -3390,7 +3392,7 @@ class ReviewPatchDialog(tk.Toplevel):
 
     def _center_window(self, parent):
         self.update_idletasks()
-        w, h = 820, 520
+        w, h = 860, 580
         if parent and parent.winfo_exists():
             x = parent.winfo_rootx() + (parent.winfo_width() // 2) - (w // 2)
             y = parent.winfo_rooty() + (parent.winfo_height() // 2) - (h // 2)
@@ -3403,16 +3405,21 @@ class ReviewPatchDialog(tk.Toplevel):
     def _build_ui(self):
         p = self.palette
         rec_type = self.review_data.get("type", "SUA_DOI")
-        stu_name = self.review_data.get("student_name", "")
-        row_num = self.review_data.get("row_num", "")
+        ocr_stt = self.review_data.get("ocr_stt", "")
+        ocr_name = self.review_data.get("ocr_student_name") or self.review_data.get("student_name", "")
+        ocr_dob = self.review_data.get("ocr_ngay_sinh", "")
         img_name = self.review_data.get("image_name", "")
         reason = self.review_data.get("reason", "")
 
-        # 1. Header Banner
+        stt_disp = ocr_stt if ocr_stt != "" else "(Chưa rõ)"
+        name_disp = ocr_name if ocr_name else "(Chưa rõ)"
+        dob_disp = ocr_dob if ocr_dob else "(Chưa rõ)"
+
+        # 1. Header Banner: Hiển thị nổi bật STT, Họ và tên, Ngày sinh nhận diện từ ảnh
         h_frame = tk.Frame(self, bg=p.HEADER_BANNER_BG, padx=16, pady=10)
         h_frame.pack(side=tk.TOP, fill=tk.X)
 
-        title_lbl = "✏️ KIỂM SOÁT THAY ĐỔI DỮ LIỆU HỌC SINH" if rec_type == "SUA_DOI" else "➕ KIỂM SOÁT BỔ SUNG HỌC SINH MỚI"
+        title_lbl = "✏️ PHÁT HIỆN HỌC SINH CÓ SỬA ĐỔI TRÊN ẢNH" if rec_type == "SUA_DOI" else "➕ KIỂM SOÁT BỔ SUNG HỌC SINH MỚI"
         tk.Label(
             h_frame,
             text=title_lbl,
@@ -3421,14 +3428,17 @@ class ReviewPatchDialog(tk.Toplevel):
             fg=p.HEADER_BANNER_FG
         ).pack(anchor=tk.W)
 
-        sub_info = f"👤 Học sinh: {stu_name}   |   📄 Dòng Excel: {row_num}   |   📷 Ảnh: {img_name}"
+        ocr_info_txt = (
+            f"📷 Nhận diện từ ảnh [{img_name}]  ➔  "
+            f"🔢 STT trên ảnh: {stt_disp}   |   👤 Họ và tên: {name_disp}   |   🎂 Ngày sinh: {dob_disp}"
+        )
         tk.Label(
             h_frame,
-            text=sub_info,
+            text=ocr_info_txt,
             font=FONT_LABEL_BOLD,
             bg=p.HEADER_BANNER_BG,
             fg=p.HEADER_SUB_FG
-        ).pack(anchor=tk.W, pady=(2, 0))
+        ).pack(anchor=tk.W, pady=(3, 0))
 
         if reason:
             tk.Label(
@@ -3450,11 +3460,63 @@ class ReviewPatchDialog(tk.Toplevel):
         ttk.Button(b_frame, text="⏭️ Bỏ qua học sinh này", command=self._on_skip).pack(side=tk.RIGHT)
 
         # 3. Main Content
-        container = ttk.Frame(self, padding=12)
+        container = ttk.Frame(self, padding=10)
         container.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
+        if rec_type == "SUA_DOI":
+            # Khung Định vị & Khớp lại STT thực trong file Excel
+            match_box = ttk.LabelFrame(
+                container,
+                text="🎯 Định vị & Khớp STT thực tế trong file Excel (Có thể nhập/chọn lại STT nếu lệch)",
+                padding=8
+            )
+            match_box.pack(side=tk.TOP, fill=tk.X, pady=(0, 8))
+
+            ttk.Label(
+                match_box,
+                text=f"📷 Nhận diện từ ảnh:   STT: {stt_disp}   |   Họ và tên: {name_disp}   |   Ngày sinh: {dob_disp}",
+                font=FONT_LABEL_BOLD,
+                foreground=p.PRIMARY
+            ).pack(anchor=tk.W, pady=(0, 4))
+
+            r_m1 = ttk.Frame(match_box)
+            r_m1.pack(fill=tk.X, pady=(0, 4))
+
+            ttk.Label(r_m1, text="STT thực trong Excel:", font=FONT_LABEL_BOLD).pack(side=tk.LEFT, padx=(0, 6))
+            init_stt = str(self.review_data.get("excel_stt", "") or ocr_stt or "").strip()
+            self.excel_stt_var = tk.StringVar(value=init_stt)
+            self.ent_excel_stt = ttk.Entry(r_m1, textvariable=self.excel_stt_var, font=FONT_LABEL_BOLD, width=8)
+            self.ent_excel_stt.pack(side=tk.LEFT, padx=(0, 6))
+            self.ent_excel_stt.bind("<KeyRelease>", self._on_stt_typed)
+
+            ttk.Button(r_m1, text="🔍 Tìm theo STT", command=self._on_stt_typed).pack(side=tk.LEFT, padx=(0, 14))
+
+            ttk.Label(r_m1, text="Hoặc chọn nhanh học sinh trong Excel:", font=FONT_LABEL).pack(side=tk.LEFT, padx=(0, 6))
+            self.student_combo_items: list[str] = []
+            for idx_r, r_d in enumerate(self.sheet_rows):
+                s_v = r_d.get("stt", "")
+                n_v = r_d.get("ho_ten", "")
+                d_v = r_d.get("ngay_sinh", "")
+                ex_r = r_d.get("excel_row", idx_r + 2)
+                self.student_combo_items.append(f"STT {s_v} | {n_v} ({d_v}) [Dòng {ex_r}]")
+
+            self.student_combo_var = tk.StringVar()
+            self.student_combo = ttk.Combobox(
+                r_m1,
+                textvariable=self.student_combo_var,
+                values=self.student_combo_items,
+                state="readonly",
+                width=42,
+                font=FONT_LABEL
+            )
+            self.student_combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            self.student_combo.bind("<<ComboboxSelected>>", self._on_combo_student_selected)
+
+            self.lbl_matched_info = ttk.Label(match_box, text="", font=FONT_LABEL_BOLD)
+            self.lbl_matched_info.pack(anchor=tk.W, pady=(2, 0))
+
         instr_txt = "Kiểm tra giá trị cũ và mới dưới đây. Bạn có thể SỬA TRỰC TIẾP vào ô 'Giá trị cập nhật' nếu AI đọc chưa đúng:"
-        ttk.Label(container, text=instr_txt, font=FONT_LABEL_BOLD, foreground=p.PRIMARY).pack(anchor=tk.W, pady=(0, 8))
+        ttk.Label(container, text=instr_txt, font=FONT_LABEL_BOLD, foreground=p.PRIMARY).pack(anchor=tk.W, pady=(0, 6))
 
         canvas_frame = ttk.Frame(container)
         canvas_frame.pack(fill=tk.BOTH, expand=True)
@@ -3497,6 +3559,7 @@ class ReviewPatchDialog(tk.Toplevel):
 
                 lbl_old = tk.Label(row_f, text=old_v or "(Trống)", font=FONT_LABEL, bg=p.CARD_BG, fg=p.MUTED, width=24, anchor="w", relief="solid", bd=1)
                 lbl_old.pack(side=tk.LEFT, padx=4)
+                self._old_labels.append((item, lbl_old))
 
                 var = tk.StringVar(value=new_v)
                 ent = ttk.Entry(row_f, textvariable=var, font=FONT_LABEL_BOLD, width=30)
@@ -3504,6 +3567,9 @@ class ReviewPatchDialog(tk.Toplevel):
                 self._entry_vars.append((item, var))
                 if idx == 0:
                     first_entry = ent
+
+            # Cập nhật hiển thị dòng khớp ban đầu
+            self._update_matched_row_display(self.selected_matched_idx)
 
         else:
             fields = self.review_data.get("fields", [])
@@ -3535,15 +3601,76 @@ class ReviewPatchDialog(tk.Toplevel):
         self.bind("<Return>", lambda e: self._on_apply())
         self.bind("<Escape>", lambda e: self._on_skip())
 
+    def _on_stt_typed(self, event=None):
+        stt_raw = self.excel_stt_var.get().strip()
+        norm_target = normalize_match_val(stt_raw, "stt")
+        if not norm_target:
+            self._update_matched_row_display(None)
+            return
+        found_idx = None
+        for idx_r, r_d in enumerate(self.sheet_rows):
+            if normalize_match_val(r_d.get("stt"), "stt") == norm_target:
+                found_idx = idx_r
+                break
+        self._update_matched_row_display(found_idx, update_stt_entry=False)
+
+    def _on_combo_student_selected(self, event=None):
+        sel_idx = self.student_combo.current()
+        if sel_idx >= 0 and sel_idx < len(self.sheet_rows):
+            self._update_matched_row_display(sel_idx, update_stt_entry=True)
+
+    def _update_matched_row_display(self, row_idx: int | None, update_stt_entry: bool = True):
+        p = self.palette
+        self.selected_matched_idx = row_idx
+        if row_idx is not None and 0 <= row_idx < len(self.sheet_rows):
+            r_d = self.sheet_rows[row_idx]
+            stt_v = r_d.get("stt", "")
+            name_v = r_d.get("ho_ten", "")
+            dob_v = r_d.get("ngay_sinh", "")
+            ex_row = r_d.get("excel_row", row_idx + 2)
+            if update_stt_entry and hasattr(self, "excel_stt_var"):
+                self.excel_stt_var.set(str(stt_v if stt_v is not None else ""))
+            if hasattr(self, "student_combo") and row_idx < len(self.student_combo_items):
+                self.student_combo.current(row_idx)
+            self.lbl_matched_info.config(
+                text=f"✅ Đang khớp với Excel: STT {stt_v}  |  Họ tên: {name_v}  |  Ngày sinh: {dob_v}  (Dòng Excel: {ex_row})",
+                foreground=p.SUCCESS
+            )
+            # Cập nhật lại cột "Giá trị cũ trong file Excel" theo đúng dòng học sinh mới chọn
+            col_to_key = {5: "ho_ten", 9: "ngay_sinh", 10: "gioi_tinh", 11: "dan_toc", 13: "noi_sinh", 2: "so_hieu_bang", 3: "so_vao_so", 14: "ten_truong"}
+            for item, lbl in self._old_labels:
+                c_idx = item.get("col_idx")
+                k_map = col_to_key.get(c_idx)
+                if k_map and k_map in r_d:
+                    new_old_v = str(r_d.get(k_map) or "")
+                    item["old_val"] = new_old_v
+                    lbl.config(text=new_old_v or "(Trống)")
+        else:
+            self.lbl_matched_info.config(
+                text="⚠️ Chưa tìm thấy STT tương ứng trong file Excel! Vui lòng gõ lại STT thực tế hoặc chọn học sinh trong danh sách bên trên.",
+                foreground=p.DANGER
+            )
+
     def _on_apply(self):
         rec_type = self.review_data.get("type", "SUA_DOI")
         if rec_type == "SUA_DOI":
+            if self.selected_matched_idx is None:
+                messagebox.showwarning(
+                    "Chưa khớp được dòng Excel",
+                    "Chưa xác định được dòng học sinh trong file Excel!\nVui lòng nhập đúng STT thực tế hoặc chọn học sinh từ danh sách thả xuống.",
+                    parent=self
+                )
+                return
             updated_changes = []
             for item, var in self._entry_vars:
                 item_copy = dict(item)
                 item_copy["new_val"] = var.get().strip()
                 updated_changes.append(item_copy)
-            self.result = {"action": "apply", "changes": updated_changes}
+            self.result = {
+                "action": "apply",
+                "matched_idx": self.selected_matched_idx,
+                "changes": updated_changes,
+            }
         else:
             updated_fields = []
             for item, var in self._entry_vars:
@@ -3560,12 +3687,23 @@ class ReviewPatchDialog(tk.Toplevel):
     def _on_apply_all(self):
         rec_type = self.review_data.get("type", "SUA_DOI")
         if rec_type == "SUA_DOI":
+            if self.selected_matched_idx is None:
+                messagebox.showwarning(
+                    "Chưa khớp được dòng Excel",
+                    "Chưa xác định được dòng học sinh trong file Excel!\nVui lòng nhập đúng STT thực tế hoặc chọn học sinh từ danh sách thả xuống.",
+                    parent=self
+                )
+                return
             updated_changes = []
             for item, var in self._entry_vars:
                 item_copy = dict(item)
                 item_copy["new_val"] = var.get().strip()
                 updated_changes.append(item_copy)
-            self.result = {"action": "apply_all", "changes": updated_changes}
+            self.result = {
+                "action": "apply_all",
+                "matched_idx": self.selected_matched_idx,
+                "changes": updated_changes,
+            }
         else:
             updated_fields = []
             for item, var in self._entry_vars:

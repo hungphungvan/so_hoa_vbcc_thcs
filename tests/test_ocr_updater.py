@@ -395,6 +395,82 @@ def test_background_scan_continues_during_manual_review(tmp_path: Path):
     assert img2_scanned_while_reviewing_img1 is True
 
 
+def test_stt_default_matching_and_manual_stt_rematch(tmp_path: Path):
+    """Kiểm tra mặc định khớp theo STT và cho phép người dùng khớp lại STT thực trong Excel khi duyệt."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Mau28Cot"
+    from src.smart_merger import TARGET_COLUMNS
+    ws.append([col["name"] for col in TARGET_COLUMNS])
+
+    for i, (name, dob) in enumerate([("Nguyễn Văn An", "15/03/2008"), ("Trần Thị Bích", "20/05/2008")], start=1):
+        r = [None] * 28
+        r[0] = i
+        r[4] = name
+        r[8] = dob
+        r[9] = "Nam" if i == 1 else "Nữ"
+        ws.append(r)
+
+    excel_file = tmp_path / "ds_stt.xlsx"
+    wb.save(excel_file)
+    fake_img = tmp_path / "trang_stt.jpg"
+    fake_img.write_bytes(b"IMG_STT")
+
+    # Học sinh 1: Khớp tự động theo STT=1 (dù không có ngay_sinh trong JSON OCR)
+    # Học sinh 2: OCR nhận nhầm STT=99 (không khớp), nhưng người dùng chọn lại STT=2 (matched_idx=1) trong hộp thoại duyệt
+    mock_json = """[
+        {
+            "loai": "SUA_DOI",
+            "stt": "01",
+            "ho_ten": "Nguyễn Văn An",
+            "cac_truong_sua": [
+                {"ten_truong": "gioi_tinh", "gia_tri_cu": "Nam", "gia_tri_moi": "Nữ"}
+            ]
+        },
+        {
+            "loai": "SUA_DOI",
+            "stt": 99,
+            "ho_ten": "Trần Thị Ngọc Bích",
+            "ngay_sinh": "20/05/2008",
+            "cac_truong_sua": [
+                {"ten_truong": "ho_ten", "gia_tri_cu": "", "gia_tri_moi": "Trần Thị Ngọc Bích"}
+            ]
+        }
+    ]"""
+
+    def review_rematch_cb(req):
+        if str(req.get("ocr_stt")) == "01":
+            assert req["matched_idx"] == 0
+            assert req["excel_stt"] == "1"
+            return {"action": "apply", "matched_idx": 0, "changes": req["changes"]}
+        else:
+            # STT 99 không khớp tự động -> matched_idx ban đầu là None
+            assert req["matched_idx"] is None
+            assert req["ocr_student_name"] == "Trần Thị Ngọc Bích"
+            assert req["ocr_ngay_sinh"] == "20/05/2008"
+            # Người dùng khớp lại với học sinh ở STT 2 (index 1 trong sheet_rows)
+            return {"action": "apply", "matched_idx": 1, "changes": req["changes"]}
+
+    out_file = tmp_path / "ds_stt_out.xlsx"
+    processor = OCRUpdaterProcessor()
+    with patch("src.ocr_updater.extract_table_from_image", return_value=mock_json):
+        res = processor.update_excel_from_images(
+            excel_path=excel_file,
+            image_paths=[fake_img],
+            selected_match_keys=None,  # Mặc định ["stt"]
+            output_path=out_file,
+            api_key="test_key",
+            manual_review_callback=review_rematch_cb,
+        )
+
+    assert res["status"] == "success"
+    assert res["modified_students"] == 2
+    wb_res = openpyxl.load_workbook(out_file)
+    ws_res = wb_res["Mau28Cot"]
+    assert ws_res.cell(row=2, column=10).value == "Nữ"
+    assert ws_res.cell(row=3, column=5).value == "Trần Thị Ngọc Bích"
+
+
 class TestOCRUpdaterUnittest(unittest.TestCase):
     def test_all(self):
         test_normalize_match_val()
@@ -407,6 +483,7 @@ class TestOCRUpdaterUnittest(unittest.TestCase):
             test_column_mapping_manager(p)
             test_updater_with_custom_column_mapping(p)
             test_background_scan_continues_during_manual_review(p)
+            test_stt_default_matching_and_manual_stt_rematch(p)
 
 
 if __name__ == "__main__":
